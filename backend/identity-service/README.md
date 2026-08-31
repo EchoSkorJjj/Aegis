@@ -1,13 +1,9 @@
 # identity-service
 
-A **universal user-management & authentication service**. It owns user profile CRUD and
+A **universal user-management & authentication service** — the identity core of **Aegis**. It owns user profile CRUD and
 role-based access, and issues its own JWTs — but is built around an **OIDC "auth seam"** so
 the same app can instead validate tokens from an external provider (Cognito, Supabase,
 Keycloak, …) by changing one config value, with no code changes.
-
-> Design principle: **authentication is pluggable; the user profile store is always yours.**
-> Even when login is delegated to an external provider, the `users` table, roles and CRUD
-> stay in this service, keyed by the token subject.
 
 ## Stack
 
@@ -16,31 +12,47 @@ Spring Data JPA · PostgreSQL · Flyway · springdoc (Swagger UI) · Docker Comp
 
 ## Quickstart
 
-You need **Docker** only — the app is compiled inside a Maven container, so no local Maven/JDK
-is required.
+This service is wired into the repository's root `docker-compose.yml`. You need **Docker** only —
+the app is compiled inside a Maven container, so no local Maven/JDK is required. From the
+**repo root**:
 
 ```bash
 docker compose up --build
 ```
 
-- API: `http://localhost:8080`
-- Swagger UI: `http://localhost:8080/swagger-ui.html`
-- JWKS (public keys): `http://localhost:8080/oauth2/jwks`
+The identity service is then on **:8081** (Compose also starts Postgres, the frontend, Mailhog,
+Zipkin and Prometheus — see the root [README](../../README.md)):
+
+- API: `http://localhost:8081`
+- Swagger UI: `http://localhost:8081/swagger-ui.html`
+- JWKS (public keys): `http://localhost:8081/oauth2/jwks`
 
 ### Try the flow
 
+With email-OTP on (the default), **login returns an MFA challenge, not tokens** — you exchange a
+6-digit code for tokens at `/auth/login/verify-otp`. With no SMTP configured the code is written
+to the app log (the console `EmailSender`); under Compose it lands in the Mailhog inbox
+(http://localhost:8025).
+
 ```bash
-# register (first user gets role USER)
-curl -sX POST localhost:8080/auth/register -H 'Content-Type: application/json' \
+# register (role USER; needs REGISTRATION_ENABLED=true, the default)
+curl -sX POST localhost:8081/auth/register -H 'Content-Type: application/json' \
   -d '{"email":"alice@example.com","password":"password123","displayName":"Alice"}'
 
-# login -> { accessToken, refreshToken, tokenType, expiresInSeconds }
-curl -sX POST localhost:8080/auth/login -H 'Content-Type: application/json' \
+# login -> { mfaRequired: true, challengeId, method: "EMAIL_OTP", ... }   (code emailed/logged)
+curl -sX POST localhost:8081/auth/login -H 'Content-Type: application/json' \
   -d '{"email":"alice@example.com","password":"password123"}'
 
+# verify the code -> { accessToken, refreshToken, tokenType, expiresInSeconds }
+curl -sX POST localhost:8081/auth/login/verify-otp -H 'Content-Type: application/json' \
+  -d '{"challengeId":"<CHALLENGE_ID>","code":"<6-DIGIT-CODE>"}'
+
 # call a protected endpoint
-curl -s localhost:8080/users/me -H "Authorization: Bearer <ACCESS_TOKEN>"
+curl -s localhost:8081/users/me -H "Authorization: Bearer <ACCESS_TOKEN>"
 ```
+
+For a password-only flow while testing, set `MFA_EMAIL_OTP_ENABLED=false` and login returns
+tokens directly.
 
 ### Getting an admin
 
@@ -57,24 +69,12 @@ IDENTITY_BOOTSTRAP_ADMIN_PASSWORD=admin-dev-password   # dev only — inject a s
 
 ## API
 
-| Method | Path | Access | Purpose |
-|---|---|---|---|
-| POST | `/auth/register` | public | Create account (role `USER`) |
-| POST | `/auth/login` | public | Exchange credentials for tokens |
-| POST | `/auth/refresh` | public | Rotate refresh token → new tokens |
-| POST | `/auth/logout` | public | Revoke a presented refresh token |
-| POST | `/auth/logout-all` | authenticated | Revoke all of the caller's refresh tokens |
-| POST | `/auth/verify-email` | public | Verify an email with a token |
-| POST | `/auth/resend-verification` | public | Re-send a verification token |
-| POST | `/auth/forgot-password` | public | Request a password-reset token |
-| POST | `/auth/reset-password` | public | Set a new password with a reset token |
-| GET | `/users/me` | authenticated | Current user's profile |
-| GET | `/users` | `ADMIN` | List users (paged) |
-| GET | `/users/{id}` | `ADMIN` or self | Fetch a user |
-| PUT | `/users/{id}` | `ADMIN` or self | Update profile (`enabled` is admin-only) |
-| PUT | `/users/{id}/roles` | `ADMIN` | Set a user's roles |
-| DELETE | `/users/{id}` | `ADMIN` | Delete a user |
-| GET | `/oauth2/jwks` | public | Public keys for other services to verify tokens |
+The always-current endpoint reference is the **Swagger UI** at
+`http://localhost:8081/swagger-ui.html` (OpenAPI JSON at `/v3/api-docs`). It covers registration
+& login, the MFA challenge + `verify-otp` and method selection, TOTP enrollment and recovery
+codes (`/auth/mfa/*`), email verification, password reset, admin user provisioning / invites
+(`POST /users`), the user CRUD & roles API, and the admin audit trail (`/audit`). Other services
+verify tokens against the public keys at `GET /oauth2/jwks`.
 
 ## The auth seam (how it's "dynamic")
 
@@ -92,29 +92,27 @@ Two config values control it — everything else is identical in both modes:
 
 ## Configuration
 
-| Var | Default | Notes |
-|---|---|---|
-| `DB_URL` / `DB_USER` / `DB_PASSWORD` | `jdbc:postgresql://localhost:5432/identity` / `identity` / `identity` | Datastore |
-| `IDENTITY_ISSUER` | `http://localhost:8080` | `iss` claim on issued tokens |
-| `ACCESS_TTL` | `900` | Access-token lifetime (seconds) |
-| `REFRESH_TTL` | `604800` | Refresh-token lifetime (seconds) |
-| `MAX_FAILED_LOGINS` / `LOCKOUT_MINUTES` | `5` / `15` | Failed logins before lockout, and lockout duration |
-| `EMAIL_VERIFICATION_HOURS` / `PASSWORD_RESET_MINUTES` | `24` / `30` | Single-use token lifetimes |
-| `IDENTITY_BOOTSTRAP_ADMIN_EMAIL` | *(empty)* | Seed/promote this admin on startup (opt-in) |
-| `IDENTITY_BOOTSTRAP_ADMIN_PASSWORD` | *(empty)* | Password for a newly-created bootstrap admin |
+Every setting is environment-overridable. The authoritative list with defaults lives in
+[`application.yml`](src/main/resources/application.yml), and the root
+[README](../../README.md#configuration) documents the full env-var surface — datasource, the auth
+seam, token TTLs, the MFA & registration feature flags, rate-limiting, audit, tracing and mail.
+(The two auth-seam knobs above are the ones that change how tokens are produced/validated.)
 
 ## Layout
 
 ```
 src/main/java/com/usermgmt/identity/
-  config/    SecurityConfig · JwtConfig (the seam) · JwksController · OpenApiConfig
-  auth/      AuthController · AuthService · AccountService · LoginAttemptService · EmailSender
-             · RefreshToken · AuthToken · AuthDtos (+ repositories)
-  user/      User · Role · UserRepository · UserService · UserController · UserDtos
-  common/    ApiError · ApiExceptions · GlobalExceptionHandler · Tokens
-  bootstrap/ AdminBootstrapRunner
-src/main/resources/  application.yml · db/migration/V1__init … V3__account_tokens.sql
-src/test/java/…      AbstractIntegrationTest + auth/user/bootstrap integration tests
+  config/     SecurityConfig · JwtConfig (the seam) · JwksController · OpenApiConfig
+  auth/       AuthController · AuthService · AccountService · MfaService · login, refresh,
+              email verification & reset, challenges · EmailSender (+ repositories)
+  auth/mfa/   TOTP enrollment & verification · recovery codes · secret encryption
+  user/       User · Role · UserService · UserController · UserDtos (+ repository)
+  audit/      append-only security audit trail + admin read API
+  ratelimit/  per-IP token-bucket filter over /auth/*
+  common/     ApiError · ApiExceptions · GlobalExceptionHandler · Tokens
+  bootstrap/  AdminBootstrapRunner
+src/main/resources/  application.yml · db/migration/ (Flyway V1…Vn)
+src/test/java/…      AbstractIntegrationTest + integration tests across the above
 ```
 
 ## Security notes (prototype)
@@ -126,6 +124,8 @@ src/test/java/…      AbstractIntegrationTest + auth/user/bootstrap integration
 - **Account lockout:** repeated failed logins lock the account (HTTP 423) for a cooldown.
 - **Email verification & password reset** use single-use, hashed, time-limited tokens. The default
   `EmailSender` **logs** the token (dev only); supply an SMTP-backed `EmailSender` bean for production.
+- **TOTP secrets are encrypted at rest** (AES-256-GCM); the passphrase (`MFA_TOTP_SECRET_KEY`) is
+  a dev-only default — inject a real secret in production.
 - Forgot-password never reveals whether an email exists (always the same response).
 
 ## Testing
@@ -141,12 +141,3 @@ mvn verify
 
 CI runs them on every push/PR via `.github/workflows/backend-ci.yml` (JDK 21 + Docker on the
 GitHub runner), so they stay green without a local Maven install.
-
-## Roadmap
-
-- **Phase 2** — ✅ complete: admin bootstrap · Testcontainers tests · logout & refresh revocation ·
-  login rate-limit / lockout · email verification · password reset.
-- **Phase 3** — wire the `delegated` OIDC mode against a live provider (Keycloak/Supabase); profile
-  sync from claims.
-- **Phase 4** — production hardening, cloud deploy, service-to-service (client-credentials) so the
-  Aegis backend can call this service.

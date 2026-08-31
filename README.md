@@ -1,15 +1,11 @@
-# user-management
+# Aegis
 
-A reusable **identity & user-management template** — a production-shaped authentication
-core you can drop under a new product and extend, rather than rebuild. A Spring Boot
-identity service issues and validates tokens; a Next.js front end talks to it through a
-Backend-for-Frontend (BFF) so the browser only ever holds httpOnly cookies.
-
-It ships with the parts every app re-implements: registration (or invite-only), login with
-**pluggable multi-factor auth**, email verification, self-service password reset, role-based
-access control, refresh-token rotation, an audit trail, and an admin API — all wired,
-migrated, and tested. Optional capabilities are **feature-flagged**: one env var per factor
-(and one for public sign-up), enforced by the backend and surfaced to the UI.
+**Aegis** is a resilience platform that reads a changing threat landscape and decides what a
+bank should do about it. It continuously ingests real-world change — new vulnerability
+advisories, vendor outages, security news — and works out whether and why each change matters
+to a bank's specific map of business services and software dependencies. It scores impact per
+service and per owner, then agentically drafts the response — a safe-upgrade pull request, a
+risk ticket, a regulator-notification memo — that a human risk owner approves or overrides.
 
 ---
 
@@ -93,26 +89,6 @@ length, TTLs, TOTP period/digits, recovery-code count) are in [Configuration](#c
 
 ---
 
-## Architecture
-
-```mermaid
-flowchart LR
-  B["Browser SPA"] -- "httpOnly cookies" --> BFF["Next.js BFF<br/>/api/auth/*"]
-  BFF -- "Bearer JWT (server-side)" --> API["identity-service<br/>Spring Boot"]
-  API --> DB[("PostgreSQL")]
-  API -- "SMTP" --> M["Mailhog / SMTP"]
-```
-
-The browser authenticates only against the same-origin BFF, which sets httpOnly cookies
-and forwards requests to the identity service with a bearer token. The identity service
-is a standalone OAuth2 resource server — any client (mobile, another service) can use it
-directly with the same JWTs.
-
-**Stack:** Spring Boot 4 · Java 21 · Spring Security (OAuth2 resource server) · PostgreSQL 16 ·
-Flyway · Testcontainers  |  Next.js 16 · React 19 · Tailwind CSS v4 · shadcn/Base UI · react-hook-form + zod.
-
----
-
 ## Quick start (Docker)
 
 ```bash
@@ -136,28 +112,6 @@ seeds a dev admin — **`admin@example.com` / `admin-dev-password`** (override o
 before any real deployment). Compose enables TOTP (`MFA_TOTP_ENABLED=true`) so you can try
 authenticator enrollment from **Account settings**; flip `REGISTRATION_ENABLED=false` to
 see invite-only mode.
-
----
-
-## Local development (services individually)
-
-Run the databases in Compose and the apps on the host for fast iteration:
-
-```bash
-# Postgres + Mailhog only
-docker compose up -d db mailhog
-
-# Identity service (host) — point mail at Mailhog
-cd backend/identity-service
-SPRING_MAIL_HOST=localhost SPRING_MAIL_PORT=1025 ./mvnw spring-boot:run
-
-# Front end (host) — BFF reaches the API server-side
-cd frontend
-IDENTITY_API_URL=http://localhost:8081 pnpm install && pnpm dev
-```
-
-With `spring.mail.host` unset the service skips SMTP and just logs tokens/OTPs to the
-console, so you can develop without Mailhog.
 
 ---
 
@@ -210,60 +164,6 @@ and rate limiter attribute the real client IP (behind a proxy / load balancer th
 
 Full, interactive docs at `http://localhost:8081/swagger-ui.html`.
 
-**Auth** (`/auth`, public): `config` (feature flags for the SPA), `register`, `login`,
-`login/select-method`, `login/verify-otp`, `refresh`, `logout`, `logout-all`,
-`verify-email`, `resend-verification`, `forgot-password`, `reset-password`, `accept-invite`.
-Plus `change-password` (authenticated).
-
-**MFA** (`/auth/mfa`, authenticated — manage your own second factor):
-
-| Method & path | Purpose |
-| --- | --- |
-| `GET /auth/mfa/status` | Which factors are enabled for me; recovery codes remaining |
-| `POST /auth/mfa/totp/init` | Begin TOTP enrollment (returns secret + QR `otpauth` URI) |
-| `POST /auth/mfa/totp/confirm` | Verify a code to finish enrollment; returns recovery codes |
-| `POST /auth/mfa/totp/disable` | Turn off TOTP for my account |
-| `POST /auth/mfa/recovery-codes/regenerate` | Issue a fresh set of backup codes |
-
-**Users** (`/users`, authenticated):
-
-| Method & path | Access |
-| --- | --- |
-| `POST /users` | `ADMIN` — provision / invite a user by email |
-| `GET /users/me` | any authenticated user |
-| `GET /users` | `ADMIN` |
-| `GET /users/{id}` | `ADMIN` or self |
-| `PUT /users/{id}` | `ADMIN` or self |
-| `PUT /users/{id}/roles` | `ADMIN` |
-| `DELETE /users/{id}` | `ADMIN` |
-
-**Audit** (`/audit`, `ADMIN`): `GET /audit` — the security trail, filterable by
-`eventType`, `outcome`, `actorEmail`, and `from`/`to` time window; paginated, newest-first.
-
-Plus `GET /oauth2/jwks` (public keys) and `GET /actuator/health`.
-
----
-
-## Project structure
-
-```
-backend/identity-service/    Spring Boot identity service
-  src/main/java/com/usermgmt/identity/
-    auth/     login, pluggable MFA (email OTP · TOTP · recovery codes), refresh,
-              email verification, password reset & admin invites
-    user/     user + role management API (RBAC), admin provisioning
-    audit/    append-only security audit trail + admin read API
-    config/   security, JWKS
-    common/   token helpers
-  src/main/resources/db/migration/   Flyway migrations
-frontend/                    Next.js app
-  src/app/(marketing|auth|app)/      route groups (incl. admin console & account settings)
-  src/app/api/*                      BFF route handlers (httpOnly cookies)
-  src/lib/server/                    server-only backend client, session & auth-config reader
-  src/proxy.ts                       server-side route guard (Next 16 middleware)
-docker-compose.yml           db · backend · frontend · mailhog · zipkin · prometheus
-```
-
 ---
 
 ## Testing
@@ -292,14 +192,6 @@ push/PR (`backend-ci`, `frontend-e2e`). See
 
 ## Roadmap
 
-Deliberately generic identity concerns not yet in the template:
-
 - **WebAuthn / passkeys** — finish the scaffolded factor (registration + assertion ceremonies).
 - **Single sign-on** — wire a real OIDC provider into the existing delegated-auth seam.
 - **Secrets management** — externalize the JWT signing key and TOTP passphrase (e.g. Vault / KMS).
-
----
-
-## License
-
-Provided as a template; adapt freely for your own product.

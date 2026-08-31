@@ -8,9 +8,9 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 @OpenAPIDefinition(info = @Info(
-        title = "Identity Service API",
+        title = "Aegis Identity Service API",
         version = "v1",
-        description = "Universal user-management & authentication service (own auth + OIDC seam)"))
+        description = "Aegis — universal user-management & authentication service (own auth + OIDC seam)"))
 @SecurityScheme(
         name = "bearer-jwt",
         type = SecuritySchemeType.HTTP,

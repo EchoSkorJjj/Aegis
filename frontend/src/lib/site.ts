@@ -5,7 +5,7 @@
  * so one flag drives both the server enforcement and the UI (see lib/server/config.ts).
  */
 export const siteConfig = {
-  name: "Vertex",
+  name: "Aegis",
   description:
     "The work tracker your team will actually enjoy using. Plan, track, and ship — without the busywork.",
   // Top-nav links. `#` entries are template placeholders to point at your own pages.
