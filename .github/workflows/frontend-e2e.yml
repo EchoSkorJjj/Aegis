@@ -1,0 +1,107 @@
+name: frontend-e2e
+
+on:
+  push:
+    paths:
+      - "frontend/**"
+      - "backend/identity-service/**"
+      - ".github/workflows/frontend-e2e.yml"
+  pull_request:
+    paths:
+      - "frontend/**"
+      - "backend/identity-service/**"
+      - ".github/workflows/frontend-e2e.yml"
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+
+    # The identity service needs Postgres; the OTP login flow needs an SMTP inbox (Mailhog),
+    # which the E2E suite reads the codes back out of.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: identity
+          POSTGRES_USER: identity
+          POSTGRES_PASSWORD: identity
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U identity -d identity"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      mailhog:
+        image: mailhog/mailhog:latest
+        ports:
+          - 1025:1025
+          - 8025:8025
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build identity-service
+        working-directory: backend/identity-service
+        run: mvn -B -q -DskipTests package
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        working-directory: frontend
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        working-directory: frontend
+        env:
+          IDENTITY_API_URL: http://localhost:8081
+        run: |
+          # Start the identity service (2FA on by default) against the CI service containers.
+          DB_URL=jdbc:postgresql://localhost:5432/identity \
+          DB_USER=identity DB_PASSWORD=identity \
+          SPRING_MAIL_HOST=localhost SPRING_MAIL_PORT=1025 \
+          IDENTITY_BOOTSTRAP_ADMIN_EMAIL=admin@example.com \
+          IDENTITY_BOOTSTRAP_ADMIN_PASSWORD=admin-dev-password \
+          TRACING_SAMPLE_RATE=0 \
+          java -jar ../backend/identity-service/target/identity-service-*.jar > /tmp/backend.log 2>&1 &
+
+          echo "Waiting for the identity service to become healthy…"
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8081/actuator/health | grep -q '"status":"UP"'; then
+              echo "identity service is up"; break
+            fi
+            if [ "$i" = "60" ]; then echo "backend failed to start"; cat /tmp/backend.log; exit 1; fi
+            sleep 3
+          done
+
+          # Playwright starts the front-end dev server itself (see webServer in the config).
+          pnpm test:e2e
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7

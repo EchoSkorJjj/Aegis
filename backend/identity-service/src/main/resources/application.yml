@@ -1,0 +1,115 @@
+server:
+  port: ${SERVER_PORT:8081}
+
+spring:
+  application:
+    name: identity-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/identity}
+    username: ${DB_USER:identity}
+    password: ${DB_PASSWORD:identity}
+  jpa:
+    hibernate:
+      ddl-auto: validate      # Flyway owns the schema; Hibernate only validates it
+    open-in-view: false
+    properties:
+      hibernate.jdbc.time_zone: UTC
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+# ---- Identity service configuration -------------------------------------
+# The "auth seam": switch how tokens are produced/validated without code changes.
+#   mode=local     -> this service issues & validates its own RSA-signed JWTs (default)
+#   mode=delegated -> this service validates an external OIDC provider's tokens
+identity:
+  auth:
+    mode: ${IDENTITY_AUTH_MODE:local}
+    issuer: ${IDENTITY_ISSUER:http://localhost:8081}
+    # Only used when mode=delegated (e.g. https://cognito-idp.<region>.amazonaws.com/<pool>)
+    issuer-uri: ${IDENTITY_ISSUER_URI:}
+  jwt:
+    access-ttl-seconds: ${ACCESS_TTL:900}        # 15 minutes
+    refresh-ttl-seconds: ${REFRESH_TTL:604800}   # 7 days
+  # Browser SPA origins allowed to call the API (comma-separated).
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+  # Account lockout after repeated failed logins (per-account).
+  security:
+    max-failed-logins: ${MAX_FAILED_LOGINS:5}
+    lockout-minutes: ${LOCKOUT_MINUTES:15}
+  # Public self-registration (POST /auth/register). Turn off for invite-only deployments,
+  # where admins provision accounts. Exposed to the SPA via GET /auth/config.
+  registration:
+    enabled: ${REGISTRATION_ENABLED:true}
+  # Per-IP token-bucket throttle on the /auth/* endpoints (brute-force / abuse protection).
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    capacity: ${RATE_LIMIT_CAPACITY:20}                     # burst allowance per IP per endpoint
+    refill-period-seconds: ${RATE_LIMIT_REFILL_SECONDS:60}  # time to refill 'capacity' tokens
+  # Second-factor methods, each independently on/off (one env var per factor). With none enabled,
+  # login is password-only. Email OTP is the no-enrollment baseline; TOTP/WebAuthn are opt-in per user.
+  mfa:
+    email-otp:
+      enabled: ${MFA_EMAIL_OTP_ENABLED:true}
+      length: ${MFA_EMAIL_OTP_LENGTH:6}
+      ttl-minutes: ${MFA_EMAIL_OTP_TTL_MINUTES:10}
+      max-attempts: ${MFA_EMAIL_OTP_MAX_ATTEMPTS:5}
+    totp:
+      enabled: ${MFA_TOTP_ENABLED:false}
+      issuer: ${MFA_TOTP_ISSUER:Identity}          # label shown in the authenticator app
+      period-seconds: ${MFA_TOTP_PERIOD:30}
+      digits: ${MFA_TOTP_DIGITS:6}
+      window: ${MFA_TOTP_WINDOW:1}                  # ± steps of clock drift tolerated
+      # Passphrase used to encrypt stored TOTP secrets (SHA-256 -> AES-256). CHANGE in production.
+      secret-key: ${MFA_TOTP_SECRET_KEY:dev-only-totp-key-change-me}
+    webauthn:
+      enabled: ${MFA_WEBAUTHN_ENABLED:false}
+    # Single-use backup codes issued when the authenticator is enabled.
+    recovery-codes:
+      count: ${MFA_RECOVERY_CODES_COUNT:10}
+  # Security audit trail. Refreshes are frequent; keep them recorded for full session
+  # forensics (default), or turn off just that high-volume event to reduce noise.
+  audit:
+    record-token-refresh: ${AUDIT_RECORD_TOKEN_REFRESH:true}
+  # Single-use token lifetimes for account flows (email verification, password reset).
+  tokens:
+    email-verification-hours: ${EMAIL_VERIFICATION_HOURS:24}
+    password-reset-minutes: ${PASSWORD_RESET_MINUTES:30}
+    invite-hours: ${INVITE_HOURS:72}   # admin invite link lifetime
+  # SPA base URL used to build links in account emails. Real mail is sent only when
+  # spring.mail.host is set (e.g. Mailhog via docker-compose); otherwise tokens are just logged.
+  frontend:
+    base-url: ${IDENTITY_FRONTEND_BASE_URL:http://localhost:3000}
+  mail:
+    from: ${IDENTITY_MAIL_FROM:no-reply@identity.local}
+  # Optional initial admin, seeded on startup ONLY when admin-email is set (opt-in; no default admin).
+  # Idempotent: creates the user if missing, grants ADMIN if not already held.
+  bootstrap:
+    admin-email: ${IDENTITY_BOOTSTRAP_ADMIN_EMAIL:}
+    admin-password: ${IDENTITY_BOOTSTRAP_ADMIN_PASSWORD:}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+  metrics:
+    tags:
+      application: identity-service
+  # Distributed tracing: sample everything in dev and export spans to Zipkin
+  # (docker-compose provides it; on the host without Zipkin, set TRACING_SAMPLE_RATE=0).
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLE_RATE:1.0}
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}

@@ -1,0 +1,97 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: identity
+      POSTGRES_USER: identity
+      POSTGRES_PASSWORD: identity
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U identity -d identity"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend/identity-service
+    depends_on:
+      db:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+      zipkin:
+        condition: service_started
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/identity
+      DB_USER: identity
+      DB_PASSWORD: identity
+      IDENTITY_ISSUER: http://localhost:8081
+      # Send account emails to Mailhog — view them at http://localhost:8025
+      SPRING_MAIL_HOST: mailhog
+      SPRING_MAIL_PORT: "1025"
+      IDENTITY_FRONTEND_BASE_URL: http://localhost:3000
+      IDENTITY_MAIL_FROM: no-reply@identity.local
+      # Dev-only: seeds an initial admin on startup. Use a real secret in production.
+      IDENTITY_BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+      IDENTITY_BOOTSTRAP_ADMIN_PASSWORD: admin-dev-password
+      # Export distributed traces to Zipkin — view them at http://localhost:9411
+      ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
+      MFA_TOTP_ENABLED: "true"
+      # Public self-registration. Set "false" for invite-only mode (admins provision accounts);
+      # the backend then rejects POST /auth/register and /auth/config tells the UI to hide sign-up.
+      REGISTRATION_ENABLED: "true"
+    ports:
+      - "8081:8081"
+
+  frontend:
+    build:
+      context: ./frontend
+      # Legacy: the browser now calls the same-origin BFF under /api/auth/*
+      # instead of the backend directly, so this build arg is no longer required.
+      args:
+        - NEXT_PUBLIC_API_URL=http://localhost:8081
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development # Change to production for live
+      # Mark session cookies Secure only over HTTPS. MUST stay false for local http://localhost —
+      # Safari (and the spec) drop Secure cookies on plain HTTP, which silently breaks login. Set
+      # true when the app is served over HTTPS. (Not keyed off NODE_ENV: `next start` forces that
+      # to "production" even here.)
+      - AUTH_COOKIE_SECURE=false
+      # Server-side only: the Next.js BFF reaches the backend over the compose
+      # network. Must be the service name — "localhost" would be the frontend
+      # container itself, not the backend.
+      - IDENTITY_API_URL=http://backend:8081
+    restart: always
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # web inbox — open http://localhost:8025
+
+  # Observability: Zipkin collects the service's distributed traces; Prometheus
+  # scrapes its /actuator/prometheus metrics.
+  zipkin:
+    image: openzipkin/zipkin:latest
+    ports:
+      - "9411:9411" # trace UI + span collector — open http://localhost:9411
+
+  prometheus:
+    image: prom/prometheus:latest
+    depends_on:
+      - backend
+    volumes:
+      - ./ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090" # Prometheus UI — open http://localhost:9090
+
+volumes:
+  pgdata:
