@@ -64,8 +64,8 @@ risk ticket, a regulator-notification memo — that a human risk owner approves 
 - **Testcontainers** integration tests against a real Postgres.
 - **OpenAPI / Swagger UI** and actuator health out of the box.
 - **Observability** — Prometheus metrics at `/actuator/prometheus` (including custom
-  security counters) and distributed tracing (Micrometer → Zipkin); Prometheus and
-  Zipkin are wired into Compose.
+  security counters — see [`ops/README.md`](ops/README.md) for ready-made PromQL queries) and
+  distributed tracing (Micrometer → Zipkin); Prometheus and Zipkin are wired into Compose.
 
 ---
 
