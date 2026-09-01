@@ -1,18 +1,18 @@
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 # Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine 
 # to understand why libc6-compat might be needed.
 RUN apk add --no-cache libc6-compat
 
 WORKDIR /app
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@11.25.0 --activate
 
-COPY package.json pnpm-lock.yaml* ./
+   COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
 
 RUN pnpm install --frozen-lockfile
 
-FROM node:20-alpine AS builder
-RUN npm install -g pnpm
+FROM node:22-alpine AS builder
+RUN npm install -g pnpm@11.25.0
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -21,7 +21,7 @@ ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
 RUN pnpm run build
 
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
