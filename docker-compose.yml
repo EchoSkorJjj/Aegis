@@ -15,7 +15,7 @@ services:
       timeout: 5s
       retries: 10
 
-  backend:
+  identity-service:
     build:
       context: ./backend/identity-service
     depends_on:
@@ -41,8 +41,9 @@ services:
       # Export distributed traces to Zipkin — view them at http://localhost:9411
       ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
       MFA_TOTP_ENABLED: "true"
+      MFA_WEBAUTHN_ENABLED: "true"
       # Public self-registration. Set "false" for invite-only mode (admins provision accounts);
-      # the backend then rejects POST /auth/register and /auth/config tells the UI to hide sign-up.
+      # the identity service then rejects POST /auth/register and /auth/config tells the UI to hide sign-up.
       REGISTRATION_ENABLED: "true"
     ports:
       - "8081:8081"
@@ -55,7 +56,7 @@ services:
       args:
         - NEXT_PUBLIC_API_URL=http://localhost:8081
     depends_on:
-      - backend
+      - identity-service
     ports:
       - "3000:3000"
     environment:
@@ -68,7 +69,7 @@ services:
       # Server-side only: the Next.js BFF reaches the backend over the compose
       # network. Must be the service name — "localhost" would be the frontend
       # container itself, not the backend.
-      - IDENTITY_API_URL=http://backend:8081
+      - IDENTITY_API_URL=http://identity-service:8081
     restart: always
 
   mailhog:
@@ -87,7 +88,7 @@ services:
   prometheus:
     image: prom/prometheus:latest
     depends_on:
-      - backend
+      - identity-service
     volumes:
       - ./ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:

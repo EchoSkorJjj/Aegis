@@ -1,7 +1,11 @@
 package com.usermgmt.identity.auth;
 
-import com.usermgmt.identity.auth.mfa.UserTotp;
-import com.usermgmt.identity.auth.mfa.UserTotpRepository;
+import com.usermgmt.identity.auth.mfa.MfaMethod;
+import com.usermgmt.identity.auth.mfa.MfaService;
+import com.usermgmt.identity.auth.mfa.MfaSettings;
+import com.usermgmt.identity.auth.mfa.totp.UserTotp;
+import com.usermgmt.identity.auth.mfa.totp.UserTotpRepository;
+import com.usermgmt.identity.auth.mfa.webauthn.WebauthnCredentialRepository;
 import com.usermgmt.identity.user.User;
 import org.junit.jupiter.api.Test;
 
@@ -17,6 +21,7 @@ import static org.mockito.Mockito.when;
 class MfaServiceTest {
 
     private final UserTotpRepository totps = mock(UserTotpRepository.class);
+    private final WebauthnCredentialRepository webauthnCredentials = mock(WebauthnCredentialRepository.class);
 
     private User user() {
         return new User(UUID.randomUUID(), "user@example.com", "hash", "User");
@@ -24,7 +29,7 @@ class MfaServiceTest {
 
     private MfaService mfa(boolean emailOtp, boolean totp, boolean webauthn) {
         return new MfaService(new MfaSettings(emailOtp, totp, webauthn),
-                null, totps, null, null, null, null, null, null, 6, 5, 10);
+                null, totps, webauthnCredentials, null, null, null, null, null, null, 6, 5, 10);
     }
 
     @Test
@@ -50,5 +55,13 @@ class MfaServiceTest {
                 .thenReturn(Optional.of(new UserTotp(user.getId(), "enc")));
         assertThat(mfa(true, true, false).availableFor(user))
                 .containsExactlyInAnyOrder(MfaMethod.EMAIL_OTP, MfaMethod.TOTP);
+    }
+
+    @Test
+    void enrolled_webauthn_is_offered_alongside_the_email_baseline() {
+        User user = user();
+        when(webauthnCredentials.existsByUserId(user.getId())).thenReturn(true);
+        assertThat(mfa(true, false, true).availableFor(user))
+                .containsExactlyInAnyOrder(MfaMethod.EMAIL_OTP, MfaMethod.WEBAUTHN);
     }
 }

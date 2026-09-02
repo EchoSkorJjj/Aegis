@@ -6,30 +6,41 @@ import com.usermgmt.identity.auth.mfa.MfaDtos.RegenerateRecoveryCodesRequest;
 import com.usermgmt.identity.auth.mfa.MfaDtos.TotpConfirmRequest;
 import com.usermgmt.identity.auth.mfa.MfaDtos.TotpDisableRequest;
 import com.usermgmt.identity.auth.mfa.MfaDtos.TotpInitResponse;
+import com.usermgmt.identity.auth.mfa.totp.MfaEnrollmentService;
+import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.PasskeySummary;
+import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.RegistrationFinishRequest;
+import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.RegistrationFinishResponse;
+import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.RegistrationOptionsResponse;
+import com.usermgmt.identity.auth.mfa.webauthn.WebauthnEnrollmentService;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.UUID;
 
-/** Authenticated self-service MFA enrollment (currently the authenticator/TOTP factor). */
+/** Authenticated self-service MFA enrollment — the authenticator (TOTP) and passkey (WebAuthn) factors. */
 @RestController
 @RequestMapping("/auth/mfa")
 @SecurityRequirement(name = "bearer-jwt")
 public class MfaController {
 
     private final MfaEnrollmentService enrollment;
+    private final WebauthnEnrollmentService webauthn;
 
-    public MfaController(MfaEnrollmentService enrollment) {
+    public MfaController(MfaEnrollmentService enrollment, WebauthnEnrollmentService webauthn) {
         this.enrollment = enrollment;
+        this.webauthn = webauthn;
     }
 
     /** The caller's own MFA enrollment state, for the settings page. */
@@ -63,6 +74,32 @@ public class MfaController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void disableTotp(@Valid @RequestBody TotpDisableRequest req, @AuthenticationPrincipal Jwt jwt) {
         enrollment.disableTotp(userId(jwt), req.code());
+    }
+
+    /** Start passkey registration: returns the WebAuthn creation options for the browser. */
+    @PostMapping("/webauthn/register/begin")
+    public RegistrationOptionsResponse beginWebauthnRegistration(@AuthenticationPrincipal Jwt jwt) {
+        return webauthn.beginRegistration(userId(jwt));
+    }
+
+    /** Finish passkey registration: verifies the attestation and stores the credential. */
+    @PostMapping("/webauthn/register/finish")
+    public RegistrationFinishResponse finishWebauthnRegistration(
+            @Valid @RequestBody RegistrationFinishRequest req, @AuthenticationPrincipal Jwt jwt) {
+        return webauthn.finishRegistration(userId(jwt), req);
+    }
+
+    /** List the caller's registered passkeys (for the settings page). */
+    @GetMapping("/webauthn/credentials")
+    public List<PasskeySummary> listPasskeys(@AuthenticationPrincipal Jwt jwt) {
+        return webauthn.listPasskeys(userId(jwt));
+    }
+
+    /** Remove one of the caller's passkeys. */
+    @DeleteMapping("/webauthn/credentials/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deletePasskey(@PathVariable UUID id, @AuthenticationPrincipal Jwt jwt) {
+        webauthn.deletePasskey(userId(jwt), id);
     }
 
     private static UUID userId(Jwt jwt) {

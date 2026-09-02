@@ -1,6 +1,6 @@
 package com.usermgmt.identity.user;
 
-import com.usermgmt.identity.auth.AccountService;
+import com.usermgmt.identity.auth.account.AccountService;
 import com.usermgmt.identity.user.UserDtos.InviteUserRequest;
 import com.usermgmt.identity.user.UserDtos.UpdateRolesRequest;
 import com.usermgmt.identity.user.UserDtos.UpdateUserRequest;

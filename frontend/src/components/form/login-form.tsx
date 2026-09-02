@@ -57,9 +57,10 @@ export function LoginForm({
   registrationEnabled = true,
   ...props
 }: React.ComponentProps<"div"> & { registrationEnabled?: boolean }) {
-  const { login, verifyOtp } = useAuth();
+  const { login, verifyOtp, loginWebauthn } = useAuth();
   const [challenge, setChallenge] = useState<PendingChallenge | null>(null);
   const [useRecovery, setUseRecovery] = useState(false);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
 
   const credentialsForm = useForm<z.infer<typeof credentialsSchema>>({
     // zodResolver's overload trips on Zod v4 branded types — see react-hook-form/resolvers#842.
@@ -129,6 +130,23 @@ export function LoginForm({
     }
   }
 
+  async function onPasskey() {
+    if (!challenge) return;
+    setPasskeyBusy(true);
+    try {
+      await loginWebauthn(challenge.challengeId);
+      toast.success("Welcome back!");
+    } catch (error) {
+      // A cancelled/failed passkey prompt throws a DOMException (not an ApiError); both land here.
+      const message =
+        error instanceof ApiError
+          ? error.message || "Passkey sign-in failed. Please try again."
+          : "Passkey sign-in was cancelled or failed.";
+      toast.error(message);
+      setPasskeyBusy(false);
+    }
+  }
+
   async function useMethod(method: MfaMethod) {
     if (!challenge || method === challenge.method) return;
     try {
@@ -155,6 +173,56 @@ export function LoginForm({
     otpForm.reset({ code: "" });
   }
 
+  const webauthn = challenge?.method === "WEBAUTHN" && !useRecovery;
+
+  // The switch-method / recovery-code / start-over footer, shared by the code and passkey panels.
+  const challengeExtras = challenge ? (
+    <>
+      {challenge.methods.includes("TOTP") && (
+        <FieldDescription className="text-center">
+          <button
+            type="button"
+            onClick={() => {
+              setUseRecovery((v) => !v);
+              otpForm.reset({ code: "" });
+            }}
+            className="underline-offset-4 hover:underline"
+          >
+            {useRecovery ? "Use another sign-in method" : "Use a recovery code"}
+          </button>
+        </FieldDescription>
+      )}
+      {!useRecovery && challenge.methods.length > 1 && (
+        <FieldDescription className="text-center">
+          Or use{" "}
+          {challenge.methods
+            .filter((m) => m !== challenge.method)
+            .map((m, i, arr) => (
+              <span key={m}>
+                <button
+                  type="button"
+                  onClick={() => useMethod(m)}
+                  className="underline-offset-4 hover:underline"
+                >
+                  {METHOD_LABEL[m]}
+                </button>
+                {i < arr.length - 1 ? " or " : ""}
+              </span>
+            ))}
+        </FieldDescription>
+      )}
+      <FieldDescription className="text-center">
+        <button
+          type="button"
+          onClick={restart}
+          className="underline-offset-4 hover:underline"
+        >
+          Start over
+        </button>
+      </FieldDescription>
+    </>
+  ) : null;
+
   return (
     <div
       className={cn("flex w-full max-w-sm flex-col gap-6", className)}
@@ -164,98 +232,75 @@ export function LoginForm({
         {challenge ? (
           <>
             <CardHeader className="text-center">
-              <CardTitle className="text-xl">Enter your code</CardTitle>
+              <CardTitle className="text-xl">
+                {webauthn ? "Use your passkey" : "Enter your code"}
+              </CardTitle>
               <CardDescription>
                 {useRecovery
                   ? "Enter one of your saved recovery codes."
-                  : challenge.method === "TOTP"
-                    ? "Open your authenticator app and enter the 6-digit code."
-                    : `We sent a 6-digit code to ${challenge.email}. It expires shortly.`}
+                  : challenge.method === "WEBAUTHN"
+                    ? "Confirm with your passkey — your fingerprint, face, or security key."
+                    : challenge.method === "TOTP"
+                      ? "Open your authenticator app and enter the 6-digit code."
+                      : `We sent a 6-digit code to ${challenge.email}. It expires shortly.`}
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <form onSubmit={otpForm.handleSubmit(onVerify)} noValidate>
+              {webauthn ? (
                 <FieldGroup>
-                  <Controller
-                    name="code"
-                    control={otpForm.control}
-                    render={({ field, fieldState }) => (
-                      <Field data-invalid={fieldState.invalid}>
-                        <FieldLabel htmlFor="otp-code">
-                          {useRecovery ? "Recovery code" : "Verification code"}
-                        </FieldLabel>
-                        <Input
-                          {...field}
-                          id="otp-code"
-                          inputMode={useRecovery ? "text" : "numeric"}
-                          autoComplete="one-time-code"
-                          maxLength={useRecovery ? 14 : 6}
-                          autoFocus
-                          aria-invalid={fieldState.invalid}
-                          placeholder={useRecovery ? "xxxxx-xxxxx" : "123456"}
-                          className={
-                            useRecovery
-                              ? "text-center tracking-wider"
-                              : "text-center text-lg tracking-[0.5em]"
-                          }
-                        />
-                        {fieldState.invalid && (
-                          <FieldError errors={[fieldState.error]} />
-                        )}
-                      </Field>
-                    )}
-                  />
                   <Button
-                    type="submit"
+                    type="button"
                     className="w-full"
-                    disabled={otpForm.formState.isSubmitting}
+                    onClick={onPasskey}
+                    disabled={passkeyBusy}
                   >
-                    {otpForm.formState.isSubmitting ? "Verifying..." : "Verify"}
+                    {passkeyBusy ? "Waiting for your passkey…" : "Use your passkey"}
                   </Button>
-                  {challenge.methods.includes("TOTP") && (
-                    <FieldDescription className="text-center">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setUseRecovery((v) => !v);
-                          otpForm.reset({ code: "" });
-                        }}
-                        className="underline-offset-4 hover:underline"
-                      >
-                        {useRecovery ? "Use your authenticator code" : "Use a recovery code"}
-                      </button>
-                    </FieldDescription>
-                  )}
-                  {!useRecovery && challenge.methods.length > 1 && (
-                    <FieldDescription className="text-center">
-                      Or use{" "}
-                      {challenge.methods
-                        .filter((m) => m !== challenge.method)
-                        .map((m, i, arr) => (
-                          <span key={m}>
-                            <button
-                              type="button"
-                              onClick={() => useMethod(m)}
-                              className="underline-offset-4 hover:underline"
-                            >
-                              {METHOD_LABEL[m]}
-                            </button>
-                            {i < arr.length - 1 ? " or " : ""}
-                          </span>
-                        ))}
-                    </FieldDescription>
-                  )}
-                  <FieldDescription className="text-center">
-                    <button
-                      type="button"
-                      onClick={restart}
-                      className="underline-offset-4 hover:underline"
-                    >
-                      Start over
-                    </button>
-                  </FieldDescription>
+                  {challengeExtras}
                 </FieldGroup>
-              </form>
+              ) : (
+                <form onSubmit={otpForm.handleSubmit(onVerify)} noValidate>
+                  <FieldGroup>
+                    <Controller
+                      name="code"
+                      control={otpForm.control}
+                      render={({ field, fieldState }) => (
+                        <Field data-invalid={fieldState.invalid}>
+                          <FieldLabel htmlFor="otp-code">
+                            {useRecovery ? "Recovery code" : "Verification code"}
+                          </FieldLabel>
+                          <Input
+                            {...field}
+                            id="otp-code"
+                            inputMode={useRecovery ? "text" : "numeric"}
+                            autoComplete="one-time-code"
+                            maxLength={useRecovery ? 14 : 6}
+                            autoFocus
+                            aria-invalid={fieldState.invalid}
+                            placeholder={useRecovery ? "xxxxx-xxxxx" : "123456"}
+                            className={
+                              useRecovery
+                                ? "text-center tracking-wider"
+                                : "text-center text-lg tracking-[0.5em]"
+                            }
+                          />
+                          {fieldState.invalid && (
+                            <FieldError errors={[fieldState.error]} />
+                          )}
+                        </Field>
+                      )}
+                    />
+                    <Button
+                      type="submit"
+                      className="w-full"
+                      disabled={otpForm.formState.isSubmitting}
+                    >
+                      {otpForm.formState.isSubmitting ? "Verifying..." : "Verify"}
+                    </Button>
+                    {challengeExtras}
+                  </FieldGroup>
+                </form>
+              )}
             </CardContent>
           </>
         ) : (

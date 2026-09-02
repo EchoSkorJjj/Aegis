@@ -1,5 +1,7 @@
 package com.usermgmt.identity.auth;
 
+import com.usermgmt.identity.auth.mfa.MfaMethod;
+
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;

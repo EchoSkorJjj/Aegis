@@ -1,6 +1,6 @@
 package com.usermgmt.identity.support;
 
-import com.usermgmt.identity.auth.EmailSender;
+import com.usermgmt.identity.auth.email.EmailSender;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 

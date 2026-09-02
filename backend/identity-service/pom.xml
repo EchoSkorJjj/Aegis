@@ -87,6 +87,14 @@
             <version>3.1.0</version>
         </dependency>
 
+        <!-- WebAuthn / FIDO2 ceremony verification (attestation + assertion). We use only the
+             verification core at the service layer; the client-facing options are our own DTOs. -->
+        <dependency>
+            <groupId>com.webauthn4j</groupId>
+            <artifactId>webauthn4j-core</artifactId>
+            <version>0.28.5.RELEASE</version>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
@@ -95,6 +103,13 @@
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Software authenticator to drive the WebAuthn ceremony in integration tests. -->
+        <dependency>
+            <groupId>com.webauthn4j</groupId>
+            <artifactId>webauthn4j-test</artifactId>
+            <version>0.28.5.RELEASE</version>
             <scope>test</scope>
         </dependency>
 

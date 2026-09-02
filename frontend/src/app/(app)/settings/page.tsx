@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { AccountMfaCard } from "@/components/account/account-mfa-card";
+import { AccountPasskeysCard } from "@/components/account/account-passkeys-card";
 import { AccountProfileCard } from "@/components/account/account-profile-card";
 import { AccountSecurityCard } from "@/components/account/account-security-card";
 
@@ -19,6 +20,7 @@ export default function SettingsPage() {
       <AccountProfileCard />
       <AccountSecurityCard />
       <AccountMfaCard />
+      <AccountPasskeysCard />
     </div>
   );
 }

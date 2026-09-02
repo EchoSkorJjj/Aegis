@@ -3,6 +3,12 @@ package com.usermgmt.identity.auth;
 import com.usermgmt.identity.audit.AuditEventType;
 import com.usermgmt.identity.audit.AuditOutcome;
 import com.usermgmt.identity.audit.AuditService;
+import com.usermgmt.identity.auth.account.AccountService;
+import com.usermgmt.identity.auth.mfa.MfaMethod;
+import com.usermgmt.identity.auth.mfa.MfaService;
+import com.usermgmt.identity.auth.mfa.webauthn.WebauthnAssertionService;
+import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.AssertionFinishRequest;
+import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.RequestOptionsResponse;
 import com.usermgmt.identity.common.ApiExceptions;
 import com.usermgmt.identity.user.Role;
 import com.usermgmt.identity.user.User;
@@ -35,6 +41,7 @@ public class AuthService {
     private final LoginAttemptService loginAttempts;
     private final AccountService accountService;
     private final MfaService mfa;
+    private final WebauthnAssertionService webauthnAssertion;
     private final AuditService audit;
     private final boolean recordTokenRefresh;
     private final boolean registrationEnabled;
@@ -50,6 +57,7 @@ public class AuthService {
                        LoginAttemptService loginAttempts,
                        AccountService accountService,
                        MfaService mfa,
+                       WebauthnAssertionService webauthnAssertion,
                        AuditService audit,
                        @Value("${identity.audit.record-token-refresh:true}") boolean recordTokenRefresh,
                        @Value("${identity.registration.enabled:true}") boolean registrationEnabled,
@@ -63,6 +71,7 @@ public class AuthService {
         this.loginAttempts = loginAttempts;
         this.accountService = accountService;
         this.mfa = mfa;
+        this.webauthnAssertion = webauthnAssertion;
         this.audit = audit;
         this.recordTokenRefresh = recordTokenRefresh;
         this.registrationEnabled = registrationEnabled;
@@ -138,6 +147,25 @@ public class AuthService {
     public AuthDtos.LoginChallengeResponse selectLoginMethod(String challengeId, MfaMethod method) {
         MfaService.Challenge challenge = mfa.selectMethod(challengeId, method);
         return new AuthDtos.LoginChallengeResponse(challenge.id(), challenge.methods(), challenge.armed());
+    }
+
+    /** WebAuthn login step: request options for the pending challenge's passkey assertion. */
+    public RequestOptionsResponse webauthnLoginOptions(String challengeId) {
+        return webauthnAssertion.options(challengeId);
+    }
+
+    /** WebAuthn login step: verify the passkey assertion for the pending challenge and issue tokens. */
+    public AuthDtos.TokenResponse verifyLoginWebauthn(String challengeId, AssertionFinishRequest request) {
+        UUID userId = webauthnAssertion.verify(challengeId, request).orElse(null);
+        if (userId == null) {
+            audit.event(AuditEventType.MFA_FAILED).detail("challenge=" + challengeId).log();
+            throw new ApiExceptions.Unauthorized("Passkey verification failed");
+        }
+        User user = users.findById(userId)
+                .orElseThrow(() -> new ApiExceptions.Unauthorized("Passkey verification failed"));
+        AuthDtos.TokenResponse tokens = issueTokens(user);
+        audit.event(AuditEventType.MFA_SUCCEEDED).actor(user).log();
+        return tokens;
     }
 
     /** Revokes a single refresh token (idempotent — no error if unknown or already revoked). */

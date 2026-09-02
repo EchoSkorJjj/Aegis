@@ -14,6 +14,11 @@ import com.usermgmt.identity.auth.AuthDtos.SelectMethodRequest;
 import com.usermgmt.identity.auth.AuthDtos.TokenResponse;
 import com.usermgmt.identity.auth.AuthDtos.VerifyEmailRequest;
 import com.usermgmt.identity.auth.AuthDtos.VerifyOtpRequest;
+import com.usermgmt.identity.auth.account.AccountService;
+import com.usermgmt.identity.auth.mfa.MfaSettings;
+import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.AssertionFinishRequest;
+import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.AssertionOptionsRequest;
+import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.RequestOptionsResponse;
 import com.usermgmt.identity.user.UserDtos.UserResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
@@ -84,6 +89,18 @@ public class AuthController {
     @PostMapping("/login/verify-otp")
     public TokenResponse verifyOtp(@Valid @RequestBody VerifyOtpRequest req) {
         return auth.verifyLoginOtp(req.challengeId(), req.code());
+    }
+
+    /** WebAuthn login step 1: request assertion options (challenge + the user's allowed credentials). */
+    @PostMapping("/login/webauthn/options")
+    public RequestOptionsResponse webauthnLoginOptions(@Valid @RequestBody AssertionOptionsRequest req) {
+        return auth.webauthnLoginOptions(req.challengeId());
+    }
+
+    /** WebAuthn login step 2: verify the passkey assertion for the challenge and issue tokens. */
+    @PostMapping("/login/webauthn/verify")
+    public TokenResponse webauthnLoginVerify(@Valid @RequestBody AssertionFinishRequest req) {
+        return auth.verifyLoginWebauthn(req.challengeId(), req);
     }
 
     @PostMapping("/refresh")

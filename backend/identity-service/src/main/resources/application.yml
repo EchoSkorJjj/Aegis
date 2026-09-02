@@ -65,6 +65,10 @@ identity:
       secret-key: ${MFA_TOTP_SECRET_KEY:dev-only-totp-key-change-me}
     webauthn:
       enabled: ${MFA_WEBAUTHN_ENABLED:false}
+      rp-id: ${WEBAUTHN_RP_ID:localhost}              # Relying Party ID — the site's registrable domain
+      rp-name: ${WEBAUTHN_RP_NAME:Aegis}              # shown in the authenticator/passkey prompt
+      origin: ${WEBAUTHN_ORIGIN:http://localhost:3000} # exact SPA origin allowed to complete ceremonies
+      timeout-seconds: ${WEBAUTHN_TIMEOUT_SECONDS:300} # client prompt timeout + server challenge lifetime
     # Single-use backup codes issued when the authenticator is enabled.
     recovery-codes:
       count: ${MFA_RECOVERY_CODES_COUNT:10}

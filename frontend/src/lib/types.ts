@@ -88,6 +88,14 @@ export interface RecoveryCodes {
   recoveryCodes: string[];
 }
 
+/** A registered passkey (WebAuthn credential) shown on the settings page. */
+export interface Passkey {
+  id: string;
+  label: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
 export interface ForgotPasswordInput {
   email: string;
 }

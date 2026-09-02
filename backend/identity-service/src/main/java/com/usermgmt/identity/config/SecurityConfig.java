@@ -39,6 +39,8 @@ public class SecurityConfig {
                                 "/auth/login",
                                 "/auth/login/select-method",
                                 "/auth/login/verify-otp",
+                                "/auth/login/webauthn/options",
+                                "/auth/login/webauthn/verify",
                                 "/auth/refresh",
                                 "/auth/logout",
                                 "/auth/verify-email",

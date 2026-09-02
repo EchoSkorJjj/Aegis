@@ -17,7 +17,7 @@ risk ticket, a regulator-notification memo — that a human risk owner approves 
   - **Email OTP** — emailed 6-digit code; the zero-enrollment baseline / fallback.
   - **TOTP authenticator apps** (RFC 6238) — QR-code enrollment, per-user opt-in,
     secrets **encrypted at rest** (AES-256-GCM), with single-use **recovery codes**.
-  - **WebAuthn / passkeys** — scaffolded, off by default.
+  - **WebAuthn / passkeys** — device biometrics or a security key (FIDO2); registration + login, per-user opt-in, off by default.
 
   When more than one factor is enabled, the user **chooses a method at login**.
 - RS256-signed JWTs with a published **JWKS** endpoint (`/oauth2/jwks`).
@@ -81,7 +81,7 @@ separate frontend variable or build to keep in sync.
 | Public sign-up | `REGISTRATION_ENABLED` | `true` | `POST /auth/register` → **403**; SPA hides sign-up (invite-only) |
 | Email-OTP 2FA | `MFA_EMAIL_OTP_ENABLED` | `true` | Not offered as a login factor |
 | TOTP authenticator | `MFA_TOTP_ENABLED` | `false` | Enrollment hidden; not offered at login |
-| WebAuthn / passkeys | `MFA_WEBAUTHN_ENABLED` | `false` | Not offered (scaffold) |
+| WebAuthn / passkeys | `MFA_WEBAUTHN_ENABLED` | `false` | Not offered as a login factor |
 
 With **no** MFA factor enabled, login is password-only. Email OTP needs no enrollment;
 TOTP and WebAuthn are opt-in per user once their factor is turned on. Full knobs (code
@@ -134,7 +134,7 @@ Everything is environment-overridable (defaults in
 | `MFA_TOTP_ENABLED` | `false` | Offer TOTP authenticator apps (per-user opt-in) |
 | `MFA_TOTP_ISSUER` / `…_PERIOD` / `…_DIGITS` / `…_WINDOW` | `Identity` / `30` / `6` / `1` | TOTP label, step seconds, digits, drift steps tolerated |
 | `MFA_TOTP_SECRET_KEY` | `dev-only-…` | Passphrase encrypting stored TOTP secrets — **change in production** |
-| `MFA_WEBAUTHN_ENABLED` | `false` | Offer WebAuthn / passkeys (scaffold) |
+| `MFA_WEBAUTHN_ENABLED` | `false` | Offer WebAuthn / passkeys (per-user opt-in) |
 | `MFA_RECOVERY_CODES_COUNT` | `10` | Backup codes issued when TOTP is enabled |
 | `MAX_FAILED_LOGINS` / `LOCKOUT_MINUTES` | `5` / `15` | Per-account login lockout policy |
 | `RATE_LIMIT_ENABLED` | `true` | Per-IP token-bucket throttle on `/auth/*` |
@@ -192,6 +192,5 @@ push/PR (`backend-ci`, `frontend-e2e`). See
 
 ## Roadmap
 
-- **WebAuthn / passkeys** — finish the scaffolded factor (registration + assertion ceremonies).
 - **Single sign-on** — wire a real OIDC provider into the existing delegated-auth seam.
 - **Secrets management** — externalize the JWT signing key and TOTP passphrase (e.g. Vault / KMS).

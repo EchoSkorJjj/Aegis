@@ -11,6 +11,7 @@ import {
 } from "react";
 
 import { authApi } from "@/lib/api";
+import { assertPasskey } from "@/lib/webauthn";
 import type {
   LoginInput,
   LoginResponse,
@@ -30,6 +31,8 @@ interface AuthContextValue {
   login: (input: LoginInput) => Promise<LoginResponse>;
   /** Completes 2FA with the emailed code, then signs in. */
   verifyOtp: (input: VerifyOtpInput) => Promise<void>;
+  /** Completes 2FA with a passkey (WebAuthn assertion) for the pending challenge, then signs in. */
+  loginWebauthn: (challengeId: string) => Promise<void>;
   logout: () => Promise<void>;
   /** Re-reads the current user from the server (e.g. after a profile change). */
   refresh: () => Promise<void>;
@@ -81,6 +84,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [completeSignIn],
   );
 
+  const loginWebauthn = useCallback(
+    async (challengeId: string) => {
+      await assertPasskey(challengeId);
+      await completeSignIn();
+    },
+    [completeSignIn],
+  );
+
   const logout = useCallback(async () => {
     try {
       await authApi.logout();
@@ -93,8 +104,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   const value = useMemo(
-    () => ({ user, isLoading, login, verifyOtp, logout, refresh: loadUser }),
-    [user, isLoading, login, verifyOtp, logout, loadUser],
+    () => ({
+      user,
+      isLoading,
+      login,
+      verifyOtp,
+      loginWebauthn,
+      logout,
+      refresh: loadUser,
+    }),
+    [user, isLoading, login, verifyOtp, loginWebauthn, logout, loadUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

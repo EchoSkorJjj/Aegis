@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { ApiError, authApi, mfaApi } from "@/lib/api";
+import { RecoveryCodesPanel } from "@/components/account/recovery-codes-panel";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -218,37 +219,6 @@ export function AccountMfaCard() {
         )}
       </CardContent>
     </Card>
-  );
-}
-
-function RecoveryCodesPanel({ codes, onDone }: { codes: string[]; onDone: () => void }) {
-  return (
-    <div className="flex flex-col gap-3">
-      <p className="text-sm text-muted-foreground">
-        Save these backup codes somewhere safe — each works once if you lose access to your
-        authenticator. They won’t be shown again.
-      </p>
-      <div className="grid grid-cols-2 gap-2 rounded-lg border p-4 font-mono text-sm">
-        {codes.map((c) => (
-          <span key={c}>{c}</span>
-        ))}
-      </div>
-      <div className="flex gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            navigator.clipboard?.writeText(codes.join("\n"));
-            toast.success("Recovery codes copied");
-          }}
-        >
-          Copy
-        </Button>
-        <Button size="sm" onClick={onDone}>
-          Done
-        </Button>
-      </div>
-    </div>
   );
 }
 

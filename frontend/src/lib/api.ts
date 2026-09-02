@@ -8,6 +8,7 @@ import type {
   LoginResponse,
   MfaChallenge,
   MfaStatus,
+  Passkey,
   RecoveryCodes,
   RegisterInput,
   ResetPasswordInput,
@@ -17,6 +18,12 @@ import type {
   UserProfile,
   VerifyOtpInput,
 } from "@/lib/types";
+import type {
+  AuthenticationResponseJSON,
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+  RegistrationResponseJSON,
+} from "@simplewebauthn/browser";
 
 /**
  * Client-side API. The browser talks ONLY to our same-origin BFF under
@@ -89,6 +96,23 @@ export const authApi = {
   /** Chooser: switch the pending challenge to another enrolled factor (arms it). */
   selectMethod(input: SelectMethodInput) {
     return bffFetch<MfaChallenge>("/api/auth/login/select-method", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  /** Passkey login: request assertion options for the pending challenge. */
+  webauthnLoginOptions(input: { challengeId: string }) {
+    return bffFetch<PublicKeyCredentialRequestOptionsJSON>(
+      "/api/auth/login/webauthn/options",
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  },
+  /** Passkey login: verify the signed assertion and establish the session. */
+  webauthnLoginVerify(input: {
+    challengeId: string;
+    credential: AuthenticationResponseJSON;
+  }) {
+    return bffFetch<{ ok: true }>("/api/auth/login/webauthn/verify", {
       method: "POST",
       body: JSON.stringify(input),
     });
@@ -181,6 +205,33 @@ export const mfaApi = {
     return bffFetch<RecoveryCodes>("/api/auth/mfa/recovery-codes/regenerate", {
       method: "POST",
       body: JSON.stringify({ code }),
+    });
+  },
+  /** Begin passkey registration: WebAuthn creation options for the authenticator. */
+  webauthnRegisterBegin() {
+    return bffFetch<PublicKeyCredentialCreationOptionsJSON>(
+      "/api/auth/mfa/webauthn/register/begin",
+      { method: "POST" },
+    );
+  },
+  /** Finish passkey registration: send the attestation, store the credential. */
+  webauthnRegisterFinish(input: {
+    label: string;
+    credential: RegistrationResponseJSON;
+  }) {
+    return bffFetch<{ credentialId: string; label: string; recoveryCodes: string[] }>(
+      "/api/auth/mfa/webauthn/register/finish",
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  },
+  /** The caller's registered passkeys. */
+  webauthnList() {
+    return bffFetch<Passkey[]>("/api/auth/mfa/webauthn/credentials");
+  },
+  /** Remove one of the caller's passkeys by id. */
+  webauthnDelete(id: string) {
+    return bffFetch<void>(`/api/auth/mfa/webauthn/credentials/${id}`, {
+      method: "DELETE",
     });
   },
 };
