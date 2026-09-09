@@ -1,14 +1,24 @@
 package com.usermgmt.identity.auth.mfa.webauthn;
 
+import java.nio.ByteBuffer;
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
+import java.util.UUID;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.usermgmt.identity.audit.AuditEventType;
 import com.usermgmt.identity.audit.AuditService;
 import com.usermgmt.identity.auth.mfa.MfaSettings;
 import com.usermgmt.identity.auth.mfa.recovery.RecoveryCodeService;
+import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.CredentialDescriptor;
+import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.PasskeySummary;
 import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.RegistrationFinishRequest;
 import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.RegistrationFinishRequest.AttestationResponse;
 import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.RegistrationFinishResponse;
-import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.CredentialDescriptor;
-import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.PasskeySummary;
 import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.RegistrationOptionsResponse;
 import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.RegistrationOptionsResponse.AuthenticatorSelection;
 import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.RegistrationOptionsResponse.PublicKeyCredentialParameter;
@@ -26,15 +36,6 @@ import com.webauthn4j.data.attestation.authenticator.AttestedCredentialData;
 import com.webauthn4j.data.client.challenge.Challenge;
 import com.webauthn4j.data.client.challenge.DefaultChallenge;
 import com.webauthn4j.util.Base64UrlUtil;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.nio.ByteBuffer;
-import java.time.Instant;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.List;
-import java.util.UUID;
 
 /**
  * Self-service passkey (WebAuthn) registration and management. {@link #beginRegistration} issues
@@ -186,7 +187,7 @@ public class WebauthnEnrollmentService {
             RegistrationParameters parameters =
                     new RegistrationParameters(rp.serverProperty(challenge), null, false, true);
             RegistrationData data = webAuthnManager.parse(registrationRequest);
-            webAuthnManager.validate(data, parameters);
+            webAuthnManager.verify(data, parameters);
             return data;
         } catch (RuntimeException ex) {
             // Any parse/validation failure means the attestation is malformed or doesn't verify.

@@ -1,5 +1,14 @@
 package com.usermgmt.identity.auth.mfa.webauthn;
 
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.usermgmt.identity.auth.mfa.LoginChallenge;
 import com.usermgmt.identity.auth.mfa.LoginChallengeRepository;
 import com.usermgmt.identity.auth.mfa.MfaMethod;
@@ -9,24 +18,18 @@ import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.CredentialDescriptor
 import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.RequestOptionsResponse;
 import com.usermgmt.identity.common.ApiExceptions;
 import com.webauthn4j.WebAuthnManager;
-import com.webauthn4j.authenticator.Authenticator;
-import com.webauthn4j.authenticator.AuthenticatorImpl;
+import com.webauthn4j.credential.CredentialRecord;
+import com.webauthn4j.credential.CredentialRecordImpl;
 import com.webauthn4j.converter.AttestedCredentialDataConverter;
 import com.webauthn4j.data.AuthenticationData;
 import com.webauthn4j.data.AuthenticationParameters;
 import com.webauthn4j.data.AuthenticationRequest;
 import com.webauthn4j.data.attestation.authenticator.AttestedCredentialData;
+import com.webauthn4j.data.attestation.statement.NoneAttestationStatement;
+import com.webauthn4j.data.extension.authenticator.AuthenticationExtensionsAuthenticatorOutputs;
 import com.webauthn4j.data.client.challenge.Challenge;
 import com.webauthn4j.data.client.challenge.DefaultChallenge;
 import com.webauthn4j.util.Base64UrlUtil;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.time.Instant;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
 
 /**
  * The WebAuthn / passkey assertion (login) ceremony. {@link #options} returns request options for a
@@ -89,7 +92,23 @@ public class WebauthnAssertionService {
         try {
             AttestedCredentialData attested = attestedCredentialDataConverter.convert(
                     Base64UrlUtil.decode(stored.getAttestedCredentialData()));
-            Authenticator authenticator = new AuthenticatorImpl(attested, null, stored.getSignCount());
+            // Rebuild the credential record from what we stored at registration. Assertion only needs
+            // the public key (inside `attested`) and the signature counter; the attestation statement
+            // and extensions are registration-time data the assertion path never reads, but the
+            // constructor requires them non-null — so pass a "none" statement and empty extensions.
+            // The uv/backup flags are left null: the verifier treats a null backup-eligibility as
+            // "skip that check" (see webauthn4j BEFlagVerifier).
+            CredentialRecord credentialRecord = new CredentialRecordImpl(
+                    new NoneAttestationStatement(),   // attestationStatement (unused for assertion)
+                    null,                             // uvInitialized
+                    null,                             // backupEligible
+                    null,                             // backupState
+                    stored.getSignCount(),            // counter
+                    attested,                         // attestedCredentialData — holds the COSE public key
+                    new AuthenticationExtensionsAuthenticatorOutputs.BuilderForRegistration().build(), // authenticatorExtensions (empty)
+                    null,                             // clientData
+                    null,                             // clientExtensions
+                    null);                            // transports
             Challenge nonce = new DefaultChallenge(Base64UrlUtil.decode(challenge.getWebauthnChallenge()));
             AuthenticationRequest authenticationRequest = new AuthenticationRequest(
                     Base64UrlUtil.decode(request.credential().id()),
@@ -97,9 +116,9 @@ public class WebauthnAssertionService {
                     Base64UrlUtil.decode(response.clientDataJSON()),
                     Base64UrlUtil.decode(response.signature()));
             AuthenticationParameters parameters = new AuthenticationParameters(
-                    rp.serverProperty(nonce), authenticator, null, false, true);
+                    rp.serverProperty(nonce), credentialRecord, null, false, true);
             AuthenticationData data = webAuthnManager.parse(authenticationRequest);
-            webAuthnManager.validate(data, parameters);
+            webAuthnManager.verify(data, parameters);
 
             long newSignCount = data.getAuthenticatorData().getSignCount();
             if (newSignCount > stored.getSignCount()) {
