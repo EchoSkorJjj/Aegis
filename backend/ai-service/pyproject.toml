@@ -1,0 +1,44 @@
+[project]
+name = "ai-service"
+version = "0.1.0"
+description = "Aegis AI Service — assess + draft + RAG (internal, called by aegis-core)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "httpx>=0.27",
+    "prometheus-fastapi-instrumentator>=7.0",
+]
+
+[project.optional-dependencies]
+# The LLM SDK is optional so the scaffold installs and its tests run with no key — a StubLlmClient
+# stands in until the real prompts land (BUILD_PLAN step 7).
+llm = ["anthropic>=0.40"]
+# Distributed tracing to Zipkin (parity with the Java services); version-coupled, so kept optional.
+tracing = [
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-instrumentation-fastapi>=0.48b0",
+    "opentelemetry-exporter-zipkin>=1.27",
+]
+dev = [
+    "pytest>=8.2",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ai_service"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
