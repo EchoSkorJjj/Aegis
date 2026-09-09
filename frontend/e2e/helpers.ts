@@ -38,10 +38,24 @@ export async function signIn(page: Page, email: string, password: string): Promi
   await page.getByRole("button", { name: "Sign in" }).click();
 
   const otpField = page.getByPlaceholder("123456");
-  await Promise.race([
-    otpField.waitFor({ state: "visible" }),
-    page.waitForURL(/\/dashboard/),
-  ]);
+  const emailCodeButton = page.getByRole("button", { name: /email code/i });
+
+  await expect
+    .poll(
+      async () => {
+        if (page.url().includes("/dashboard")) return "done";
+        if (await emailCodeButton.isVisible()) return "chooser";
+        if (await otpField.isVisible()) return "otp";
+        return "pending";
+      },
+      { timeout: 15_000 },
+    )
+    .not.toBe("pending");
+
+  if (await emailCodeButton.isVisible()) {
+    await emailCodeButton.click();
+    await otpField.waitFor({ state: "visible" });
+  }
 
   if (await otpField.isVisible()) {
     await otpField.fill(await getLoginOtp(email));

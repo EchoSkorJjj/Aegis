@@ -5,11 +5,13 @@ on:
     paths:
       - "frontend/**"
       - "backend/identity-service/**"
+      - "backend/gateway/**"
       - ".github/workflows/frontend-e2e.yml"
   pull_request:
     paths:
       - "frontend/**"
       - "backend/identity-service/**"
+      - "backend/gateway/**"
       - ".github/workflows/frontend-e2e.yml"
 
 jobs:
@@ -52,6 +54,10 @@ jobs:
         working-directory: backend/identity-service
         run: mvn -B -q -DskipTests package
 
+      - name: Build gateway
+        working-directory: backend/gateway
+        run: mvn -B -q -DskipTests package
+
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -75,7 +81,8 @@ jobs:
       - name: Run E2E tests
         working-directory: frontend
         env:
-          IDENTITY_API_URL: http://localhost:8081
+          # The BFF talks only to the gateway now, which routes /auth,/oauth2,/users -> identity.
+          GATEWAY_URL: http://localhost:8080
         run: |
           # Start the identity service (2FA on by default) against the CI service containers.
           DB_URL=jdbc:postgresql://localhost:5432/identity \
@@ -92,6 +99,24 @@ jobs:
               echo "identity service is up"; break
             fi
             if [ "$i" = "60" ]; then echo "backend failed to start"; cat /tmp/backend.log; exit 1; fi
+            sleep 3
+          done
+
+          # Start the gateway — the single entry point the frontend BFF calls. It validates JWTs
+          # against identity's JWKS and routes /auth,/oauth2,/users -> identity. aegis-core is not
+          # exercised by these auth tests, so CORE_URI is only a placeholder.
+          IDENTITY_URI=http://localhost:8081 \
+          CORE_URI=http://localhost:8082 \
+          IDENTITY_JWKS_URI=http://localhost:8081/oauth2/jwks \
+          TRACING_SAMPLE_RATE=0 \
+          java -jar ../backend/gateway/target/gateway-*.jar > /tmp/gateway.log 2>&1 &
+
+          echo "Waiting for the gateway to become healthy..."
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8080/actuator/health | grep -q '"status":"UP"'; then
+              echo "gateway is up"; break
+            fi
+            if [ "$i" = "60" ]; then echo "gateway failed to start"; cat /tmp/gateway.log; exit 1; fi
             sleep 3
           done
 

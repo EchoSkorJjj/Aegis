@@ -26,3 +26,17 @@ test("a visitor can sign up, sign in (with email OTP), and sign out", async ({ p
   await page.getByRole("menuitem", { name: /log out/i }).click();
   await expect(page).toHaveURL(/\/login/);
 });
+
+test("invalid credentials are rejected", async ({ page }) => {
+  // A throwaway email so this negative test never locks a real account (e.g. the shared bootstrap
+  // admin) across runs — identity returns 401 for unknown users and wrong passwords alike.
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(`nobody-${Date.now()}@example.com`);
+  await page.getByLabel("Password", { exact: true }).fill("definitely-not-the-password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+
+  // An inline error shows, no second factor is issued, and we stay on the login page.
+  await expect(page.getByText("Invalid email or password")).toBeVisible();
+  await expect(page.getByPlaceholder("123456")).toBeHidden();
+  await expect(page).toHaveURL(/\/login/);
+});
