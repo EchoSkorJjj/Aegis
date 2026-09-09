@@ -1,4 +1,10 @@
-# Prometheus scrape configuration for the identity service (used by docker-compose).
+# Prometheus scrape configuration for the Aegis services (used by docker-compose).
+# Targets are compose service names on the shared `edge` network.
+#
+# ai-service is intentionally NOT scraped: it lives on the isolated `internal` network, reachable
+# only by aegis-core (see docker-compose.yml), so Prometheus cannot reach it. To collect its metrics
+# later, either attach prometheus to the `internal` network too (relaxes the isolation) or expose
+# them via aegis-core.
 global:
   scrape_interval: 15s
 
@@ -6,4 +12,12 @@ scrape_configs:
   - job_name: identity-service
     metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ["backend:8081"]
+      - targets: ["identity-service:8081"]
+  - job_name: aegis-core
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["aegis-core:8082"]
+  - job_name: gateway
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["gateway:8080"]
