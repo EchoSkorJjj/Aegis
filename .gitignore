@@ -16,3 +16,21 @@ target/
 # Local env overrides
 *.env
 .env
+
+# docs and plans
+docs/
+ARCHITECTURE.*
+BUILD_PLAN.*
+PROJECT_PLAN.*
+VISION.*
+
+# Python (ai-service)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
