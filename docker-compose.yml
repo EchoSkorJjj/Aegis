@@ -1,5 +1,7 @@
 services:
   db:
+    # Shared PostgreSQL instance; each service owns a schema (identity-service: public,
+    # aegis-core: core).
     image: postgres:16
     environment:
       POSTGRES_DB: identity
@@ -14,6 +16,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks: [edge]
 
   identity-service:
     build:
@@ -47,16 +50,83 @@ services:
       REGISTRATION_ENABLED: "true"
     ports:
       - "8081:8081"
+    networks: [edge]
+
+  # Aegis Core — domain + pipeline service (inventory, ingestion, matching, scoring, actions).
+  # Java / Spring resource server: validates identity-service's JWTs via its JWKS, owns the `core`
+  # DB schema, and calls the internal ai-service for the assess/draft steps.
+  # On BOTH networks: `edge` (reached by the gateway; reaches db/identity/zipkin) and `internal`
+  # (the private link to ai-service) — so it is the only service that can reach ai-service.
+  aegis-core:
+    build:
+      context: ./backend/aegis-core
+    depends_on:
+      db:
+        condition: service_healthy
+      identity-service:
+        condition: service_started
+      ai-service:
+        condition: service_started
+      zipkin:
+        condition: service_started
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/identity
+      DB_USER: identity
+      DB_PASSWORD: identity
+      # Fetch identity-service's public signing keys to validate access tokens.
+      IDENTITY_JWKS_URI: http://identity-service:8081/oauth2/jwks
+      # The internal ai-service (assess + draft). Called with a service token, not a user JWT.
+      AI_SERVICE_URI: http://ai-service:8083
+      AI_SERVICE_TOKEN: dev-internal-token-change-me
+      # Export distributed traces to Zipkin — view them at http://localhost:9411
+      ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+    ports:
+      - "8082:8082"
+    networks: [edge, internal]
+
+  # Aegis AI Service — internal Python/FastAPI service for the AI logic (assess + draft + RAG).
+  # Locked down to aegis-core only: it joins ONLY the `internal` network (so the gateway, frontend,
+  # identity-service and Prometheus on `edge` cannot reach it) and publishes NO host port. The
+  # service token (X-Service-Token) is the app-level second layer. To poke it while debugging, go
+  # through aegis-core (GET /api/ai/ping) or `docker compose exec aegis-core ...`.
+  ai-service:
+    build:
+      context: ./backend/ai-service
+    environment:
+      SERVICE_TOKEN: dev-internal-token-change-me
+      # LLM is stubbed in dev. To enable real drafting: build with the `llm` extra and set
+      # LLM_PROVIDER=anthropic + ANTHROPIC_API_KEY (see backend/ai-service/README.md).
+      LLM_PROVIDER: stub
+    networks: [internal]
+
+  # API gateway (Spring Cloud Gateway, WebMVC) — the single entry point on :8080. Authenticates at
+  # the edge: /auth,/oauth2 pass through to identity-service without a token; every other path
+  # (/api/**) requires a valid JWT before it is routed to aegis-core. It has no route to ai-service.
+  gateway:
+    build:
+      context: ./backend/gateway
+    depends_on:
+      identity-service:
+        condition: service_started
+      aegis-core:
+        condition: service_started
+      zipkin:
+        condition: service_started
+    environment:
+      IDENTITY_URI: http://identity-service:8081
+      CORE_URI: http://aegis-core:8082
+      IDENTITY_JWKS_URI: http://identity-service:8081/oauth2/jwks
+      ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
+    ports:
+      - "8080:8080"
+    networks: [edge]
 
   frontend:
     build:
       context: ./frontend
-      # Legacy: the browser now calls the same-origin BFF under /api/auth/*
-      # instead of the backend directly, so this build arg is no longer required.
-      args:
-        - NEXT_PUBLIC_API_URL=http://localhost:8081
     depends_on:
-      - identity-service
+      - gateway
     ports:
       - "3000:3000"
     environment:
@@ -66,17 +136,19 @@ services:
       # true when the app is served over HTTPS. (Not keyed off NODE_ENV: `next start` forces that
       # to "production" even here.)
       - AUTH_COOKIE_SECURE=false
-      # Server-side only: the Next.js BFF reaches the backend over the compose
-      # network. Must be the service name — "localhost" would be the frontend
-      # container itself, not the backend.
-      - IDENTITY_API_URL=http://identity-service:8081
+      # Server-side only: the Next.js BFF sends EVERY backend call through the gateway, which
+      # authenticates it and routes to identity-service (/auth,/oauth2,/users) or aegis-core (/api).
+      # Must be the service name — "localhost" would be the frontend container itself.
+      - GATEWAY_URL=http://gateway:8080
     restart: always
+    networks: [edge]
 
   mailhog:
     image: mailhog/mailhog:latest
     ports:
       - "1025:1025" # SMTP
       - "8025:8025" # web inbox — open http://localhost:8025
+    networks: [edge]
 
   # Observability: Zipkin collects the service's distributed traces; Prometheus
   # scrapes its /actuator/prometheus metrics.
@@ -84,15 +156,29 @@ services:
     image: openzipkin/zipkin:latest
     ports:
       - "9411:9411" # trace UI + span collector — open http://localhost:9411
+    networks: [edge]
 
   prometheus:
     image: prom/prometheus:latest
     depends_on:
       - identity-service
+      - aegis-core
+      - gateway
     volumes:
       - ./ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
       - "9090:9090" # Prometheus UI — open http://localhost:9090
+    # On `edge` only, so it cannot reach ai-service (by design). ai-service metrics are therefore
+    # not scraped; see ops/prometheus.yml.
+    networks: [edge]
+
+networks:
+  # Edge + shared infra: gateway, identity-service, aegis-core, frontend, db, and observability.
+  edge:
+  # Private link for the AI boundary: only aegis-core and ai-service join it, so ai-service is
+  # reachable by aegis-core alone. Not marked `internal: true`, so ai-service keeps outbound
+  # internet access for the LLM API later.
+  internal:
 
 volumes:
   pgdata:
