@@ -12,17 +12,15 @@ import { headers as nextHeaders } from "next/headers";
 /**
  * Backend base URL as seen from the Next.js server (NOT the browser).
  *
- * - Local `pnpm dev`: defaults to http://localhost:8081.
- * - Docker Compose: set IDENTITY_API_URL=http://backend:8081 (service DNS name).
+ * Every server-side backend call goes through the API gateway, which authenticates the request and
+ * routes it (`/auth`, `/oauth2`, `/users` -> identity-service; `/api` -> aegis-core). The browser
+ * talks only to our same-origin BFF; the BFF talks only to the gateway.
  *
- * Falls back to NEXT_PUBLIC_API_URL for backwards compatibility with existing
- * setups, but note that in Docker the browser-facing localhost URL is not
- * reachable from inside the frontend container, so IDENTITY_API_URL must win.
+ * - Docker Compose: GATEWAY_URL=http://gateway:8080 (the gateway's service DNS name).
+ * - Local `pnpm dev`: defaults to http://localhost:8080 — run the gateway locally, or point
+ *   GATEWAY_URL at wherever it listens.
  */
-export const BACKEND_URL =
-  process.env.IDENTITY_API_URL ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  "http://localhost:8081";
+export const BACKEND_URL = process.env.GATEWAY_URL ?? "http://localhost:8080";
 
 export interface BackendResult {
   /** True for 2xx responses. */
