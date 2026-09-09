@@ -1,0 +1,64 @@
+package com.aegis.core.common;
+
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+import java.time.Instant;
+import java.util.stream.Collectors;
+
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(ApiExceptions.NotFound.class)
+    public ResponseEntity<ApiError> notFound(ApiExceptions.NotFound ex, HttpServletRequest req) {
+        return build(HttpStatus.NOT_FOUND, ex.getMessage(), req);
+    }
+
+    @ExceptionHandler(ApiExceptions.Conflict.class)
+    public ResponseEntity<ApiError> conflict(ApiExceptions.Conflict ex, HttpServletRequest req) {
+        return build(HttpStatus.CONFLICT, ex.getMessage(), req);
+    }
+
+    @ExceptionHandler(ApiExceptions.BadRequest.class)
+    public ResponseEntity<ApiError> badRequest(ApiExceptions.BadRequest ex, HttpServletRequest req) {
+        return build(HttpStatus.BAD_REQUEST, ex.getMessage(), req);
+    }
+
+    @ExceptionHandler(ApiExceptions.Unauthorized.class)
+    public ResponseEntity<ApiError> unauthorized(ApiExceptions.Unauthorized ex, HttpServletRequest req) {
+        return build(HttpStatus.UNAUTHORIZED, ex.getMessage(), req);
+    }
+
+    @ExceptionHandler(ApiExceptions.Forbidden.class)
+    public ResponseEntity<ApiError> forbidden(ApiExceptions.Forbidden ex, HttpServletRequest req) {
+        return build(HttpStatus.FORBIDDEN, ex.getMessage(), req);
+    }
+
+    @ExceptionHandler(ApiExceptions.UpstreamUnavailable.class)
+    public ResponseEntity<ApiError> upstream(ApiExceptions.UpstreamUnavailable ex, HttpServletRequest req) {
+        return build(HttpStatus.BAD_GATEWAY, ex.getMessage(), req);
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiError> denied(AccessDeniedException ex, HttpServletRequest req) {
+        return build(HttpStatus.FORBIDDEN, "Access denied", req);
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ApiError> validation(MethodArgumentNotValidException ex, HttpServletRequest req) {
+        String message = ex.getBindingResult().getFieldErrors().stream()
+                .map(f -> f.getField() + " " + f.getDefaultMessage())
+                .collect(Collectors.joining("; "));
+        return build(HttpStatus.BAD_REQUEST, message.isBlank() ? "Validation failed" : message, req);
+    }
+
+    private ResponseEntity<ApiError> build(HttpStatus status, String message, HttpServletRequest req) {
+        return ResponseEntity.status(status).body(new ApiError(
+                Instant.now(), status.value(), status.getReasonPhrase(), message, req.getRequestURI()));
+    }
+}

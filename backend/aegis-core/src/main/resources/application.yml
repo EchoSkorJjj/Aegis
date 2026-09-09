@@ -1,0 +1,63 @@
+server:
+  port: ${SERVER_PORT:8082}
+
+spring:
+  application:
+    name: aegis-core
+  # One PostgreSQL instance shared with identity-service; this service owns the `core` schema
+  # (identity-service uses `public`). Plain relational store — RAG/pgvector lives in the ai-service.
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/identity}
+    username: ${DB_USER:identity}
+    password: ${DB_PASSWORD:identity}
+  jpa:
+    hibernate:
+      ddl-auto: validate      # Flyway owns the schema; Hibernate only validates it
+    open-in-view: false
+    properties:
+      hibernate.jdbc.time_zone: UTC
+      hibernate.default_schema: core
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    schemas: core             # Flyway creates and manages the `core` schema
+    default-schema: core
+    create-schemas: true
+  # Resource server: validate identity-service's RS256 tokens against its JWKS (lazy decoder).
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${IDENTITY_JWKS_URI:http://localhost:8081/oauth2/jwks}
+
+# ---- Aegis Core configuration -------------------------------------------
+aegis:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+  # The internal Python ai-service (assess + draft + RAG). Called with a service token, not a user JWT.
+  ai:
+    base-url: ${AI_SERVICE_URI:http://localhost:8083}
+    service-token: ${AI_SERVICE_TOKEN:dev-internal-token-change-me}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+  metrics:
+    tags:
+      application: aegis-core
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLE_RATE:1.0}
+    export:
+      zipkin:
+        endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
