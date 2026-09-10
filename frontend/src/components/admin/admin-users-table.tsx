@@ -59,6 +59,8 @@ export function AdminUsersTable() {
     if (authLoading || !isAdmin) return;
 
     const controller = new AbortController();
+    // A new search / filter / page refetches from the server; surface the loading state right away.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     setError(null);
 

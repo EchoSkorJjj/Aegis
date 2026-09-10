@@ -147,7 +147,7 @@ export function LoginForm({
     }
   }
 
-  async function useMethod(method: MfaMethod) {
+  async function chooseMethod(method: MfaMethod) {
     if (!challenge || method === challenge.method) return;
     try {
       const updated = await authApi.selectMethod({
@@ -201,7 +201,7 @@ export function LoginForm({
               <span key={m}>
                 <button
                   type="button"
-                  onClick={() => useMethod(m)}
+                  onClick={() => chooseMethod(m)}
                   className="underline-offset-4 hover:underline"
                 >
                   {METHOD_LABEL[m]}

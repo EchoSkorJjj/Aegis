@@ -56,6 +56,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // Bootstrap the session from the server on mount: it lives in httpOnly cookies, so the client
+    // must ask who it is. This is a legitimate external-system sync, and the state updates happen in
+    // async callbacks (not synchronously in the effect body) — the heuristic below is a false positive.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadUser().finally(() => setIsLoading(false));
   }, [loadUser]);
 

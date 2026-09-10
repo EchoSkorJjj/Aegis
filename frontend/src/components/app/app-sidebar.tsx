@@ -1,20 +1,24 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BadgeCheck,
   Bell,
+  Boxes,
+  ChevronRight,
   ChevronsUpDown,
-  FolderKanban,
+  FileText,
+  GitPullRequest,
   Hexagon,
   LayoutDashboard,
-  ListTodo,
   LogOut,
+  type LucideIcon,
+  Rss,
   Settings,
+  ShieldAlert,
   ShieldCheck,
-  SquareKanban,
-  Users,
 } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -36,16 +40,54 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   useSidebar,
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/providers/auth-provider";
 
-const platformNav = [
+type NavLink = { title: string; href: string; icon: LucideIcon };
+type NavGroup = { title: string; icon: LucideIcon; items: { title: string; href: string }[] };
+type NavItem = NavLink | NavGroup;
+
+const platformNav: NavItem[] = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { title: "Your work", href: "#", icon: ListTodo },
-  { title: "Projects", href: "#", icon: FolderKanban },
-  { title: "Boards", href: "#", icon: SquareKanban },
-  { title: "Members", href: "#", icon: Users },
+  {
+    title: "Inventory",
+    icon: Boxes,
+    items: [
+      { title: "Services", href: "/inventory/services" },
+      { title: "Components", href: "/inventory/components" },
+      { title: "Vendors", href: "/inventory/vendors" },
+      { title: "Dependency map", href: "/inventory/map" },
+    ],
+  },
+  { title: "Advisories", href: "/advisories", icon: Rss },
+  {
+    title: "Findings",
+    icon: ShieldAlert,
+    items: [
+      { title: "Triage queue", href: "/findings" },
+      { title: "My services", href: "/findings/mine" },
+    ],
+  },
+  {
+    title: "Responses",
+    icon: GitPullRequest,
+    items: [
+      { title: "Review & approve", href: "/responses/review" },
+      { title: "History", href: "/responses/history" },
+    ],
+  },
+  {
+    title: "Reports",
+    icon: FileText,
+    items: [
+      { title: "Evidence", href: "/reports/evidence" },
+      { title: "Audit log", href: "/reports/audit" },
+    ],
+  },
 ];
 
 const accountNav = [{ title: "Settings", href: "/settings", icon: Settings }];
@@ -53,10 +95,31 @@ const accountNav = [{ title: "Settings", href: "/settings", icon: Settings }];
 const adminNav = [{ title: "Users", href: "/admin/users", icon: ShieldCheck }];
 
 export function AppSidebar() {
-  const { isMobile } = useSidebar();
+  const { isMobile, state, setOpen } = useSidebar();
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const isAdmin = !!user?.roles.includes("ADMIN");
+
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const isGroupActive = (group: NavGroup) =>
+    group.items.some((sub) => pathname === sub.href || pathname.startsWith(`${sub.href}/`));
+  // A group is open when the user has toggled it, otherwise when it contains the active route.
+  const isGroupOpen = (group: NavGroup) => openGroups[group.title] ?? isGroupActive(group);
+  const toggleGroup = (group: NavGroup) => {
+    const open = isGroupOpen(group);
+    setOpenGroups((prev) => ({ ...prev, [group.title]: !open }));
+  };
+
+  // When the sidebar is icon-collapsed, a group's inline sub-menu is hidden — so clicking a group
+  // expands the sidebar and opens that group, rather than toggling a menu the user can't see.
+  const onGroupClick = (group: NavGroup) => {
+    if (state === "collapsed" && !isMobile) {
+      setOpen(true);
+      setOpenGroups((prev) => ({ ...prev, [group.title]: true }));
+    } else {
+      toggleGroup(group);
+    }
+  };
 
   const displayName = user?.displayName || user?.email || "User";
   const email = user?.email ?? "";
@@ -87,18 +150,50 @@ export function AppSidebar() {
           <SidebarGroupLabel>Platform</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {platformNav.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    isActive={pathname === item.href}
-                    render={<Link href={item.href} />}
-                    tooltip={item.title}
-                  >
-                    <item.icon />
-                    <span>{item.title}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {platformNav.map((item) =>
+                "items" in item ? (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton
+                      isActive={isGroupActive(item)}
+                      onClick={() => onGroupClick(item)}
+                      tooltip={item.title}
+                    >
+                      <item.icon />
+                      <span>{item.title}</span>
+                      <ChevronRight
+                        className={`ml-auto transition-transform ${
+                          isGroupOpen(item) ? "rotate-90" : ""
+                        }`}
+                      />
+                    </SidebarMenuButton>
+                    {isGroupOpen(item) && (
+                      <SidebarMenuSub>
+                        {item.items.map((sub) => (
+                          <SidebarMenuSubItem key={sub.href}>
+                            <SidebarMenuSubButton
+                              isActive={pathname === sub.href}
+                              render={<Link href={sub.href} />}
+                            >
+                              <span>{sub.title}</span>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        ))}
+                      </SidebarMenuSub>
+                    )}
+                  </SidebarMenuItem>
+                ) : (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton
+                      isActive={pathname === item.href}
+                      render={<Link href={item.href} />}
+                      tooltip={item.title}
+                    >
+                      <item.icon />
+                      <span>{item.title}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ),
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
