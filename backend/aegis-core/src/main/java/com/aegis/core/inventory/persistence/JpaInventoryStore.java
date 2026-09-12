@@ -12,7 +12,7 @@ import org.springframework.stereotype.Repository;
 import java.util.Optional;
 import java.util.UUID;
 
-/** JPA adapter; persistence entities never cross the inventory module boundary. */
+/** JPA adapter for the inventory domain entities and explicit relationship records. */
 @Repository
 public class JpaInventoryStore implements InventoryStore {
 
@@ -46,23 +46,17 @@ public class JpaInventoryStore implements InventoryStore {
 
     @Override
     public BusinessService save(BusinessService value) {
-        BusinessServiceEntity entity = services.findById(value.getId()).orElse(null);
-        if (entity == null) {
-            entity = new BusinessServiceEntity(value.getId(), value.getName(), value.getCriticality());
-        } else {
-            entity.update(value.getName(), value.getCriticality());
-        }
-        return toDomain(services.save(entity));
+        return services.save(value);
     }
 
     @Override
     public Optional<BusinessService> findBusinessService(UUID id) {
-        return services.findById(id).map(JpaInventoryStore::toDomain);
+        return services.findById(id);
     }
 
     @Override
     public Page<BusinessService> findBusinessServices(Pageable pageable) {
-        return services.findAll(pageable).map(JpaInventoryStore::toDomain);
+        return services.findAll(pageable);
     }
 
     @Override
@@ -78,23 +72,17 @@ public class JpaInventoryStore implements InventoryStore {
 
     @Override
     public SoftwareComponent save(SoftwareComponent value) {
-        SoftwareComponentEntity entity = components.findById(value.getId()).orElse(null);
-        if (entity == null) {
-            entity = new SoftwareComponentEntity(value.getId(), value.getEcosystem(), value.getName(), value.getVersion());
-        } else {
-            entity.update(value.getEcosystem(), value.getName(), value.getVersion());
-        }
-        return toDomain(components.save(entity));
+        return components.save(value);
     }
 
     @Override
     public Optional<SoftwareComponent> findSoftwareComponent(UUID id) {
-        return components.findById(id).map(JpaInventoryStore::toDomain);
+        return components.findById(id);
     }
 
     @Override
     public Page<SoftwareComponent> findSoftwareComponents(Pageable pageable) {
-        return components.findAll(pageable).map(JpaInventoryStore::toDomain);
+        return components.findAll(pageable);
     }
 
     @Override
@@ -113,23 +101,17 @@ public class JpaInventoryStore implements InventoryStore {
 
     @Override
     public ThirdPartyVendor save(ThirdPartyVendor value) {
-        ThirdPartyVendorEntity entity = vendors.findById(value.getId()).orElse(null);
-        if (entity == null) {
-            entity = new ThirdPartyVendorEntity(value.getId(), value.getName());
-        } else {
-            entity.update(value.getName());
-        }
-        return toDomain(vendors.save(entity));
+        return vendors.save(value);
     }
 
     @Override
     public Optional<ThirdPartyVendor> findThirdPartyVendor(UUID id) {
-        return vendors.findById(id).map(JpaInventoryStore::toDomain);
+        return vendors.findById(id);
     }
 
     @Override
     public Page<ThirdPartyVendor> findThirdPartyVendors(Pageable pageable) {
-        return vendors.findAll(pageable).map(JpaInventoryStore::toDomain);
+        return vendors.findAll(pageable);
     }
 
     @Override
@@ -145,23 +127,17 @@ public class JpaInventoryStore implements InventoryStore {
 
     @Override
     public Owner save(Owner value) {
-        OwnerEntity entity = owners.findById(value.getId()).orElse(null);
-        if (entity == null) {
-            entity = new OwnerEntity(value.getId(), value.getName());
-        } else {
-            entity.update(value.getName());
-        }
-        return toDomain(owners.save(entity));
+        return owners.save(value);
     }
 
     @Override
     public Optional<Owner> findOwner(UUID id) {
-        return owners.findById(id).map(JpaInventoryStore::toDomain);
+        return owners.findById(id);
     }
 
     @Override
     public Page<Owner> findOwners(Pageable pageable) {
-        return owners.findAll(pageable).map(JpaInventoryStore::toDomain);
+        return owners.findAll(pageable);
     }
 
     @Override
@@ -197,7 +173,7 @@ public class JpaInventoryStore implements InventoryStore {
 
     @Override
     public Page<SoftwareComponent> findServiceComponents(UUID serviceId, Pageable pageable) {
-        return components.findForService(serviceId, pageable).map(JpaInventoryStore::toDomain);
+        return components.findForService(serviceId, pageable);
     }
 
     @Override
@@ -222,7 +198,7 @@ public class JpaInventoryStore implements InventoryStore {
 
     @Override
     public Page<ThirdPartyVendor> findServiceVendors(UUID serviceId, Pageable pageable) {
-        return vendors.findForService(serviceId, pageable).map(JpaInventoryStore::toDomain);
+        return vendors.findForService(serviceId, pageable);
     }
 
     @Override
@@ -247,7 +223,7 @@ public class JpaInventoryStore implements InventoryStore {
 
     @Override
     public Page<Owner> findServiceOwners(UUID serviceId, Pageable pageable) {
-        return owners.findForService(serviceId, pageable).map(JpaInventoryStore::toDomain);
+        return owners.findForService(serviceId, pageable);
     }
 
     @Override
@@ -272,22 +248,6 @@ public class JpaInventoryStore implements InventoryStore {
 
     @Override
     public Page<SoftwareComponent> findComponentDependencies(UUID componentId, Pageable pageable) {
-        return components.findDependencies(componentId, pageable).map(JpaInventoryStore::toDomain);
-    }
-
-    private static BusinessService toDomain(BusinessServiceEntity entity) {
-        return new BusinessService(entity.id(), entity.name(), entity.criticality());
-    }
-
-    private static SoftwareComponent toDomain(SoftwareComponentEntity entity) {
-        return new SoftwareComponent(entity.id(), entity.ecosystem(), entity.name(), entity.version());
-    }
-
-    private static ThirdPartyVendor toDomain(ThirdPartyVendorEntity entity) {
-        return new ThirdPartyVendor(entity.id(), entity.name());
-    }
-
-    private static Owner toDomain(OwnerEntity entity) {
-        return new Owner(entity.id(), entity.name());
+        return components.findDependencies(componentId, pageable);
     }
 }

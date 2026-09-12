@@ -1,5 +1,5 @@
 /**
- * Persistence-agnostic inventory domain models. JPA mappings live in the inventory persistence
- * adapter so these immutable models retain their validation and identity semantics.
+ * Inventory domain models. The four aggregate records are also the JPA entities; persistence-only
+ * relationship records stay behind the inventory persistence adapter.
  */
 package com.aegis.core.inventory.domain;

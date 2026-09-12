@@ -42,8 +42,8 @@ public class InventoryService {
 
     @Transactional
     public BusinessService updateBusinessService(UUID id, String name, BusinessCriticality criticality) {
-        getBusinessService(id);
-        BusinessService value = new BusinessService(id, name, criticality);
+        BusinessService value = getBusinessService(id);
+        value.update(name, criticality);
         rejectDuplicateBusinessServiceName(value.getName(), id);
         return store.save(value);
     }
@@ -74,8 +74,8 @@ public class InventoryService {
 
     @Transactional
     public SoftwareComponent updateSoftwareComponent(UUID id, String ecosystem, String name, String version) {
-        getSoftwareComponent(id);
-        SoftwareComponent value = new SoftwareComponent(id, ecosystem, name, version);
+        SoftwareComponent value = getSoftwareComponent(id);
+        value.update(ecosystem, name, version);
         rejectDuplicateComponent(value, id);
         return store.save(value);
     }
@@ -106,8 +106,8 @@ public class InventoryService {
 
     @Transactional
     public ThirdPartyVendor updateThirdPartyVendor(UUID id, String name) {
-        getThirdPartyVendor(id);
-        ThirdPartyVendor value = new ThirdPartyVendor(id, name);
+        ThirdPartyVendor value = getThirdPartyVendor(id);
+        value.rename(name);
         rejectDuplicateVendorName(value.getName(), id);
         return store.save(value);
     }
@@ -138,8 +138,8 @@ public class InventoryService {
 
     @Transactional
     public Owner updateOwner(UUID id, String name) {
-        getOwner(id);
-        Owner value = new Owner(id, name);
+        Owner value = getOwner(id);
+        value.rename(name);
         rejectDuplicateOwnerName(value.getName(), id);
         return store.save(value);
     }

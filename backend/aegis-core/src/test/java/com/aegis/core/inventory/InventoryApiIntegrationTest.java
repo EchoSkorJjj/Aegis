@@ -125,7 +125,9 @@ class InventoryApiIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(id.toString()))
                 .andExpect(jsonPath("$.name").value("Checkout " + suffix))
-                .andExpect(jsonPath("$.criticality").value("HIGH"));
+                .andExpect(jsonPath("$.criticality").value("HIGH"))
+                .andExpect(jsonPath("$.createdAt").isNotEmpty())
+                .andExpect(jsonPath("$.updatedAt").isNotEmpty());
 
         mvc.perform(get("/api/inventory/services/{id}", id).with(role("SERVICE_OWNER")))
                 .andExpect(status().isOk())
@@ -139,6 +141,40 @@ class InventoryApiIntegrationTest extends AbstractIntegrationTest {
         mvc.perform(get("/api/inventory/services/{id}", id).with(role("ANALYST")))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404));
+    }
+
+    @Test
+    void identityAndTimestampsAreServerControlledInCreateAndUpdateDtos() throws Exception {
+        UUID suppliedId = UUID.randomUUID();
+        String suppliedCreatedAt = "2000-01-01T00:00:00Z";
+        String suppliedUpdatedAt = "2001-01-01T00:00:00Z";
+        String suffix = UUID.randomUUID().toString();
+
+        MvcResult created = mvc.perform(post("/api/inventory/services")
+                        .with(role("ANALYST"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"" + suppliedId + "\",\"name\":\"Controlled " + suffix
+                                + "\",\"criticality\":\"LOW\",\"createdAt\":\"" + suppliedCreatedAt
+                                + "\",\"updatedAt\":\"" + suppliedUpdatedAt + "\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(org.hamcrest.Matchers.not(suppliedId.toString())))
+                .andExpect(jsonPath("$.createdAt").value(org.hamcrest.Matchers.not(suppliedCreatedAt)))
+                .andExpect(jsonPath("$.updatedAt").value(org.hamcrest.Matchers.not(suppliedUpdatedAt)))
+                .andReturn();
+        Matcher matcher = ID_PATTERN.matcher(created.getResponse().getContentAsString());
+        assertThat(matcher.find()).isTrue();
+        UUID actualId = UUID.fromString(matcher.group(1));
+
+        mvc.perform(put("/api/inventory/services/{id}", actualId)
+                        .with(role("ANALYST"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"" + suppliedId + "\",\"name\":\"Still controlled " + suffix
+                                + "\",\"criticality\":\"HIGH\",\"createdAt\":\"" + suppliedCreatedAt
+                                + "\",\"updatedAt\":\"" + suppliedUpdatedAt + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(actualId.toString()))
+                .andExpect(jsonPath("$.createdAt").value(org.hamcrest.Matchers.not(suppliedCreatedAt)))
+                .andExpect(jsonPath("$.updatedAt").value(org.hamcrest.Matchers.not(suppliedUpdatedAt)));
     }
 
     @Test

@@ -9,6 +9,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
+import java.time.Instant;
 import java.util.UUID;
 
 public final class InventoryDtos {
@@ -21,9 +22,12 @@ public final class InventoryDtos {
             @NotNull BusinessCriticality criticality) {
     }
 
-    public record BusinessServiceResponse(UUID id, String name, BusinessCriticality criticality) {
+    public record BusinessServiceResponse(
+            UUID id, String name, BusinessCriticality criticality, Instant createdAt, Instant updatedAt) {
         static BusinessServiceResponse from(BusinessService value) {
-            return new BusinessServiceResponse(value.getId(), value.getName(), value.getCriticality());
+            return new BusinessServiceResponse(
+                    value.getId(), value.getName(), value.getCriticality(),
+                    value.getCreatedAt(), value.getUpdatedAt());
         }
     }
 
@@ -33,25 +37,29 @@ public final class InventoryDtos {
             @NotBlank @Size(max = 128) String version) {
     }
 
-    public record SoftwareComponentResponse(UUID id, String ecosystem, String name, String version) {
+    public record SoftwareComponentResponse(
+            UUID id, String ecosystem, String name, String version, Instant createdAt, Instant updatedAt) {
         static SoftwareComponentResponse from(SoftwareComponent value) {
             return new SoftwareComponentResponse(
-                    value.getId(), value.getEcosystem(), value.getName(), value.getVersion());
+                    value.getId(), value.getEcosystem(), value.getName(), value.getVersion(),
+                    value.getCreatedAt(), value.getUpdatedAt());
         }
     }
 
     public record NamedInventoryRequest(@NotBlank @Size(max = 255) String name) {
     }
 
-    public record ThirdPartyVendorResponse(UUID id, String name) {
+    public record ThirdPartyVendorResponse(UUID id, String name, Instant createdAt, Instant updatedAt) {
         static ThirdPartyVendorResponse from(ThirdPartyVendor value) {
-            return new ThirdPartyVendorResponse(value.getId(), value.getName());
+            return new ThirdPartyVendorResponse(
+                    value.getId(), value.getName(), value.getCreatedAt(), value.getUpdatedAt());
         }
     }
 
-    public record OwnerResponse(UUID id, String name) {
+    public record OwnerResponse(UUID id, String name, Instant createdAt, Instant updatedAt) {
         static OwnerResponse from(Owner value) {
-            return new OwnerResponse(value.getId(), value.getName());
+            return new OwnerResponse(
+                    value.getId(), value.getName(), value.getCreatedAt(), value.getUpdatedAt());
         }
     }
 }

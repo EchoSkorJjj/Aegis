@@ -5,6 +5,8 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.IdClass;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.SourceType;
 
 import java.io.Serializable;
 import java.time.Instant;
@@ -17,6 +19,7 @@ import java.util.UUID;
 class ServiceComponentEntity {
     @Id @Column(name = "business_service_id") private UUID businessServiceId;
     @Id @Column(name = "component_id") private UUID componentId;
+    @CreationTimestamp(source = SourceType.DB)
     @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
 
     protected ServiceComponentEntity() {
@@ -25,7 +28,6 @@ class ServiceComponentEntity {
     ServiceComponentEntity(UUID businessServiceId, UUID componentId) {
         this.businessServiceId = businessServiceId;
         this.componentId = componentId;
-        this.createdAt = Instant.now();
     }
 
     static final class Key implements Serializable {
@@ -57,6 +59,7 @@ class ServiceComponentEntity {
 class ServiceVendorEntity {
     @Id @Column(name = "business_service_id") private UUID businessServiceId;
     @Id @Column(name = "vendor_id") private UUID vendorId;
+    @CreationTimestamp(source = SourceType.DB)
     @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
 
     protected ServiceVendorEntity() {
@@ -65,7 +68,6 @@ class ServiceVendorEntity {
     ServiceVendorEntity(UUID businessServiceId, UUID vendorId) {
         this.businessServiceId = businessServiceId;
         this.vendorId = vendorId;
-        this.createdAt = Instant.now();
     }
 
     static final class Key implements Serializable {
@@ -84,6 +86,7 @@ class ServiceVendorEntity {
 class ServiceOwnerEntity {
     @Id @Column(name = "business_service_id") private UUID businessServiceId;
     @Id @Column(name = "owner_id") private UUID ownerId;
+    @CreationTimestamp(source = SourceType.DB)
     @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
 
     protected ServiceOwnerEntity() {
@@ -92,7 +95,6 @@ class ServiceOwnerEntity {
     ServiceOwnerEntity(UUID businessServiceId, UUID ownerId) {
         this.businessServiceId = businessServiceId;
         this.ownerId = ownerId;
-        this.createdAt = Instant.now();
     }
 
     static final class Key implements Serializable {
@@ -111,6 +113,7 @@ class ServiceOwnerEntity {
 class ComponentDependencyEntity {
     @Id @Column(name = "component_id") private UUID componentId;
     @Id @Column(name = "dependency_id") private UUID dependencyId;
+    @CreationTimestamp(source = SourceType.DB)
     @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
 
     protected ComponentDependencyEntity() {
@@ -119,7 +122,6 @@ class ComponentDependencyEntity {
     ComponentDependencyEntity(UUID componentId, UUID dependencyId) {
         this.componentId = componentId;
         this.dependencyId = dependencyId;
-        this.createdAt = Instant.now();
     }
 
     static final class Key implements Serializable {

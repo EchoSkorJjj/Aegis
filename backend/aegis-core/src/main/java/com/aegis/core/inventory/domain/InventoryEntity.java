@@ -1,12 +1,36 @@
 package com.aegis.core.inventory.domain;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Id;
+import jakarta.persistence.MappedSuperclass;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.SourceType;
+import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.proxy.HibernateProxy;
+
+import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Base identity semantics shared by the immutable inventory entities. */
-abstract class InventoryEntity {
+/** Shared UUID identity and database-sourced audit timestamps for inventory entities. */
+@MappedSuperclass
+public abstract class InventoryEntity {
 
-    private final UUID id;
+    @Id
+    @Column(name = "id", nullable = false, updatable = false)
+    private UUID id;
+
+    @CreationTimestamp(source = SourceType.DB)
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private Instant createdAt;
+
+    @UpdateTimestamp(source = SourceType.DB)
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
+
+    protected InventoryEntity() {
+        // Required by JPA. Application code uses the validating UUID constructor.
+    }
 
     protected InventoryEntity(UUID id) {
         if (id == null) {
@@ -15,8 +39,16 @@ abstract class InventoryEntity {
         this.id = id;
     }
 
-    public final UUID getId() {
+    public UUID getId() {
         return id;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
     }
 
     protected static <T> T requireNonNull(T value, String fieldName) {
@@ -38,15 +70,22 @@ abstract class InventoryEntity {
         if (this == other) {
             return true;
         }
-        if (other == null || getClass() != other.getClass()) {
+        if (other == null || effectiveClass(this) != effectiveClass(other)) {
             return false;
         }
         InventoryEntity that = (InventoryEntity) other;
-        return id.equals(that.id);
+        UUID thisId = getId();
+        return thisId != null && thisId.equals(that.getId());
     }
 
     @Override
     public final int hashCode() {
-        return Objects.hash(getClass(), id);
+        return Objects.hash(effectiveClass(this), getId());
+    }
+
+    private static Class<?> effectiveClass(Object value) {
+        return value instanceof HibernateProxy proxy
+                ? proxy.getHibernateLazyInitializer().getPersistentClass()
+                : value.getClass();
     }
 }
