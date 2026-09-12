@@ -6,9 +6,9 @@ advisory ingestion, matching, scoring, and the execution of approved actions. Th
 See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../../BUILD_PLAN.md), and
 [`docs/adr/0001-aegis-core-language.md`](../../docs/adr/0001-aegis-core-language.md).
 
-> **Status: scaffold.** Runnable skeleton — Spring Boot app, resource-server security, the `core`
-> schema, the module seams, and the AI port (interfaces + DTOs + a wired-but-unimplemented HTTP
-> client). No domain logic yet; that lands feature by feature (BUILD_PLAN step 1 onward).
+> **Status: foundational scaffold.** The Spring Boot wiring, security, `core` schema, module seams,
+> and AI port are in place. The inventory module defines its core domain entities; persistence,
+> relationships, and APIs land in subsequent features.
 
 ## Modules (a modular monolith, split by seams later)
 
