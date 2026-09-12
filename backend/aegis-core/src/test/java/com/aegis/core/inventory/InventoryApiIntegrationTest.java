@@ -54,7 +54,7 @@ class InventoryApiIntegrationTest extends AbstractIntegrationTest {
                 .extracting(authority -> authority.getAuthority())
                 .containsExactlyInAnyOrder(
                         "ROLE_USER", "ROLE_ADMIN", "ROLE_SERVICE_OWNER", "ROLE_ANALYST",
-                        "ROLE_COMPLIANCE_ADMIN", "FACTOR_BEARER");
+                        "ROLE_COMPLIANCE_ADMIN");
     }
 
     @Test
