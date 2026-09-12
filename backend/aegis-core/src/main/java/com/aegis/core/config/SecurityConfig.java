@@ -31,7 +31,9 @@ import java.util.List;
 public class SecurityConfig {
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain filterChain(HttpSecurity http,
+                                           SecurityErrorHandlers errors,
+                                           JwtAuthenticationConverter jwtAuthenticationConverter) throws Exception {
         http
                 .cors(Customizer.withDefaults())
                 .csrf(csrf -> csrf.disable())
@@ -46,13 +48,19 @@ public class SecurityConfig {
                                 "/actuator/prometheus"
                         ).permitAll()
                         .anyRequest().authenticated())
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint(errors)
+                        .accessDeniedHandler(errors))
                 .oauth2ResourceServer(oauth -> oauth
-                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())));
+                        .authenticationEntryPoint(errors)
+                        .accessDeniedHandler(errors)
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)));
         return http.build();
     }
 
     /** Maps the JWT "roles" claim (e.g. ["SERVICE_OWNER","ANALYST"]) to ROLE_* authorities. */
-    private JwtAuthenticationConverter jwtAuthenticationConverter() {
+    @Bean
+    public JwtAuthenticationConverter jwtAuthenticationConverter() {
         JwtGrantedAuthoritiesConverter authorities = new JwtGrantedAuthoritiesConverter();
         authorities.setAuthoritiesClaimName("roles");
         authorities.setAuthorityPrefix("ROLE_");
