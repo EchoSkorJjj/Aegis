@@ -6,9 +6,9 @@ advisory ingestion, matching, scoring, and the execution of approved actions. Th
 See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../../BUILD_PLAN.md), and
 [`docs/adr/0001-aegis-core-language.md`](../../docs/adr/0001-aegis-core-language.md).
 
-> **Status: foundational scaffold.** The Spring Boot wiring, security, `core` schema, module seams,
-> and AI port are in place. The inventory module defines its core domain entities; persistence,
-> relationships, and APIs land in subsequent features.
+> **Status:** the Spring Boot wiring, security, module seams, and AI port are in place. The inventory
+> module persists its core entities and direct relationships and exposes authenticated CRUD APIs;
+> later ingestion, transitive graph queries, matching, scoring, and action workflows remain planned.
 
 ## Modules (a modular monolith, split by seams later)
 
@@ -59,4 +59,16 @@ mvn spring-boot:run     # run locally (needs Postgres on :5432 and identity-serv
 ```
 
 In Docker Compose it builds and starts alongside identity-service and the ai-service. API docs at
-`http://localhost:8082/swagger-ui.html` once endpoints exist.
+`http://localhost:8082/swagger-ui.html`.
+
+## Inventory API
+
+Inventory endpoints are rooted at `/api/inventory`. Paginated entity collections and direct
+relationship collections default to name/ID ascending order. `SERVICE_OWNER`, `ANALYST`, and
+`COMPLIANCE_ADMIN` may read inventory; `ANALYST` and `COMPLIANCE_ADMIN` may create, update, delete,
+link, and unlink it. `ADMIN` remains a platform user-management role, not an Aegis domain role.
+
+The map supports multiple owners per business service. Deleting an inventory entity cascades only
+its relationship rows; the related services, components, vendors, and owners remain intact. The
+component dependency API stores direct edges only. Transitive traversal and impacted-service graph
+queries are intentionally deferred to the later E4 graph-query story.
