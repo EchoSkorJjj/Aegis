@@ -70,6 +70,11 @@ public class JpaInventoryStore implements InventoryStore {
     }
 
     @Override
+    public Optional<BusinessService> findBusinessServiceByName(String name) {
+        return services.findByNameIgnoreCase(name);
+    }
+
+    @Override
     public boolean businessServiceNameExists(String name, UUID excludingId) {
         return excludingId == null ? services.existsByNameIgnoreCase(name)
                 : services.existsByNameIgnoreCaseAndIdNot(name, excludingId);
@@ -93,6 +98,11 @@ public class JpaInventoryStore implements InventoryStore {
     @Override
     public Page<SoftwareComponent> findSoftwareComponents(Pageable pageable) {
         return components.findAll(pageable);
+    }
+
+    @Override
+    public Optional<SoftwareComponent> findSoftwareComponentByCoordinates(String ecosystem, String name, String version) {
+        return components.findByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCase(ecosystem, name, version);
     }
 
     @Override
@@ -125,6 +135,11 @@ public class JpaInventoryStore implements InventoryStore {
     }
 
     @Override
+    public Optional<ThirdPartyVendor> findThirdPartyVendorByName(String name) {
+        return vendors.findByNameIgnoreCase(name);
+    }
+
+    @Override
     public boolean thirdPartyVendorNameExists(String name, UUID excludingId) {
         return excludingId == null ? vendors.existsByNameIgnoreCase(name)
                 : vendors.existsByNameIgnoreCaseAndIdNot(name, excludingId);
@@ -148,6 +163,11 @@ public class JpaInventoryStore implements InventoryStore {
     @Override
     public Page<Owner> findOwners(Pageable pageable) {
         return owners.findAll(pageable);
+    }
+
+    @Override
+    public Optional<Owner> findOwnerByName(String name) {
+        return owners.findByNameIgnoreCase(name);
     }
 
     @Override

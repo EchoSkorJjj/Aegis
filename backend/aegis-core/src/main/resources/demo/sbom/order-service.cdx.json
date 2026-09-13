@@ -1,0 +1,53 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "bom-ref": "order-service",
+      "type": "application",
+      "group": "com.demo",
+      "name": "order-service",
+      "version": "2.0.3",
+      "purl": "pkg:maven/com.demo/order-service@2.0.3"
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "kafka-clients",
+      "type": "library",
+      "group": "org.apache.kafka",
+      "name": "kafka-clients",
+      "version": "3.0.0",
+      "purl": "pkg:maven/org.apache.kafka/kafka-clients@3.0.0"
+    },
+    {
+      "bom-ref": "snappy-java",
+      "type": "library",
+      "group": "org.xerial.snappy",
+      "name": "snappy-java",
+      "version": "1.1.8.1",
+      "purl": "pkg:maven/org.xerial.snappy/snappy-java@1.1.8.1"
+    },
+    {
+      "bom-ref": "log4j-core",
+      "type": "library",
+      "group": "org.apache.logging.log4j",
+      "name": "log4j-core",
+      "version": "2.14.1",
+      "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1"
+    },
+    {
+      "bom-ref": "jackson-databind",
+      "type": "library",
+      "group": "com.fasterxml.jackson.core",
+      "name": "jackson-databind",
+      "version": "2.13.0",
+      "purl": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.13.0"
+    }
+  ],
+  "dependencies": [
+    { "ref": "order-service", "dependsOn": ["kafka-clients", "log4j-core", "jackson-databind"] },
+    { "ref": "kafka-clients", "dependsOn": ["snappy-java"] }
+  ]
+}

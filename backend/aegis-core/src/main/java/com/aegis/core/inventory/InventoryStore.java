@@ -20,24 +20,28 @@ public interface InventoryStore {
     BusinessService save(BusinessService value);
     Optional<BusinessService> findBusinessService(UUID id);
     Page<BusinessService> findBusinessServices(Pageable pageable);
+    Optional<BusinessService> findBusinessServiceByName(String name);
     boolean businessServiceNameExists(String name, UUID excludingId);
     void deleteBusinessService(UUID id);
 
     SoftwareComponent save(SoftwareComponent value);
     Optional<SoftwareComponent> findSoftwareComponent(UUID id);
     Page<SoftwareComponent> findSoftwareComponents(Pageable pageable);
+    Optional<SoftwareComponent> findSoftwareComponentByCoordinates(String ecosystem, String name, String version);
     boolean softwareComponentCoordinatesExist(String ecosystem, String name, String version, UUID excludingId);
     void deleteSoftwareComponent(UUID id);
 
     ThirdPartyVendor save(ThirdPartyVendor value);
     Optional<ThirdPartyVendor> findThirdPartyVendor(UUID id);
     Page<ThirdPartyVendor> findThirdPartyVendors(Pageable pageable);
+    Optional<ThirdPartyVendor> findThirdPartyVendorByName(String name);
     boolean thirdPartyVendorNameExists(String name, UUID excludingId);
     void deleteThirdPartyVendor(UUID id);
 
     Owner save(Owner value);
     Optional<Owner> findOwner(UUID id);
     Page<Owner> findOwners(Pageable pageable);
+    Optional<Owner> findOwnerByName(String name);
     boolean ownerNameExists(String name, UUID excludingId);
     void deleteOwner(UUID id);
 

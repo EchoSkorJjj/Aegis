@@ -50,12 +50,14 @@ domain. See `ARCHITECTURE.md` for the topology.
 | `AI_SERVICE_TOKEN` | `dev-internal-token-change-me` | Shared service token sent to the ai-service |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | SPA origins allowed in dev |
 | `ZIPKIN_ENDPOINT` | `http://localhost:9411/api/v2/spans` | Trace collector |
+| `AEGIS_DEMO_SEED_ENABLED` | `false` | Load the demo estate at startup (dev/demo only) |
 
 ## Build & test
 
 ```bash
 # from backend/aegis-core
-mvn clean test          # compiles + runs the smoke test (needs Docker for Testcontainers)
+./mvnw verify           # unit tests + integration tests (Testcontainers needs Docker) + format check
+./mvnw spotless:apply   # fix import order / whitespace
 mvn spring-boot:run     # run locally (needs Postgres on :5432 and identity-service on :8081)
 ```
 
@@ -87,3 +89,26 @@ time by the impact endpoints below.
 
 Both require the same read role as the rest of the inventory API (`SERVICE_OWNER`, `ANALYST`,
 `COMPLIANCE_ADMIN`) and 404 when the component/vendor does not exist.
+
+### SBOM import (CycloneDX)
+
+`POST /api/inventory/services/{serviceId}/sbom` (`ANALYST`, `COMPLIANCE_ADMIN`) takes a CycloneDX JSON
+SBOM (`application/json` or `application/vnd.cyclonedx+json`) and merges it into the map:
+
+- Components are matched by (ecosystem, name, version), case-insensitively, or created. The ecosystem
+  is the purl type and the name follows advisory-feed spelling (`group:artifact` for Maven,
+  `@scope/name` for npm); components without a purl use the `generic` ecosystem. Components with no
+  version are skipped; nested components are included.
+- `dependencies` become component dependency edges. The service is linked only to its top-level
+  components (the SBOM root's direct dependencies, plus any component nothing else depends on), so
+  deeper libraries are reported as transitive impact.
+- The import is additive, idempotent, and atomic — a malformed purl, oversized field, or more than
+  5,000 components rejects the whole document with a 400. The response counts what changed.
+
+### Demo estate
+
+A fictional estate — five services, their owners and vendors, and four CycloneDX SBOMs (Maven, npm,
+PyPI) — lives in `src/main/resources/demo/`. Set `AEGIS_DEMO_SEED_ENABLED=true` (Docker Compose does)
+to load it at startup through the SBOM import; seeding is idempotent. Try the impact of
+`org.apache.logging.log4j:log4j-core 2.14.1`: Order Service uses it directly, Payments API reaches it
+through three hops.
