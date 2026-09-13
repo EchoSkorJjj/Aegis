@@ -46,6 +46,16 @@ aegis:
   # Opt-in: load the fictional demo estate (classpath:demo/) at startup. Idempotent; dev/demo only.
   demo:
     seed-enabled: ${AEGIS_DEMO_SEED_ENABLED:false}
+  # Ingestion framework (E5). No feeds are wired yet — connectors register as IngestionSource beans
+  # and the scheduler discovers them. Disable with enabled=false; poll-interval is an ISO-8601 duration.
+  ingestion:
+    enabled: ${AEGIS_INGESTION_ENABLED:true}
+    poll-interval: ${AEGIS_INGESTION_POLL_INTERVAL:PT15M}
+    retry:
+      max-attempts: 3
+      initial-delay: PT1S
+      multiplier: 2.0
+      max-delay: PT30S
 
 springdoc:
   swagger-ui:
