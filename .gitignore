@@ -23,7 +23,7 @@ ARCHITECTURE.*
 BUILD_PLAN.*
 PROJECT_PLAN.*
 VISION.*
-AGENTS.*
+/AGENTS.md
 
 # Python (ai-service)
 __pycache__/

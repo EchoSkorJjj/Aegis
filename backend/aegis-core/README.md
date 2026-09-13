@@ -6,9 +6,10 @@ advisory ingestion, matching, scoring, and the execution of approved actions. Th
 See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../../BUILD_PLAN.md), and
 [`docs/adr/0001-aegis-core-language.md`](../../docs/adr/0001-aegis-core-language.md).
 
-> **Status: scaffold.** Runnable skeleton — Spring Boot app, resource-server security, the `core`
-> schema, the module seams, and the AI port (interfaces + DTOs + a wired-but-unimplemented HTTP
-> client). No domain logic yet; that lands feature by feature (BUILD_PLAN step 1 onward).
+> **Status:** the Spring Boot wiring, security, module seams, and AI port are in place. The inventory
+> module persists its core entities and direct relationships, exposes authenticated CRUD APIs, and
+> answers impact graph queries (component/vendor → impacted services + owners, including transitive
+> component dependents); later ingestion, matching, scoring, and action workflows remain planned.
 
 ## Modules (a modular monolith, split by seams later)
 
@@ -59,4 +60,30 @@ mvn spring-boot:run     # run locally (needs Postgres on :5432 and identity-serv
 ```
 
 In Docker Compose it builds and starts alongside identity-service and the ai-service. API docs at
-`http://localhost:8082/swagger-ui.html` once endpoints exist.
+`http://localhost:8082/swagger-ui.html`.
+
+## Inventory API
+
+Inventory endpoints are rooted at `/api/inventory`. Paginated entity collections and direct
+relationship collections default to name/ID ascending order. `SERVICE_OWNER`, `ANALYST`, and
+`COMPLIANCE_ADMIN` may read inventory; `ANALYST` and `COMPLIANCE_ADMIN` may create, update, delete,
+link, and unlink it. `ADMIN` remains a platform user-management role, not an Aegis domain role.
+
+The map supports multiple owners per business service. Deleting an inventory entity cascades only
+its relationship rows; the related services, components, vendors, and owners remain intact. The
+component dependency API stores direct edges only; transitive reachability is resolved at query
+time by the impact endpoints below.
+
+### Impact graph queries
+
+- `GET /api/inventory/components/{componentId}/impact` — every business service that uses the
+  component, directly or transitively (i.e. the service uses some other component that depends on
+  it, at any depth), each with its owners. Each entry reports `direct` (true only when the service
+  uses the queried component itself) and `viaComponent` (the component the service actually
+  depends on directly).
+- `GET /api/inventory/vendors/{vendorId}/impact` — every business service that uses the vendor
+  directly, with its owners. Vendors have no dependency graph of their own, so this is a direct
+  join, not a traversal.
+
+Both require the same read role as the rest of the inventory API (`SERVICE_OWNER`, `ANALYST`,
+`COMPLIANCE_ADMIN`) and 404 when the component/vendor does not exist.
