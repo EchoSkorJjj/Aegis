@@ -1,27 +1,21 @@
 package com.aegis.core.inventory;
 
-import com.aegis.core.inventory.domain.BusinessCriticality;
-import com.aegis.core.inventory.domain.BusinessService;
-import com.aegis.core.inventory.domain.Owner;
-import com.aegis.core.inventory.domain.SoftwareComponent;
-import com.aegis.core.inventory.domain.ThirdPartyVendor;
-import com.aegis.core.support.AbstractIntegrationTest;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.MediaType;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
-import org.springframework.test.web.servlet.MvcResult;
-
 import java.util.List;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static org.hamcrest.Matchers.hasSize;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.hasSize;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
+import org.springframework.security.core.authority.FactorGrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import org.springframework.test.web.servlet.MvcResult;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -30,6 +24,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.aegis.core.inventory.domain.BusinessCriticality;
+import com.aegis.core.inventory.domain.BusinessService;
+import com.aegis.core.inventory.domain.Owner;
+import com.aegis.core.inventory.domain.SoftwareComponent;
+import com.aegis.core.inventory.domain.ThirdPartyVendor;
+import com.aegis.core.support.AbstractIntegrationTest;
 
 class InventoryApiIntegrationTest extends AbstractIntegrationTest {
 
@@ -52,9 +53,11 @@ class InventoryApiIntegrationTest extends AbstractIntegrationTest {
 
         assertThat(jwtAuthenticationConverter.convert(jwt).getAuthorities())
                 .extracting(authority -> authority.getAuthority())
+                // A JWT (resource-server) authentication is a "bearer" factor, so Spring Security 7
+                // attaches FactorGrantedAuthority.BEARER_AUTHORITY ("FACTOR_BEARER") to the mapped roles.
                 .containsExactlyInAnyOrder(
                         "ROLE_USER", "ROLE_ADMIN", "ROLE_SERVICE_OWNER", "ROLE_ANALYST",
-                        "ROLE_COMPLIANCE_ADMIN");
+                        "ROLE_COMPLIANCE_ADMIN", FactorGrantedAuthority.BEARER_AUTHORITY);
     }
 
     @Test
