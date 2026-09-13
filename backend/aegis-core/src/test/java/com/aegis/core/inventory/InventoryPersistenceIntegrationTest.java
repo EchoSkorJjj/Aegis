@@ -1,5 +1,13 @@
 package com.aegis.core.inventory;
 
+import java.time.Instant;
+import java.util.UUID;
+
+import jakarta.persistence.Entity;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityManagerFactory;
+import jakarta.persistence.Table;
+
 import com.aegis.core.common.ApiExceptions;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
@@ -7,10 +15,6 @@ import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
 import com.aegis.core.support.AbstractIntegrationTest;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.EntityManagerFactory;
-import jakarta.persistence.Table;
 import org.hibernate.Hibernate;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,9 +23,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
-
-import java.time.Instant;
-import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

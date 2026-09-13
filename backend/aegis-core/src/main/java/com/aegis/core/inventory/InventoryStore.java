@@ -1,18 +1,18 @@
 package com.aegis.core.inventory;
 
-import com.aegis.core.inventory.domain.BusinessService;
-import com.aegis.core.inventory.domain.Owner;
-import com.aegis.core.inventory.domain.SoftwareComponent;
-import com.aegis.core.inventory.domain.ThirdPartyVendor;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+
+import com.aegis.core.inventory.domain.BusinessService;
+import com.aegis.core.inventory.domain.Owner;
+import com.aegis.core.inventory.domain.SoftwareComponent;
+import com.aegis.core.inventory.domain.ThirdPartyVendor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 /** Persistence port used by inventory application logic. */
 public interface InventoryStore {

@@ -1,5 +1,9 @@
 package com.usermgmt.identity.auth.account;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.UUID;
+
 import com.usermgmt.identity.audit.AuditEventType;
 import com.usermgmt.identity.audit.AuditService;
 import com.usermgmt.identity.auth.RefreshTokenRepository;
@@ -13,10 +17,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.time.Duration;
-import java.time.Instant;
-import java.util.UUID;
 
 /** Email-verification and password-reset flows using single-use, hashed, time-limited tokens. */
 @Service

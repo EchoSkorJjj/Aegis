@@ -1,14 +1,14 @@
 package com.usermgmt.identity.auth.mfa;
 
+import java.time.Instant;
+import java.util.UUID;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-
-import java.time.Instant;
-import java.util.UUID;
 
 /**
  * A pending two-factor login: after the password succeeds, a one-time code is emailed and this row

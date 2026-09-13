@@ -1,13 +1,13 @@
 package com.usermgmt.identity.user;
 
+import java.util.UUID;
+
 import com.usermgmt.identity.support.AbstractIntegrationTest;
 import com.usermgmt.identity.support.CapturingEmailSender;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
-
-import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;

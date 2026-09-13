@@ -1,5 +1,9 @@
 package com.aegis.core.inventory.persistence;
 
+import java.util.Collection;
+import java.util.List;
+import java.util.UUID;
+
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.SoftwareComponent;
@@ -9,10 +13,6 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-
-import java.util.Collection;
-import java.util.List;
-import java.util.UUID;
 
 interface BusinessServiceJpaRepository extends JpaRepository<BusinessService, UUID> {
     boolean existsByNameIgnoreCase(String name);

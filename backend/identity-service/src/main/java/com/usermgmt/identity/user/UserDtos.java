@@ -1,12 +1,12 @@
 package com.usermgmt.identity.user;
 
-import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotEmpty;
-
 import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
+
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 
 public final class UserDtos {
 

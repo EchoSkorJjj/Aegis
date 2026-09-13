@@ -1,5 +1,7 @@
 package com.usermgmt.identity.audit;
 
+import java.time.Instant;
+
 import com.usermgmt.identity.audit.AuditDtos.AuditEventResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import org.springframework.data.domain.Page;
@@ -12,8 +14,6 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.time.Instant;
 
 /**
  * Read-only, admin-only view of the security audit trail. Supports filtering by event type,

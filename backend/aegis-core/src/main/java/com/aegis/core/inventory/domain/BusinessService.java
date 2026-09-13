@@ -1,13 +1,14 @@
 package com.aegis.core.inventory.domain;
 
+import java.util.UUID;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
-import org.hibernate.annotations.NaturalId;
 
-import java.util.UUID;
+import org.hibernate.annotations.NaturalId;
 
 @Entity
 @Table(name = "business_services")

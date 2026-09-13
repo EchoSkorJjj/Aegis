@@ -7,9 +7,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import com.usermgmt.identity.audit.AuditEventType;
 import com.usermgmt.identity.audit.AuditService;
 import com.usermgmt.identity.auth.mfa.MfaSettings;
@@ -36,6 +33,8 @@ import com.webauthn4j.data.attestation.authenticator.AttestedCredentialData;
 import com.webauthn4j.data.client.challenge.Challenge;
 import com.webauthn4j.data.client.challenge.DefaultChallenge;
 import com.webauthn4j.util.Base64UrlUtil;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Self-service passkey (WebAuthn) registration and management. {@link #beginRegistration} issues

@@ -1,5 +1,7 @@
 package com.usermgmt.identity.bootstrap;
 
+import java.util.UUID;
+
 import com.usermgmt.identity.user.Role;
 import com.usermgmt.identity.user.User;
 import com.usermgmt.identity.user.UserRepository;
@@ -12,8 +14,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.UUID;
 
 /**
  * Seeds/promotes an initial ADMIN from configuration on startup — the standard pattern for a

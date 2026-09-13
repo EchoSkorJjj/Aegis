@@ -10,14 +10,6 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import com.usermgmt.identity.audit.AuditEventType;
 import com.usermgmt.identity.audit.AuditOutcome;
 import com.usermgmt.identity.audit.AuditService;
@@ -31,6 +23,13 @@ import com.usermgmt.identity.common.ApiExceptions;
 import com.usermgmt.identity.user.Role;
 import com.usermgmt.identity.user.User;
 import com.usermgmt.identity.user.UserRepository;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class AuthService {
