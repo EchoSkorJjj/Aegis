@@ -5,8 +5,12 @@ import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.hamcrest.Matchers.hasSize;
+import com.aegis.core.inventory.domain.BusinessCriticality;
+import com.aegis.core.inventory.domain.BusinessService;
+import com.aegis.core.inventory.domain.Owner;
+import com.aegis.core.inventory.domain.SoftwareComponent;
+import com.aegis.core.inventory.domain.ThirdPartyVendor;
+import com.aegis.core.support.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
@@ -14,8 +18,11 @@ import org.springframework.security.core.authority.FactorGrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import org.springframework.test.web.servlet.MvcResult;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.hasSize;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -24,13 +31,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-
-import com.aegis.core.inventory.domain.BusinessCriticality;
-import com.aegis.core.inventory.domain.BusinessService;
-import com.aegis.core.inventory.domain.Owner;
-import com.aegis.core.inventory.domain.SoftwareComponent;
-import com.aegis.core.inventory.domain.ThirdPartyVendor;
-import com.aegis.core.support.AbstractIntegrationTest;
 
 class InventoryApiIntegrationTest extends AbstractIntegrationTest {
 

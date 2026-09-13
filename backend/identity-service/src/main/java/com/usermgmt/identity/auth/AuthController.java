@@ -1,5 +1,9 @@
 package com.usermgmt.identity.auth;
 
+import java.util.UUID;
+
+import jakarta.validation.Valid;
+
 import com.usermgmt.identity.auth.AuthDtos.AcceptInviteRequest;
 import com.usermgmt.identity.auth.AuthDtos.AuthConfigResponse;
 import com.usermgmt.identity.auth.AuthDtos.ChangePasswordRequest;
@@ -21,7 +25,6 @@ import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.AssertionOptionsRequ
 import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.RequestOptionsResponse;
 import com.usermgmt.identity.user.UserDtos.UserResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
-import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -33,8 +36,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.UUID;
 
 @RestController
 @RequestMapping("/auth")

@@ -1,11 +1,11 @@
 package com.usermgmt.identity.support;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 import com.usermgmt.identity.auth.email.EmailSender;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
-
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Test {@link EmailSender} (marked {@link Primary} so it replaces the logging one) that captures

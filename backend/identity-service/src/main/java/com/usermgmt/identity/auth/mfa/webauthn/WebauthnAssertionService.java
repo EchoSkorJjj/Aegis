@@ -6,9 +6,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import com.usermgmt.identity.auth.mfa.LoginChallenge;
 import com.usermgmt.identity.auth.mfa.LoginChallengeRepository;
 import com.usermgmt.identity.auth.mfa.MfaMethod;
@@ -18,18 +15,20 @@ import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.CredentialDescriptor
 import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.RequestOptionsResponse;
 import com.usermgmt.identity.common.ApiExceptions;
 import com.webauthn4j.WebAuthnManager;
+import com.webauthn4j.converter.AttestedCredentialDataConverter;
 import com.webauthn4j.credential.CredentialRecord;
 import com.webauthn4j.credential.CredentialRecordImpl;
-import com.webauthn4j.converter.AttestedCredentialDataConverter;
 import com.webauthn4j.data.AuthenticationData;
 import com.webauthn4j.data.AuthenticationParameters;
 import com.webauthn4j.data.AuthenticationRequest;
 import com.webauthn4j.data.attestation.authenticator.AttestedCredentialData;
 import com.webauthn4j.data.attestation.statement.NoneAttestationStatement;
-import com.webauthn4j.data.extension.authenticator.AuthenticationExtensionsAuthenticatorOutputs;
 import com.webauthn4j.data.client.challenge.Challenge;
 import com.webauthn4j.data.client.challenge.DefaultChallenge;
+import com.webauthn4j.data.extension.authenticator.AuthenticationExtensionsAuthenticatorOutputs;
 import com.webauthn4j.util.Base64UrlUtil;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * The WebAuthn / passkey assertion (login) ceremony. {@link #options} returns request options for a

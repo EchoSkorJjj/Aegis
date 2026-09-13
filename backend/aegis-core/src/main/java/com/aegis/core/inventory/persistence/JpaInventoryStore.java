@@ -1,15 +1,5 @@
 package com.aegis.core.inventory.persistence;
 
-import com.aegis.core.inventory.InventoryStore;
-import com.aegis.core.inventory.InventoryStore.ServiceComponentLink;
-import com.aegis.core.inventory.domain.BusinessService;
-import com.aegis.core.inventory.domain.Owner;
-import com.aegis.core.inventory.domain.SoftwareComponent;
-import com.aegis.core.inventory.domain.ThirdPartyVendor;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-import org.springframework.stereotype.Repository;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -21,6 +11,16 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import com.aegis.core.inventory.InventoryStore;
+import com.aegis.core.inventory.InventoryStore.ServiceComponentLink;
+import com.aegis.core.inventory.domain.BusinessService;
+import com.aegis.core.inventory.domain.Owner;
+import com.aegis.core.inventory.domain.SoftwareComponent;
+import com.aegis.core.inventory.domain.ThirdPartyVendor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Repository;
 
 /** JPA adapter for the inventory domain entities and explicit relationship records. */
 @Repository

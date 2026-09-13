@@ -1,8 +1,8 @@
 package com.usermgmt.identity.auth.mfa;
 
-import jakarta.validation.constraints.NotBlank;
-
 import java.util.List;
+
+import jakarta.validation.constraints.NotBlank;
 
 public final class MfaDtos {
 

@@ -1,5 +1,7 @@
 package com.usermgmt.identity.audit;
 
+import java.util.UUID;
+
 import com.usermgmt.identity.support.AbstractIntegrationTest;
 import com.usermgmt.identity.user.Role;
 import com.usermgmt.identity.user.User;
@@ -10,8 +12,6 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
-
-import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;

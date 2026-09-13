@@ -1,16 +1,17 @@
 package com.aegis.core.inventory.domain;
 
+import java.time.Instant;
+import java.util.Objects;
+import java.util.UUID;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Id;
 import jakarta.persistence.MappedSuperclass;
+
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.SourceType;
 import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.proxy.HibernateProxy;
-
-import java.time.Instant;
-import java.util.Objects;
-import java.util.UUID;
 
 /** Shared UUID identity and database-sourced audit timestamps for inventory entities. */
 @MappedSuperclass

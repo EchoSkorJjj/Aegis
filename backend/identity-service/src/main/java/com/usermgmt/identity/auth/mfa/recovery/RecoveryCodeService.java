@@ -1,14 +1,14 @@
 package com.usermgmt.identity.auth.mfa.recovery;
 
-import com.usermgmt.identity.common.Tokens;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+
+import com.usermgmt.identity.common.Tokens;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Single-use MFA backup codes. Codes are high-entropy and stored hashed (SHA-256 of the normalised
