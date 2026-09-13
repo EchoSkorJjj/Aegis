@@ -1,14 +1,14 @@
-name: backend-ci
+name: identity-service-ci
 
 on:
   push:
     paths:
       - "backend/identity-service/**"
-      - ".github/workflows/backend-ci.yml"
+      - ".github/workflows/identity-service-ci.yml"
   pull_request:
     paths:
       - "backend/identity-service/**"
-      - ".github/workflows/backend-ci.yml"
+      - ".github/workflows/identity-service-ci.yml"
 
 jobs:
   build-and-test:
