@@ -1,0 +1,38 @@
+{
+  "services": [
+    {
+      "name": "Payments API",
+      "criticality": "CRITICAL",
+      "owners": ["Payments Team", "Platform SRE"],
+      "vendors": ["Stripe", "Amazon Web Services"],
+      "sbom": "demo/sbom/payments-api.cdx.json"
+    },
+    {
+      "name": "Order Service",
+      "criticality": "HIGH",
+      "owners": ["Commerce Team"],
+      "vendors": ["Amazon Web Services"],
+      "sbom": "demo/sbom/order-service.cdx.json"
+    },
+    {
+      "name": "Customer Portal",
+      "criticality": "HIGH",
+      "owners": ["Web Platform Team"],
+      "vendors": ["Cloudflare", "Auth0"],
+      "sbom": "demo/sbom/customer-portal.cdx.json"
+    },
+    {
+      "name": "Internal Reporting",
+      "criticality": "LOW",
+      "owners": ["Data Team"],
+      "vendors": ["Snowflake"],
+      "sbom": "demo/sbom/internal-reporting.cdx.json"
+    },
+    {
+      "name": "Marketing Site",
+      "criticality": "MEDIUM",
+      "owners": ["Web Platform Team"],
+      "vendors": ["Cloudflare"]
+    }
+  ]
+}

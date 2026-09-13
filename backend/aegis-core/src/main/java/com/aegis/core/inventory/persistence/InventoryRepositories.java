@@ -2,6 +2,7 @@ package com.aegis.core.inventory.persistence;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.aegis.core.inventory.domain.BusinessService;
@@ -15,11 +16,14 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 interface BusinessServiceJpaRepository extends JpaRepository<BusinessService, UUID> {
+    Optional<BusinessService> findByNameIgnoreCase(String name);
     boolean existsByNameIgnoreCase(String name);
     boolean existsByNameIgnoreCaseAndIdNot(String name, UUID id);
 }
 
 interface SoftwareComponentJpaRepository extends JpaRepository<SoftwareComponent, UUID> {
+    Optional<SoftwareComponent> findByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCase(
+            String ecosystem, String name, String version);
     boolean existsByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCase(String ecosystem, String name, String version);
     boolean existsByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCaseAndIdNot(
             String ecosystem, String name, String version, UUID id);
@@ -34,6 +38,7 @@ interface SoftwareComponentJpaRepository extends JpaRepository<SoftwareComponent
 }
 
 interface ThirdPartyVendorJpaRepository extends JpaRepository<ThirdPartyVendor, UUID> {
+    Optional<ThirdPartyVendor> findByNameIgnoreCase(String name);
     boolean existsByNameIgnoreCase(String name);
     boolean existsByNameIgnoreCaseAndIdNot(String name, UUID id);
 
@@ -43,6 +48,7 @@ interface ThirdPartyVendorJpaRepository extends JpaRepository<ThirdPartyVendor, 
 }
 
 interface OwnerJpaRepository extends JpaRepository<Owner, UUID> {
+    Optional<Owner> findByNameIgnoreCase(String name);
     boolean existsByNameIgnoreCase(String name);
     boolean existsByNameIgnoreCaseAndIdNot(String name, UUID id);
 

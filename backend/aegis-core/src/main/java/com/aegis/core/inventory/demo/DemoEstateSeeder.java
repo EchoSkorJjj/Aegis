@@ -1,0 +1,91 @@
+package com.aegis.core.inventory.demo;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.util.List;
+
+import com.aegis.core.inventory.InventoryService;
+import com.aegis.core.inventory.InventoryStore;
+import com.aegis.core.inventory.domain.BusinessCriticality;
+import com.aegis.core.inventory.domain.BusinessService;
+import com.aegis.core.inventory.domain.Owner;
+import com.aegis.core.inventory.domain.ThirdPartyVendor;
+import com.aegis.core.inventory.sbom.CycloneDxBom;
+import com.aegis.core.inventory.sbom.SbomImportService;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
+
+/**
+ * Loads the fictional demo estate from {@code classpath:demo/} — services, owners, vendors, and each
+ * service's CycloneDX SBOM (through the real import path). Find-or-create throughout, so it is safe
+ * to run repeatedly and never duplicates or removes existing inventory.
+ */
+@Service
+public class DemoEstateSeeder {
+
+    public static final String ESTATE_RESOURCE = "demo/estate.json";
+
+    private final InventoryService inventory;
+    private final InventoryStore store;
+    private final SbomImportService sboms;
+    private final ObjectMapper mapper;
+
+    public DemoEstateSeeder(
+            InventoryService inventory, InventoryStore store, SbomImportService sboms, ObjectMapper mapper) {
+        this.inventory = inventory;
+        this.store = store;
+        this.sboms = sboms;
+        this.mapper = mapper;
+    }
+
+    @Transactional
+    public int seed() {
+        Estate estate = read(ESTATE_RESOURCE, Estate.class);
+        for (ServiceSpec spec : estate.services()) {
+            BusinessService service = store.findBusinessServiceByName(spec.name())
+                    .orElseGet(() -> inventory.createBusinessService(spec.name(), spec.criticality()));
+            for (String ownerName : spec.owners()) {
+                Owner owner = store.findOwnerByName(ownerName).orElseGet(() -> inventory.createOwner(ownerName));
+                if (!store.serviceOwnerExists(service.getId(), owner.getId())) {
+                    store.addServiceOwner(service.getId(), owner.getId());
+                }
+            }
+            for (String vendorName : spec.vendors()) {
+                ThirdPartyVendor vendor = store.findThirdPartyVendorByName(vendorName)
+                        .orElseGet(() -> inventory.createThirdPartyVendor(vendorName));
+                if (!store.serviceVendorExists(service.getId(), vendor.getId())) {
+                    store.addServiceVendor(service.getId(), vendor.getId());
+                }
+            }
+            if (spec.sbom() != null) {
+                sboms.importSbom(service.getId(), read(spec.sbom(), CycloneDxBom.class));
+            }
+        }
+        return estate.services().size();
+    }
+
+    private <T> T read(String resource, Class<T> type) {
+        try (InputStream in = new ClassPathResource(resource).getInputStream()) {
+            return mapper.readValue(in, type);
+        } catch (IOException ex) {
+            throw new UncheckedIOException("Cannot read demo estate resource " + resource, ex);
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Estate(List<ServiceSpec> services) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record ServiceSpec(
+            String name, BusinessCriticality criticality, List<String> owners, List<String> vendors, String sbom) {
+        public ServiceSpec {
+            owners = owners == null ? List.of() : owners;
+            vendors = vendors == null ? List.of() : vendors;
+        }
+    }
+}

@@ -1,0 +1,61 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:3e671687-395b-41f5-a30f-a58921a69b79",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-01-01T00:00:00Z",
+    "component": {
+      "bom-ref": "root",
+      "type": "application",
+      "name": "storefront-fixture",
+      "version": "1.0.0",
+      "purl": "pkg:npm/storefront-fixture@1.0.0"
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "web",
+      "type": "framework",
+      "name": "fixture-web-framework",
+      "version": "2.0.0",
+      "purl": "pkg:npm/fixture-web-framework@2.0.0",
+      "licenses": [{ "license": { "id": "MIT" } }]
+    },
+    {
+      "bom-ref": "http",
+      "type": "library",
+      "group": "@fixture",
+      "name": "http-client",
+      "version": "1.1.0",
+      "purl": "pkg:npm/%40fixture/http-client@1.1.0",
+      "components": [
+        {
+          "bom-ref": "redirects",
+          "type": "library",
+          "name": "fixture-redirects",
+          "version": "0.9.0",
+          "purl": "pkg:npm/fixture-redirects@0.9.0"
+        }
+      ]
+    },
+    {
+      "bom-ref": "logger",
+      "type": "library",
+      "name": "fixture-logger",
+      "purl": "pkg:npm/fixture-logger@3.0.0"
+    },
+    {
+      "bom-ref": "os",
+      "type": "operating-system",
+      "name": "fixture-os-without-version"
+    }
+  ],
+  "dependencies": [
+    { "ref": "root", "dependsOn": ["web", "logger"] },
+    { "ref": "web", "dependsOn": ["http"] },
+    { "ref": "http", "dependsOn": ["redirects", "http", "never-declared"] },
+    { "ref": "logger", "dependsOn": [] },
+    { "ref": "os", "dependsOn": ["logger"] }
+  ]
+}

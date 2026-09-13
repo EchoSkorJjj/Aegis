@@ -79,6 +79,37 @@ class GraphQueryApiIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void componentImpactReportsDiamondsOnceAndTerminatesOnCycles() throws Exception {
+        String suffix = UUID.randomUUID().toString();
+        BusinessService service = inventory.createBusinessService("Diamond " + suffix, BusinessCriticality.MEDIUM);
+        SoftwareComponent base = inventory.createSoftwareComponent("npm", "base-" + suffix, "1.0");
+        SoftwareComponent left = inventory.createSoftwareComponent("npm", "left-" + suffix, "1.0");
+        SoftwareComponent right = inventory.createSoftwareComponent("npm", "right-" + suffix, "1.0");
+        SoftwareComponent top = inventory.createSoftwareComponent("npm", "top-" + suffix, "1.0");
+        SoftwareComponent loopA = inventory.createSoftwareComponent("npm", "loop-a-" + suffix, "1.0");
+        SoftwareComponent loopB = inventory.createSoftwareComponent("npm", "loop-b-" + suffix, "1.0");
+
+        // Diamond: top -> left -> base and top -> right -> base.
+        inventory.addComponentDependency(left.getId(), base.getId());
+        inventory.addComponentDependency(right.getId(), base.getId());
+        inventory.addComponentDependency(top.getId(), left.getId());
+        inventory.addComponentDependency(top.getId(), right.getId());
+        // A cycle above the diamond: loopA <-> loopB, with loopA depending on top.
+        inventory.addComponentDependency(loopA.getId(), top.getId());
+        inventory.addComponentDependency(loopB.getId(), loopA.getId());
+        inventory.addComponentDependency(loopA.getId(), loopB.getId());
+        inventory.addServiceComponent(service.getId(), loopB.getId());
+
+        mvc.perform(get("/api/inventory/components/{id}/impact", base.getId()).with(role("ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.services.length()").value(1))
+                .andExpect(jsonPath("$.services[0].service.id").value(service.getId().toString()))
+                .andExpect(jsonPath("$.services[0].direct").value(false))
+                .andExpect(jsonPath("$.services[0].viaComponent.id").value(loopB.getId().toString()))
+                .andExpect(jsonPath("$.services[0].owners.length()").value(0));
+    }
+
+    @Test
     void vendorImpactListsServicesUsingTheVendorDirectlyWithOwners() throws Exception {
         String suffix = UUID.randomUUID().toString();
         BusinessService checkout = inventory.createBusinessService("Checkout " + suffix, BusinessCriticality.HIGH);

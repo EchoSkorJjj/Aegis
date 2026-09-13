@@ -43,6 +43,9 @@ aegis:
   ai:
     base-url: ${AI_SERVICE_URI:http://localhost:8083}
     service-token: ${AI_SERVICE_TOKEN:dev-internal-token-change-me}
+  # Opt-in: load the fictional demo estate (classpath:demo/) at startup. Idempotent; dev/demo only.
+  demo:
+    seed-enabled: ${AEGIS_DEMO_SEED_ENABLED:false}
 
 springdoc:
   swagger-ui:

@@ -1,0 +1,64 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "bom-ref": "customer-portal",
+      "type": "application",
+      "name": "@demo/customer-portal",
+      "version": "3.1.0",
+      "purl": "pkg:npm/%40demo/customer-portal@3.1.0"
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "next",
+      "type": "framework",
+      "name": "next",
+      "version": "12.0.7",
+      "purl": "pkg:npm/next@12.0.7"
+    },
+    {
+      "bom-ref": "react",
+      "type": "library",
+      "name": "react",
+      "version": "17.0.2",
+      "purl": "pkg:npm/react@17.0.2"
+    },
+    {
+      "bom-ref": "axios",
+      "type": "library",
+      "name": "axios",
+      "version": "0.21.1",
+      "purl": "pkg:npm/axios@0.21.1"
+    },
+    {
+      "bom-ref": "follow-redirects",
+      "type": "library",
+      "name": "follow-redirects",
+      "version": "1.14.7",
+      "purl": "pkg:npm/follow-redirects@1.14.7"
+    },
+    {
+      "bom-ref": "lodash",
+      "type": "library",
+      "name": "lodash",
+      "version": "4.17.20",
+      "purl": "pkg:npm/lodash@4.17.20"
+    },
+    {
+      "bom-ref": "ui-kit",
+      "type": "library",
+      "name": "@demo/ui-kit",
+      "version": "1.2.0",
+      "purl": "pkg:npm/%40demo/ui-kit@1.2.0"
+    }
+  ],
+  "dependencies": [
+    { "ref": "customer-portal", "dependsOn": ["next", "axios", "lodash", "ui-kit"] },
+    { "ref": "next", "dependsOn": ["react"] },
+    { "ref": "axios", "dependsOn": ["follow-redirects"] },
+    { "ref": "ui-kit", "dependsOn": ["react", "lodash"] }
+  ]
+}
