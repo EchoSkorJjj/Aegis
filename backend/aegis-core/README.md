@@ -9,7 +9,8 @@ See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../..
 > **Status:** the Spring Boot wiring, security, module seams, and AI port are in place. The inventory
 > module persists its core entities and direct relationships, exposes authenticated CRUD APIs, and
 > answers impact graph queries (component/vendor → impacted services + owners, including transitive
-> component dependents); later ingestion, matching, scoring, and action workflows remain planned.
+> component dependents); the ingestion framework (scheduled polling, dedup, raw-event store) is
+> scaffolded with no feeds wired yet, and matching, scoring, and action workflows remain planned.
 
 ## Modules (a modular monolith, split by seams later)
 
@@ -51,6 +52,8 @@ domain. See `ARCHITECTURE.md` for the topology.
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | SPA origins allowed in dev |
 | `ZIPKIN_ENDPOINT` | `http://localhost:9411/api/v2/spans` | Trace collector |
 | `AEGIS_DEMO_SEED_ENABLED` | `false` | Load the demo estate at startup (dev/demo only) |
+| `AEGIS_INGESTION_ENABLED` | `true` | Run the feed scheduler (no feeds are wired yet) |
+| `AEGIS_INGESTION_POLL_INTERVAL` | `PT15M` | Feed poll cadence (ISO-8601 duration) |
 
 ## Build & test
 
@@ -112,3 +115,18 @@ PyPI) — lives in `src/main/resources/demo/`. Set `AEGIS_DEMO_SEED_ENABLED=true
 to load it at startup through the SBOM import; seeding is idempotent. Try the impact of
 `org.apache.logging.log4j:log4j-core 2.14.1`: Order Service uses it directly, Payments API reaches it
 through three hops.
+
+## Ingestion
+
+Scheduled polling of external feeds into an append-only, de-duplicated **raw-event store**
+(`raw_events`), before any normalisation. The framework is in place; the feed connectors and the
+normalisation of raw events into `Change`/`Signal` records are later stories, so no feeds ship yet.
+
+- **Seam** — a feed is an `IngestionSource` bean (`sourceId()` + `poll()`). `IngestionScheduler`
+  discovers every such bean and polls it on `aegis.ingestion.poll-interval` (ISO-8601, default 15m),
+  applying retry/backoff and isolating one feed's failure from the others. Add a connector by
+  implementing `IngestionSource` as a `@Component` — nothing else is required.
+- **Dedup** — `RawEventStore.saveIfNew` keys on `sourceId:externalId` (or `sourceId:sha256(payload)`
+  when a feed has no id), enforced by a unique index, so overlapping re-polls are safe.
+- **Retry/backoff** — each poll is retried with bounded exponential backoff (`aegis.ingestion.retry.*`).
+- Disable the scheduler with `AEGIS_INGESTION_ENABLED=false`.
