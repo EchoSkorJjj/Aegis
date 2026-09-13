@@ -1,7 +1,10 @@
 package com.aegis.core.inventory;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.function.Function;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.EntityManager;
@@ -19,7 +22,9 @@ import org.hibernate.Hibernate;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -63,7 +68,7 @@ class InventoryPersistenceIntegrationTest extends AbstractIntegrationTest {
         ThirdPartyVendor vendor = inventory.createThirdPartyVendor("Acme " + suffix);
         Owner owner = inventory.createOwner("Platform " + suffix);
 
-        for (var value : java.util.List.of(service, component, vendor, owner)) {
+        for (var value : List.of(service, component, vendor, owner)) {
             assertThat(value.getId()).isNotNull();
             assertThat(value.getCreatedAt()).isNotNull();
             assertThat(value.getUpdatedAt()).isNotNull();
@@ -82,10 +87,11 @@ class InventoryPersistenceIntegrationTest extends AbstractIntegrationTest {
                 "select criticality from core.business_services where id = ?",
                 String.class, service.getId())).isEqualTo("CRITICAL");
 
-        assertThat(inventory.listBusinessServices(PAGE).getContent()).contains(service);
-        assertThat(inventory.listSoftwareComponents(PAGE).getContent()).contains(component);
-        assertThat(inventory.listThirdPartyVendors(PAGE).getContent()).contains(vendor);
-        assertThat(inventory.listOwners(PAGE).getContent()).contains(owner);
+        // Other test classes share this database, so the new rows may not be on the first page.
+        assertThat(allPages(inventory::listBusinessServices)).contains(service);
+        assertThat(allPages(inventory::listSoftwareComponents)).contains(component);
+        assertThat(allPages(inventory::listThirdPartyVendors)).contains(vendor);
+        assertThat(allPages(inventory::listOwners)).contains(owner);
 
         Instant previousUpdatedAt = service.getUpdatedAt();
         BusinessService updated = inventory.updateBusinessService(
@@ -210,6 +216,18 @@ class InventoryPersistenceIntegrationTest extends AbstractIntegrationTest {
         assertThat(edges).isZero();
         assertThatThrownBy(() -> inventory.getBusinessService(service.getId()))
                 .isInstanceOf(ApiExceptions.NotFound.class);
+    }
+
+    private static <T> List<T> allPages(Function<Pageable, Page<T>> query) {
+        List<T> all = new ArrayList<>();
+        Pageable pageable = PAGE;
+        Page<T> page;
+        do {
+            page = query.apply(pageable);
+            all.addAll(page.getContent());
+            pageable = page.nextPageable();
+        } while (page.hasNext());
+        return all;
     }
 
     private void assertJpaEntity(Class<?> type, String tableName) {
