@@ -1,6 +1,7 @@
 package com.aegis.core.inventory.persistence;
 
 import com.aegis.core.inventory.InventoryStore;
+import com.aegis.core.inventory.InventoryStore.ServiceComponentLink;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.SoftwareComponent;
@@ -9,8 +10,17 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /** JPA adapter for the inventory domain entities and explicit relationship records. */
 @Repository
@@ -249,5 +259,55 @@ public class JpaInventoryStore implements InventoryStore {
     @Override
     public Page<SoftwareComponent> findComponentDependencies(UUID componentId, Pageable pageable) {
         return components.findDependencies(componentId, pageable);
+    }
+
+    @Override
+    public Set<UUID> findComponentIdsDependingOn(Collection<UUID> dependencyIds) {
+        return componentDependencies.findByDependencyIdIn(dependencyIds).stream()
+                .map(ComponentDependencyEntity::getComponentId)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    @Override
+    public List<ServiceComponentLink> findServiceComponentLinks(Collection<UUID> componentIds) {
+        return serviceComponents.findByComponentIdIn(componentIds).stream()
+                .map(link -> new ServiceComponentLink(link.getBusinessServiceId(), link.getComponentId()))
+                .toList();
+    }
+
+    @Override
+    public Map<UUID, BusinessService> findBusinessServicesByIds(Collection<UUID> ids) {
+        return services.findAllById(ids).stream()
+                .collect(Collectors.toMap(BusinessService::getId, Function.identity()));
+    }
+
+    @Override
+    public Map<UUID, SoftwareComponent> findSoftwareComponentsByIds(Collection<UUID> ids) {
+        return components.findAllById(ids).stream()
+                .collect(Collectors.toMap(SoftwareComponent::getId, Function.identity()));
+    }
+
+    @Override
+    public Map<UUID, List<Owner>> findOwnersForServices(Collection<UUID> serviceIds) {
+        List<ServiceOwnerEntity> links = serviceOwners.findByBusinessServiceIdIn(serviceIds);
+        Map<UUID, Owner> ownerById = owners.findAllById(links.stream()
+                        .map(ServiceOwnerEntity::getOwnerId)
+                        .collect(Collectors.toCollection(LinkedHashSet::new)))
+                .stream()
+                .collect(Collectors.toMap(Owner::getId, Function.identity()));
+
+        Map<UUID, List<Owner>> ownersByService = new LinkedHashMap<>();
+        for (ServiceOwnerEntity link : links) {
+            ownersByService.computeIfAbsent(link.getBusinessServiceId(), key -> new ArrayList<>())
+                    .add(ownerById.get(link.getOwnerId()));
+        }
+        return ownersByService;
+    }
+
+    @Override
+    public List<UUID> findServiceIdsForVendor(UUID vendorId) {
+        return serviceVendors.findByVendorId(vendorId).stream()
+                .map(ServiceVendorEntity::getBusinessServiceId)
+                .toList();
     }
 }

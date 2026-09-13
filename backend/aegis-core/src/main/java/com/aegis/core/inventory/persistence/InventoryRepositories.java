@@ -10,6 +10,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.UUID;
 
 interface BusinessServiceJpaRepository extends JpaRepository<BusinessService, UUID> {
@@ -50,13 +52,18 @@ interface OwnerJpaRepository extends JpaRepository<Owner, UUID> {
 }
 
 interface ServiceComponentJpaRepository extends JpaRepository<ServiceComponentEntity, ServiceComponentEntity.Key> {
+    List<ServiceComponentEntity> findByComponentIdIn(Collection<UUID> componentIds);
 }
 
 interface ServiceVendorJpaRepository extends JpaRepository<ServiceVendorEntity, ServiceVendorEntity.Key> {
+    List<ServiceVendorEntity> findByVendorId(UUID vendorId);
 }
 
 interface ServiceOwnerJpaRepository extends JpaRepository<ServiceOwnerEntity, ServiceOwnerEntity.Key> {
+    List<ServiceOwnerEntity> findByBusinessServiceIdIn(Collection<UUID> businessServiceIds);
 }
 
 interface ComponentDependencyJpaRepository extends JpaRepository<ComponentDependencyEntity, ComponentDependencyEntity.Key> {
+    /** Direct dependents: components whose {@code dependencyId} is one of the given components. */
+    List<ComponentDependencyEntity> findByDependencyIdIn(Collection<UUID> dependencyIds);
 }

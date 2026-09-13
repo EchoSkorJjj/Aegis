@@ -7,8 +7,9 @@ See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../..
 [`docs/adr/0001-aegis-core-language.md`](../../docs/adr/0001-aegis-core-language.md).
 
 > **Status:** the Spring Boot wiring, security, module seams, and AI port are in place. The inventory
-> module persists its core entities and direct relationships and exposes authenticated CRUD APIs;
-> later ingestion, transitive graph queries, matching, scoring, and action workflows remain planned.
+> module persists its core entities and direct relationships, exposes authenticated CRUD APIs, and
+> answers impact graph queries (component/vendor → impacted services + owners, including transitive
+> component dependents); later ingestion, matching, scoring, and action workflows remain planned.
 
 ## Modules (a modular monolith, split by seams later)
 
@@ -70,5 +71,19 @@ link, and unlink it. `ADMIN` remains a platform user-management role, not an Aeg
 
 The map supports multiple owners per business service. Deleting an inventory entity cascades only
 its relationship rows; the related services, components, vendors, and owners remain intact. The
-component dependency API stores direct edges only. Transitive traversal and impacted-service graph
-queries are intentionally deferred to the later E4 graph-query story.
+component dependency API stores direct edges only; transitive reachability is resolved at query
+time by the impact endpoints below.
+
+### Impact graph queries
+
+- `GET /api/inventory/components/{componentId}/impact` — every business service that uses the
+  component, directly or transitively (i.e. the service uses some other component that depends on
+  it, at any depth), each with its owners. Each entry reports `direct` (true only when the service
+  uses the queried component itself) and `viaComponent` (the component the service actually
+  depends on directly).
+- `GET /api/inventory/vendors/{vendorId}/impact` — every business service that uses the vendor
+  directly, with its owners. Vendors have no dependency graph of their own, so this is a direct
+  join, not a traversal.
+
+Both require the same read role as the rest of the inventory API (`SERVICE_OWNER`, `ANALYST`,
+`COMPLIANCE_ADMIN`) and 404 when the component/vendor does not exist.

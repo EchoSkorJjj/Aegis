@@ -30,6 +30,14 @@ class ServiceComponentEntity {
         this.componentId = componentId;
     }
 
+    UUID getBusinessServiceId() {
+        return businessServiceId;
+    }
+
+    UUID getComponentId() {
+        return componentId;
+    }
+
     static final class Key implements Serializable {
         private UUID businessServiceId;
         private UUID componentId;
@@ -70,6 +78,14 @@ class ServiceVendorEntity {
         this.vendorId = vendorId;
     }
 
+    UUID getBusinessServiceId() {
+        return businessServiceId;
+    }
+
+    UUID getVendorId() {
+        return vendorId;
+    }
+
     static final class Key implements Serializable {
         private UUID businessServiceId;
         private UUID vendorId;
@@ -97,6 +113,14 @@ class ServiceOwnerEntity {
         this.ownerId = ownerId;
     }
 
+    UUID getBusinessServiceId() {
+        return businessServiceId;
+    }
+
+    UUID getOwnerId() {
+        return ownerId;
+    }
+
     static final class Key implements Serializable {
         private UUID businessServiceId;
         private UUID ownerId;
@@ -122,6 +146,14 @@ class ComponentDependencyEntity {
     ComponentDependencyEntity(UUID componentId, UUID dependencyId) {
         this.componentId = componentId;
         this.dependencyId = dependencyId;
+    }
+
+    UUID getComponentId() {
+        return componentId;
+    }
+
+    UUID getDependencyId() {
+        return dependencyId;
     }
 
     static final class Key implements Serializable {

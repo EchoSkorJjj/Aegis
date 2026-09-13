@@ -7,7 +7,11 @@ import com.aegis.core.inventory.domain.ThirdPartyVendor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /** Persistence port used by inventory application logic. */
@@ -56,4 +60,22 @@ public interface InventoryStore {
     void addComponentDependency(UUID componentId, UUID dependencyId);
     boolean removeComponentDependency(UUID componentId, UUID dependencyId);
     Page<SoftwareComponent> findComponentDependencies(UUID componentId, Pageable pageable);
+
+    /** A service's direct edge to a component it uses — the traversal unit for component impact. */
+    record ServiceComponentLink(UUID serviceId, UUID componentId) {
+    }
+
+    /** Components with a direct dependency edge onto any of {@code dependencyIds} (one BFS level). */
+    Set<UUID> findComponentIdsDependingOn(Collection<UUID> dependencyIds);
+
+    /** Every service→component edge for services that use any of {@code componentIds} directly. */
+    List<ServiceComponentLink> findServiceComponentLinks(Collection<UUID> componentIds);
+
+    Map<UUID, BusinessService> findBusinessServicesByIds(Collection<UUID> ids);
+    Map<UUID, SoftwareComponent> findSoftwareComponentsByIds(Collection<UUID> ids);
+
+    /** Owners of each service in {@code serviceIds}, keyed by service id. */
+    Map<UUID, List<Owner>> findOwnersForServices(Collection<UUID> serviceIds);
+
+    List<UUID> findServiceIdsForVendor(UUID vendorId);
 }

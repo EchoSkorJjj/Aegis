@@ -10,6 +10,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public final class InventoryDtos {
@@ -61,5 +62,27 @@ public final class InventoryDtos {
             return new OwnerResponse(
                     value.getId(), value.getName(), value.getCreatedAt(), value.getUpdatedAt());
         }
+    }
+
+    /** A service impacted through a direct relationship only (e.g. via a vendor). */
+    public record ImpactedServiceResponse(BusinessServiceResponse service, List<OwnerResponse> owners) {
+    }
+
+    /**
+     * A service impacted by a component, direct or transitive. {@code viaComponent} is the
+     * component the service actually depends on directly; {@code direct} is true only when that
+     * is the queried component itself, false when it was reached through a dependency chain.
+     */
+    public record ComponentImpactedServiceResponse(
+            BusinessServiceResponse service, List<OwnerResponse> owners, boolean direct,
+            SoftwareComponentResponse viaComponent) {
+    }
+
+    public record ComponentImpactResponse(
+            SoftwareComponentResponse component, List<ComponentImpactedServiceResponse> services) {
+    }
+
+    public record VendorImpactResponse(
+            ThirdPartyVendorResponse vendor, List<ImpactedServiceResponse> services) {
     }
 }

@@ -2,11 +2,13 @@ package com.aegis.core.inventory;
 
 import com.aegis.core.inventory.InventoryDtos.BusinessServiceRequest;
 import com.aegis.core.inventory.InventoryDtos.BusinessServiceResponse;
+import com.aegis.core.inventory.InventoryDtos.ComponentImpactResponse;
 import com.aegis.core.inventory.InventoryDtos.NamedInventoryRequest;
 import com.aegis.core.inventory.InventoryDtos.OwnerResponse;
 import com.aegis.core.inventory.InventoryDtos.SoftwareComponentRequest;
 import com.aegis.core.inventory.InventoryDtos.SoftwareComponentResponse;
 import com.aegis.core.inventory.InventoryDtos.ThirdPartyVendorResponse;
+import com.aegis.core.inventory.InventoryDtos.VendorImpactResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
@@ -305,6 +307,21 @@ public class InventoryController {
             @PathVariable UUID componentId, @PathVariable UUID dependencyId) {
         inventory.removeComponentDependency(componentId, dependencyId);
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/components/{componentId}/impact")
+    @PreAuthorize(InventoryRoles.READ)
+    @Operation(summary = "Get services and owners impacted by a component, "
+            + "including services reached through transitive dependencies")
+    public ComponentImpactResponse getComponentImpact(@PathVariable UUID componentId) {
+        return inventory.getComponentImpact(componentId);
+    }
+
+    @GetMapping("/vendors/{vendorId}/impact")
+    @PreAuthorize(InventoryRoles.READ)
+    @Operation(summary = "Get services and owners impacted by a vendor")
+    public VendorImpactResponse getVendorImpact(@PathVariable UUID vendorId) {
+        return inventory.getVendorImpact(vendorId);
     }
 
     private static ResponseEntity<Void> relationshipCreated(String path) {
