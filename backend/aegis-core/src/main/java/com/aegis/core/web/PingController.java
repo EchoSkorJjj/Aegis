@@ -1,6 +1,11 @@
 package com.aegis.core.web;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import com.aegis.core.common.ApiExceptions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -8,9 +13,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
-
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 /**
  * Temporary connectivity endpoints under {@code /api} — both require a valid JWT (enforced at the
@@ -27,6 +29,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api")
 public class PingController {
+
+    private static final Logger log = LoggerFactory.getLogger(PingController.class);
 
     private final RestClient aiRestClient;
 
@@ -56,8 +60,10 @@ public class PingController {
             body.put("aiService", upstream);
             return body;
         } catch (RestClientException ex) {
-            // ai-service unreachable, or rejected our service token.
-            throw new ApiExceptions.UpstreamUnavailable("ai-service call failed: " + ex.getMessage());
+            // ai-service unreachable, or rejected our service token. Log the detail server-side;
+            // never leak upstream internals (URLs, error messages) to the caller.
+            log.warn("ai-service call to /v1/ping failed", ex);
+            throw new ApiExceptions.UpstreamUnavailable("ai-service is unavailable");
         }
     }
 }

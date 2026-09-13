@@ -4,6 +4,11 @@ server:
 spring:
   application:
     name: aegis-core
+  # Pagination: cap client-supplied page sizes so a large ?size= can't exhaust memory or the DB.
+  data:
+    web:
+      pageable:
+        max-page-size: 100
   # One PostgreSQL instance shared with identity-service; this service owns the `core` schema
   # (identity-service uses `public`). Plain relational store — RAG/pgvector lives in the ai-service.
   datasource:
