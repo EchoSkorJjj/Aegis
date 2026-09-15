@@ -31,7 +31,7 @@ class AdminInviteIntegrationTest extends AbstractIntegrationTest {
         User admin = new User(UUID.randomUUID(), "inviter@example.com",
                 passwordEncoder.encode("password123"), "Inviter");
         admin.getRoles().add(Role.USER);
-        admin.getRoles().add(Role.ADMIN);
+        admin.getRoles().add(Role.PLATFORM_ADMIN);
         users.save(admin);
         String adminToken = login("inviter@example.com", "password123");
 

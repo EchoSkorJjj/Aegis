@@ -42,6 +42,10 @@ identity:
   # where admins provision accounts. Exposed to the SPA via GET /auth/config.
   registration:
     enabled: ${REGISTRATION_ENABLED:true}
+  # Self-serve organization creation (ADR 0003): when on, a registration that includes an
+  # organization name creates the org and makes the registrant its owner (ORG_ADMIN).
+  org-signup:
+    enabled: ${ORG_SIGNUP_ENABLED:true}
   # Per-IP token-bucket throttle on the /auth/* endpoints (brute-force / abuse protection).
   rate-limit:
     enabled: ${RATE_LIMIT_ENABLED:true}
@@ -88,7 +92,7 @@ identity:
   mail:
     from: ${IDENTITY_MAIL_FROM:no-reply@identity.local}
   # Optional initial admin, seeded on startup ONLY when admin-email is set (opt-in; no default admin).
-  # Idempotent: creates the user if missing, grants ADMIN if not already held.
+  # Idempotent: creates the user if missing, grants PLATFORM_ADMIN if not already held.
   bootstrap:
     admin-email: ${IDENTITY_BOOTSTRAP_ADMIN_EMAIL:}
     admin-password: ${IDENTITY_BOOTSTRAP_ADMIN_PASSWORD:}

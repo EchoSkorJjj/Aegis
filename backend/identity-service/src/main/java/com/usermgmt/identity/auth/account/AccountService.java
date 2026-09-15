@@ -2,7 +2,9 @@ package com.usermgmt.identity.auth.account;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import com.usermgmt.identity.audit.AuditEventType;
 import com.usermgmt.identity.audit.AuditService;
@@ -10,6 +12,9 @@ import com.usermgmt.identity.auth.RefreshTokenRepository;
 import com.usermgmt.identity.auth.email.EmailSender;
 import com.usermgmt.identity.common.ApiExceptions;
 import com.usermgmt.identity.common.Tokens;
+import com.usermgmt.identity.org.MembershipStatus;
+import com.usermgmt.identity.org.OrganizationMember;
+import com.usermgmt.identity.org.OrganizationMemberRepository;
 import com.usermgmt.identity.user.Role;
 import com.usermgmt.identity.user.User;
 import com.usermgmt.identity.user.UserRepository;
@@ -28,6 +33,7 @@ public class AccountService {
     private final EmailSender emailSender;
     private final PasswordEncoder passwordEncoder;
     private final AuditService audit;
+    private final OrganizationMemberRepository members;
     private final Duration verificationTtl;
     private final Duration resetTtl;
     private final Duration inviteTtl;
@@ -38,6 +44,7 @@ public class AccountService {
                           EmailSender emailSender,
                           PasswordEncoder passwordEncoder,
                           AuditService audit,
+                          OrganizationMemberRepository members,
                           @Value("${identity.tokens.email-verification-hours:24}") long verificationHours,
                           @Value("${identity.tokens.password-reset-minutes:30}") long resetMinutes,
                           @Value("${identity.tokens.invite-hours:72}") long inviteHours) {
@@ -47,6 +54,7 @@ public class AccountService {
         this.emailSender = emailSender;
         this.passwordEncoder = passwordEncoder;
         this.audit = audit;
+        this.members = members;
         this.verificationTtl = Duration.ofHours(verificationHours);
         this.resetTtl = Duration.ofMinutes(resetMinutes);
         this.inviteTtl = Duration.ofHours(inviteHours);
@@ -97,20 +105,46 @@ public class AccountService {
     }
 
     /**
-     * Admin-provisioned account: creates the user with an unusable random password and emails a
-     * single-use link to set their own. The real password is chosen via {@link #acceptInvite}.
+     * Invites a user into an organization (ADR 0001, Jira-style). An <em>existing</em> account is added
+     * as an ACTIVE member immediately (no email, no new identity); a <em>new</em> email creates an
+     * identity with an unusable password + an INVITED membership and emails a set-password link (the
+     * password is chosen via {@link #acceptInvite}, which also activates the membership). Adding someone
+     * who is already a member of the org is a 409.
      */
     @Transactional
-    public User inviteUser(String email, String displayName) {
+    public User inviteUser(String email, String displayName, UUID orgId, Set<Role> roles) {
         String normalized = email.trim().toLowerCase();
-        if (users.existsByEmail(normalized)) {
-            throw new ApiExceptions.Conflict("Email already registered");
+        Set<Role> orgRoles = (roles == null) ? Set.of()
+                : roles.stream().filter(r -> !r.isPlatformScoped()).collect(Collectors.toSet());
+
+        User existing = users.findByEmail(normalized).orElse(null);
+        if (existing != null) {
+            // Existing identity: add them to the org — they can already sign in, so no email/new account.
+            if (orgId == null) {
+                throw new ApiExceptions.Conflict("Email already registered");
+            }
+            if (members.existsByOrgIdAndUserId(orgId, existing.getId())) {
+                throw new ApiExceptions.Conflict("Already a member of this organization");
+            }
+            OrganizationMember membership = new OrganizationMember(UUID.randomUUID(), orgId, existing.getId());
+            membership.setRoles(orgRoles); // status defaults to ACTIVE
+            members.save(membership);
+            audit.event(AuditEventType.USER_INVITED).target(existing).detail("added to org " + orgId).log();
+            return existing;
         }
-        // A random hash no one holds — the account cannot be signed into until the invite is accepted.
+
+        // New identity: a random hash no one holds — cannot sign in until the invite is accepted.
         String unusablePassword = passwordEncoder.encode(Tokens.opaqueToken());
         User user = new User(UUID.randomUUID(), normalized, unusablePassword, displayName);
         user.getRoles().add(Role.USER);
-        User saved = users.saveAndFlush(user); // flush so the invite-token FK sees the new row
+        user.setLastActiveOrgId(orgId); // the org this invite lands them in (null for a platform-level invite)
+        User saved = users.saveAndFlush(user); // flush so the membership + invite-token FKs see the new row
+        if (orgId != null) {
+            OrganizationMember membership = new OrganizationMember(UUID.randomUUID(), orgId, saved.getId());
+            membership.setStatus(MembershipStatus.INVITED); // becomes ACTIVE when the invite is accepted
+            membership.setRoles(orgRoles);
+            members.save(membership);
+        }
         String raw = issueToken(saved.getId(), TokenType.INVITE, inviteTtl);
         emailSender.sendInvite(saved.getEmail(), raw);
         audit.event(AuditEventType.USER_INVITED).target(saved).detail("invite sent").log();
@@ -125,6 +159,12 @@ public class AccountService {
                 .orElseThrow(() -> new ApiExceptions.BadRequest("Invalid or expired token"));
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         user.setEmailVerified(true);
+        // Activate the membership(s) created for this invite (ADR 0001).
+        members.findByUserId(user.getId()).forEach(m -> {
+            if (m.getStatus() == MembershipStatus.INVITED) {
+                m.setStatus(MembershipStatus.ACTIVE);
+            }
+        });
         audit.event(AuditEventType.EMAIL_VERIFIED).actor(user).detail("via invite").log();
     }
 

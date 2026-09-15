@@ -11,7 +11,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Verifies the opt-in admin bootstrap: with the properties set, an ADMIN is seeded at startup.
+ * Verifies the opt-in admin bootstrap: with the properties set, a PLATFORM_ADMIN is seeded at startup.
  * (The other tests deliberately do NOT enable this path, proving it is off by default.)
  */
 @SpringBootTest(properties = {
@@ -27,7 +27,7 @@ class AdminBootstrapIntegrationTest extends AbstractIntegrationTest {
     @Test
     void bootstrapSeedsAdminOnStartup() {
         User admin = users.findByEmail("boot-admin@example.com").orElseThrow();
-        assertThat(admin.getRoles()).contains(Role.ADMIN);
+        assertThat(admin.getRoles()).contains(Role.PLATFORM_ADMIN);
         assertThat(admin.isEmailVerified()).isTrue();
     }
 }

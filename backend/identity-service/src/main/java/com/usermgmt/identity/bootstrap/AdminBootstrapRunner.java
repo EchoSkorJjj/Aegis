@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Seeds/promotes an initial ADMIN from configuration on startup — the standard pattern for a
+ * Seeds/promotes an initial PLATFORM_ADMIN from configuration on startup — the standard pattern for a
  * self-hosted identity service (cf. Keycloak {@code KEYCLOAK_ADMIN}, Grafana
  * {@code GF_SECURITY_ADMIN_*}, and Postgres' own {@code POSTGRES_USER}).
  *
@@ -24,7 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
  * <ul>
  *   <li><b>Opt-in</b> — the bean only exists when {@code identity.bootstrap.admin-email} is set,
  *       so there is never a default admin.</li>
- *   <li><b>Idempotent</b> — creates the user if missing, grants ADMIN if not already held,
+ *   <li><b>Idempotent</b> — creates the user if missing, grants PLATFORM_ADMIN if not already held,
  *       otherwise does nothing. Safe on every restart.</li>
  *   <li>The password is used <b>only</b> when creating a new user, is read from env/secret,
  *       and is never logged.</li>
@@ -69,17 +69,17 @@ public class AdminBootstrapRunner implements ApplicationRunner {
             admin = new User(UUID.randomUUID(), email, passwordEncoder.encode(adminPassword), "Administrator");
             admin.setEmailVerified(true);
             admin.getRoles().add(Role.USER);
-            admin.getRoles().add(Role.ADMIN);
+            admin.getRoles().add(Role.PLATFORM_ADMIN);
             users.save(admin);
-            log.info("Bootstrap: created ADMIN account {}", email);
+            log.info("Bootstrap: created PLATFORM_ADMIN account {}", email);
             return;
         }
 
-        if (admin.getRoles().add(Role.ADMIN)) {
+        if (admin.getRoles().add(Role.PLATFORM_ADMIN)) {
             users.save(admin);
-            log.info("Bootstrap: granted ADMIN to existing user {}", email);
+            log.info("Bootstrap: granted PLATFORM_ADMIN to existing user {}", email);
         } else {
-            log.debug("Bootstrap: {} already has ADMIN; nothing to do", email);
+            log.debug("Bootstrap: {} already has PLATFORM_ADMIN; nothing to do", email);
         }
     }
 }
