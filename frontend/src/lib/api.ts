@@ -2,10 +2,12 @@ import type {
   AcceptInviteInput,
   AuthConfig,
   ChangePasswordInput,
+  CreateOrgInput,
   ForgotPasswordInput,
   InviteUserInput,
   LoginInput,
   LoginResponse,
+  Membership,
   MfaChallenge,
   MfaStatus,
   Passkey,
@@ -150,6 +152,28 @@ export const authApi = {
   logoutAll() {
     return bffFetch<void>("/api/auth/logout-all", { method: "POST" });
   },
+  /** Switch the active organization (ADR 0001). The BFF re-issues + re-sets the session cookies. */
+  switchOrg(orgId: string) {
+    return bffFetch<void>("/api/auth/switch-org", {
+      method: "POST",
+      body: JSON.stringify({ orgId }),
+    });
+  },
+};
+
+/** The caller's organizations + self-serve org creation (workspace switcher). */
+export const orgApi = {
+  /** Every organization the caller belongs to, with their roles in each. */
+  list() {
+    return bffFetch<Membership[]>("/api/orgs");
+  },
+  /** Create an organization the caller will own (ORG_ADMIN). */
+  create(input: CreateOrgInput) {
+    return bffFetch<Membership>("/api/orgs", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
 };
 
 /** Authenticated self-service account actions (all proxied through the BFF). */
@@ -171,7 +195,7 @@ export const accountApi = {
   },
 };
 
-/** Admin user-management actions (proxied through the BFF; the backend enforces the ADMIN role). */
+/** Admin user-management actions (proxied through the BFF; the backend enforces org/platform admin roles). */
 export const adminApi = {
   inviteUser(input: InviteUserInput) {
     return bffFetch<UserProfile>("/api/admin/users", {

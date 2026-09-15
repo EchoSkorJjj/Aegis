@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Ban, CircleCheck, MoreHorizontal, ShieldCheck, ShieldOff, Trash2 } from "lucide-react";
+import { Ban, Check, CircleCheck, MoreHorizontal, ShieldCheck, ShieldOff, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -10,6 +10,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -24,7 +27,8 @@ import {
 } from "@/components/ui/table";
 import { InviteUserForm } from "@/components/admin/invite-user-form";
 import { useAuth } from "@/providers/auth-provider";
-import type { Page, UserProfile } from "@/lib/types";
+import { DOMAIN_ROLES } from "@/lib/roles";
+import type { Page, Role, UserProfile } from "@/lib/types";
 
 const PAGE_SIZE = 10;
 const DEFAULT_SORT = "createdAt,desc";
@@ -32,7 +36,11 @@ const COLUMN_COUNT = 6;
 
 export function AdminUsersTable() {
   const { user, isLoading: authLoading } = useAuth();
-  const isAdmin = !!user?.roles.includes("ADMIN");
+  const isAdmin = !!user?.roles.some((r) => r === "ORG_ADMIN" || r === "PLATFORM_ADMIN");
+  const isPlatformAdmin = !!user?.roles.includes("PLATFORM_ADMIN");
+  // Domain-role members may view the directory (read-only); admins additionally get row actions.
+  const canSeeMembers = !!user?.roles.some((r) => r !== "USER");
+  const columnCount = isAdmin ? COLUMN_COUNT : COLUMN_COUNT - 1;
 
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState(""); // debounced
@@ -56,7 +64,7 @@ export function AdminUsersTable() {
   }, [searchInput]);
 
   useEffect(() => {
-    if (authLoading || !isAdmin) return;
+    if (authLoading || !canSeeMembers) return;
 
     const controller = new AbortController();
     // A new search / filter / page refetches from the server; surface the loading state right away.
@@ -89,7 +97,8 @@ export function AdminUsersTable() {
       });
 
     return () => controller.abort();
-  }, [authLoading, isAdmin, search, from, to, page, sort, refreshKey]);
+    // user?.orgId: switching the active organization must refetch this org's members immediately.
+  }, [authLoading, canSeeMembers, user?.orgId, search, from, to, page, sort, refreshKey]);
 
   function toggleSort(field: string) {
     const [current, dir] = sort.split(",");
@@ -107,10 +116,10 @@ export function AdminUsersTable() {
 
   const refetch = () => setRefreshKey((k) => k + 1);
 
-  if (!authLoading && user && !isAdmin) {
+  if (!authLoading && user && !canSeeMembers) {
     return (
       <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-        You need administrator access to view this page.
+        You don&apos;t have access to view members.
       </div>
     );
   }
@@ -119,9 +128,11 @@ export function AdminUsersTable() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex justify-end">
-        <InviteUserForm onInvited={refetch} />
-      </div>
+      {isAdmin && (
+        <div className="flex justify-end">
+          <InviteUserForm onInvited={refetch} showRoles={!isPlatformAdmin} />
+        </div>
+      )}
       {/* Filters */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="w-full sm:max-w-xs">
@@ -185,16 +196,18 @@ export function AdminUsersTable() {
               <TableHead>
                 <SortButton label="Joined" field="createdAt" sort={sort} onSort={toggleSort} />
               </TableHead>
-              <TableHead className="w-10 text-right">
-                <span className="sr-only">Actions</span>
-              </TableHead>
+              {isAdmin && (
+                <TableHead className="w-10 text-right">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: COLUMN_COUNT }).map((__, j) => (
+                  {Array.from({ length: columnCount }).map((__, j) => (
                     <TableCell key={j}>
                       <Skeleton className="h-4 w-24" />
                     </TableCell>
@@ -203,13 +216,13 @@ export function AdminUsersTable() {
               ))
             ) : error === "forbidden" ? (
               <TableRow>
-                <TableCell colSpan={COLUMN_COUNT} className="py-10 text-center text-muted-foreground">
+                <TableCell colSpan={columnCount} className="py-10 text-center text-muted-foreground">
                   You are not authorized to view users.
                 </TableCell>
               </TableRow>
             ) : error ? (
               <TableRow>
-                <TableCell colSpan={COLUMN_COUNT} className="py-10 text-center text-muted-foreground">
+                <TableCell colSpan={columnCount} className="py-10 text-center text-muted-foreground">
                   Could not load users. Please try again.
                 </TableCell>
               </TableRow>
@@ -240,14 +253,21 @@ export function AdminUsersTable() {
                       day: "numeric",
                     })}
                   </TableCell>
-                  <TableCell className="text-right">
-                    <RowActions user={u} currentUserId={user?.id} onChanged={refetch} />
-                  </TableCell>
+                  {isAdmin && (
+                    <TableCell className="text-right">
+                      <RowActions
+                        user={u}
+                        currentUserId={user?.id}
+                        onChanged={refetch}
+                        callerIsPlatformAdmin={isPlatformAdmin}
+                      />
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={COLUMN_COUNT} className="py-10 text-center text-muted-foreground">
+                <TableCell colSpan={columnCount} className="py-10 text-center text-muted-foreground">
                   No users match these filters.
                 </TableCell>
               </TableRow>
@@ -294,14 +314,19 @@ function RowActions({
   user,
   currentUserId,
   onChanged,
+  callerIsPlatformAdmin,
 }: {
   user: UserProfile;
   currentUserId?: string;
   onChanged: () => void;
+  callerIsPlatformAdmin: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const isSelf = user.id === currentUserId;
-  const isAdminUser = user.roles.includes("ADMIN");
+  // The member's current org roles (everything but the USER baseline / platform roles). A role update
+  // always re-sends USER — the backend keeps it as the baseline and drops it from the org membership.
+  const orgRoles = user.roles.filter((r) => r !== "USER" && r !== "PLATFORM_ADMIN");
+  const isPlatformAdminUser = user.roles.includes("PLATFORM_ADMIN");
 
   async function run(request: Promise<Response>, successMessage: string) {
     setBusy(true);
@@ -344,48 +369,108 @@ function RowActions({
           </Button>
         }
       />
-      <DropdownMenuContent align="end" className="min-w-40">
-        <DropdownMenuItem
-          onClick={() =>
-            run(
-              fetch(`/api/admin/users/${user.id}`, {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ enabled: !user.enabled }),
-              }),
-              user.enabled ? "User disabled" : "User enabled",
-            )
-          }
-        >
-          {user.enabled ? <Ban /> : <CircleCheck />}
-          {user.enabled ? "Disable" : "Enable"}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() =>
-            run(
-              fetch(`/api/admin/users/${user.id}/roles`, {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ roles: isAdminUser ? ["USER"] : ["USER", "ADMIN"] }),
-              }),
-              isAdminUser ? "Admin role removed" : "Promoted to admin",
-            )
-          }
-        >
-          {isAdminUser ? <ShieldOff /> : <ShieldCheck />}
-          {isAdminUser ? "Remove admin" : "Make admin"}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          variant="destructive"
-          onClick={() => {
-            if (!window.confirm(`Delete ${user.email}? This cannot be undone.`)) return;
-            run(fetch(`/api/admin/users/${user.id}`, { method: "DELETE" }), "User deleted");
-          }}
-        >
-          <Trash2 />
-          Delete
-        </DropdownMenuItem>
+      <DropdownMenuContent align="end" className="min-w-44">
+        {callerIsPlatformAdmin ? (
+          // Platform admin: identity-level break-glass only — no org-role assignment (ADR 0001).
+          <>
+            <DropdownMenuItem
+              onClick={() =>
+                run(
+                  fetch(`/api/admin/users/${user.id}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ enabled: !user.enabled }),
+                  }),
+                  user.enabled ? "User disabled" : "User enabled",
+                )
+              }
+            >
+              {user.enabled ? <Ban /> : <CircleCheck />}
+              {user.enabled ? "Disable" : "Enable"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() =>
+                run(
+                  fetch(`/api/admin/users/${user.id}/roles`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      roles: isPlatformAdminUser ? ["USER"] : ["USER", "PLATFORM_ADMIN"],
+                    }),
+                  }),
+                  isPlatformAdminUser ? "Platform admin removed" : "Promoted to platform admin",
+                )
+              }
+            >
+              {isPlatformAdminUser ? <ShieldOff /> : <ShieldCheck />}
+              {isPlatformAdminUser ? "Remove platform admin" : "Make platform admin"}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => {
+                if (!window.confirm(`Permanently delete ${user.email}? This cannot be undone.`)) return;
+                run(fetch(`/api/admin/users/${user.id}`, { method: "DELETE" }), "User deleted");
+              }}
+            >
+              <Trash2 />
+              Delete user
+            </DropdownMenuItem>
+          </>
+        ) : (
+          // Org admin: manage the member's domain roles + remove them from the organization.
+          <>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <ShieldCheck />
+                Roles
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                {DOMAIN_ROLES.map(({ value, label }) => {
+                  const has = user.roles.includes(value);
+                  const next: Role[] = has
+                    ? orgRoles.filter((r) => r !== value)
+                    : [...orgRoles, value];
+                  return (
+                    <DropdownMenuItem
+                      key={value}
+                      onClick={() =>
+                        run(
+                          fetch(`/api/admin/users/${user.id}/roles`, {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ roles: ["USER", ...next] }),
+                          }),
+                          `${label} ${has ? "removed" : "assigned"}`,
+                        )
+                      }
+                    >
+                      {has ? <Check /> : <span className="size-4" />}
+                      {label}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => {
+                if (
+                  !window.confirm(`Remove ${user.email} from this organization? Their account is kept.`)
+                )
+                  return;
+                run(
+                  fetch(`/api/admin/users/${user.id}`, { method: "DELETE" }),
+                  "Removed from organization",
+                );
+              }}
+            >
+              <Trash2 />
+              Remove from organization
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -65,3 +65,46 @@ export async function signIn(page: Page, email: string, password: string): Promi
   await page.waitForURL(/\/dashboard/);
   await expect(page).toHaveURL(/\/dashboard/);
 }
+
+/** Registers a brand-new account through the sign-up form; ends on the login page. */
+export async function signUp(
+  page: Page,
+  { name, email, password }: { name: string; email: string; password: string },
+): Promise<void> {
+  await page.goto("/signup");
+  await page.getByLabel("Name").fill(name);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page).toHaveURL(/\/login/);
+}
+
+/**
+ * Fills the "Create organization" form — on the no-org screen or /organizations/new — and waits for
+ * the dashboard, which is where a successful create lands.
+ */
+export async function createOrg(page: Page, orgName: string): Promise<void> {
+  await page.getByLabel("Organization name").fill(orgName);
+  await page.getByRole("button", { name: "Create organization" }).click();
+  await expect(page.getByText(/your workspace content goes here/i)).toBeVisible();
+}
+
+/**
+ * Sign up → sign in (email OTP) → create an organization, leaving the caller signed in as that org's
+ * owner (ORG_ADMIN). The common setup for org-admin scenarios.
+ */
+export async function registerOrgAdmin(
+  page: Page,
+  {
+    name,
+    email,
+    password,
+    orgName,
+  }: { name: string; email: string; password: string; orgName: string },
+): Promise<void> {
+  await signUp(page, { name, email, password });
+  await signIn(page, email, password);
+  await expect(page.getByText(/create or join an organization/i)).toBeVisible();
+  await createOrg(page, orgName);
+}

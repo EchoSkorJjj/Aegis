@@ -7,6 +7,7 @@ import {
   BadgeCheck,
   Bell,
   Boxes,
+  Check,
   ChevronRight,
   ChevronsUpDown,
   FileText,
@@ -15,17 +16,21 @@ import {
   LayoutDashboard,
   LogOut,
   type LucideIcon,
+  Plus,
   Rss,
   Settings,
   ShieldAlert,
   ShieldCheck,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -97,8 +102,21 @@ const adminNav = [{ title: "Users", href: "/admin/users", icon: ShieldCheck }];
 export function AppSidebar() {
   const { isMobile, state, setOpen } = useSidebar();
   const pathname = usePathname();
-  const { user, logout } = useAuth();
-  const isAdmin = !!user?.roles.includes("ADMIN");
+  const { user, organizations, switchOrg, logout } = useAuth();
+  // Anyone with a role beyond the USER baseline can open the member directory (read-only for the
+  // domain roles, full management for admins). The Users page itself gates what each can do.
+  const canSeeMembers = !!user?.roles.some((r) => r !== "USER");
+
+  const activeOrgName =
+    organizations.find((org) => org.id === user?.orgId)?.name ?? "Workspace";
+  const switchTo = async (orgId: string) => {
+    if (orgId === user?.orgId) return;
+    try {
+      await switchOrg(orgId);
+    } catch {
+      toast.error("Could not switch organization");
+    }
+  };
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const isGroupActive = (group: NavGroup) =>
@@ -130,17 +148,47 @@ export function AppSidebar() {
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" render={<Link href="/dashboard" />}>
-              <span className="flex aspect-square size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                <Hexagon className="size-4" />
-              </span>
-              <span className="grid flex-1 text-left leading-tight">
-                <span className="truncate font-semibold">Aegis</span>
-                <span className="truncate text-xs text-muted-foreground">
-                  Workspace
-                </span>
-              </span>
-            </SidebarMenuButton>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <SidebarMenuButton
+                    size="lg"
+                    className="data-[popup-open]:bg-sidebar-accent data-[popup-open]:text-sidebar-accent-foreground"
+                  >
+                    <span className="flex aspect-square size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                      <Hexagon className="size-4" />
+                    </span>
+                    <span className="grid flex-1 text-left leading-tight">
+                      <span className="truncate font-semibold">{activeOrgName}</span>
+                      <span className="truncate text-xs text-muted-foreground">Aegis</span>
+                    </span>
+                    <ChevronsUpDown className="ml-auto size-4" />
+                  </SidebarMenuButton>
+                }
+              />
+              <DropdownMenuContent
+                className="w-(--anchor-width) min-w-56 rounded-lg"
+                side={isMobile ? "bottom" : "right"}
+                align="start"
+                sideOffset={4}
+              >
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Organizations</DropdownMenuLabel>
+                  {organizations.map((org) => (
+                    <DropdownMenuItem key={org.id} onClick={() => switchTo(org.id)}>
+                      <Hexagon className="size-4" />
+                      <span className="truncate">{org.name}</span>
+                      {org.id === user?.orgId && <Check className="ml-auto size-4" />}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem render={<Link href="/organizations/new" />}>
+                  <Plus className="size-4" />
+                  Create organization
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
@@ -198,9 +246,9 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {isAdmin && (
+        {canSeeMembers && (
           <SidebarGroup>
-            <SidebarGroupLabel>Admin</SidebarGroupLabel>
+            <SidebarGroupLabel>Organization</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {adminNav.map((item) => (
