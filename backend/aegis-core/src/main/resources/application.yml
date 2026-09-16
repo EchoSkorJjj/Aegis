@@ -46,8 +46,8 @@ aegis:
   # Opt-in: load the fictional demo estate (classpath:demo/) at startup. Idempotent; dev/demo only.
   demo:
     seed-enabled: ${AEGIS_DEMO_SEED_ENABLED:false}
-  # Ingestion framework (E5). No feeds are wired yet — connectors register as IngestionSource beans
-  # and the scheduler discovers them. Disable with enabled=false; poll-interval is an ISO-8601 duration.
+  # Ingestion framework (E5). Connectors register as IngestionSource beans and the scheduler
+  # discovers them. Disable with enabled=false; poll-interval is an ISO-8601 duration.
   ingestion:
     enabled: ${AEGIS_INGESTION_ENABLED:true}
     poll-interval: ${AEGIS_INGESTION_POLL_INTERVAL:PT15M}
@@ -56,6 +56,29 @@ aegis:
       initial-delay: PT1S
       multiplier: 2.0
       max-delay: PT30S
+    # NVD CVE API 2.0 connector. Off by default so the test suite and a plain local run never reach
+    # out to nvd.nist.gov; Docker Compose turns it on. The API key is optional — it raises NVD's rate
+    # limit from 5 to 50 requests per rolling 30s. Supply it through the environment, never here.
+    nvd:
+      enabled: ${AEGIS_INGESTION_NVD_ENABLED:false}
+      base-url: ${AEGIS_NVD_BASE_URL:https://services.nvd.nist.gov/rest/json/cves/2.0}
+      api-key: ${AEGIS_NVD_API_KEY:}
+      # How far back the first poll reaches, before a watermark exists. NVD caps a window at 120 days.
+      initial-window: ${AEGIS_NVD_INITIAL_WINDOW:P2D}
+      # Re-poll slightly before the watermark so an advisory revised mid-poll is never skipped.
+      overlap: PT10M
+      results-per-page: 1000
+      max-pages: 10
+      # NVD asks for >=6s between unauthenticated requests.
+      page-delay: PT6S
+      connect-timeout: PT5S
+      read-timeout: PT30S
+      # Feed content is untrusted: cap what a single CVE may push into the raw-event store. A CVE
+      # enumerating thousands of CPEs exceeds 1 MB, so this is deliberately well above the typical size.
+      max-payload-bytes: 5242880
+      # Cadence of the raw-event -> advisory drain, and how many events one drain handles.
+      normalize-interval: ${AEGIS_NVD_NORMALIZE_INTERVAL:PT1M}
+      normalize-batch-size: 200
 
 springdoc:
   swagger-ui:

@@ -9,8 +9,9 @@ See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../..
 > **Status:** the Spring Boot wiring, security, module seams, and AI port are in place. The inventory
 > module persists its core entities and direct relationships, exposes authenticated CRUD APIs, and
 > answers impact graph queries (component/vendor → impacted services + owners, including transitive
-> component dependents); the ingestion framework (scheduled polling, dedup, raw-event store) is
-> scaffolded with no feeds wired yet, and matching, scoring, and action workflows remain planned.
+> component dependents); the ingestion framework (scheduled polling, dedup, raw-event store) runs the
+> **NVD CVE connector**, which normalises CPE, CVSS, and affected product versions into advisories.
+> Matching, scoring, and action workflows remain planned.
 
 ## Modules (a modular monolith, split by seams later)
 
@@ -52,8 +53,13 @@ domain. See `ARCHITECTURE.md` for the topology.
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | SPA origins allowed in dev |
 | `ZIPKIN_ENDPOINT` | `http://localhost:9411/api/v2/spans` | Trace collector |
 | `AEGIS_DEMO_SEED_ENABLED` | `false` | Load the demo estate at startup (dev/demo only) |
-| `AEGIS_INGESTION_ENABLED` | `true` | Run the feed scheduler (no feeds are wired yet) |
+| `AEGIS_INGESTION_ENABLED` | `true` | Run the feed scheduler |
 | `AEGIS_INGESTION_POLL_INTERVAL` | `PT15M` | Feed poll cadence (ISO-8601 duration) |
+| `AEGIS_INGESTION_NVD_ENABLED` | `false` | Poll the NVD CVE API (Docker Compose sets `true`) |
+| `AEGIS_NVD_API_KEY` | *(empty)* | Optional NVD key: raises the rate limit from 5 to 50 req/30s |
+| `AEGIS_NVD_INITIAL_WINDOW` | `P2D` | How far back the very first poll reaches (NVD caps at 120 days) |
+| `AEGIS_NVD_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → advisory drain |
+| `AEGIS_NVD_BASE_URL` | NVD 2.0 API | Override the feed endpoint (used by tests and mirrors) |
 
 ## Build & test
 
@@ -119,8 +125,8 @@ through three hops.
 ## Ingestion
 
 Scheduled polling of external feeds into an append-only, de-duplicated **raw-event store**
-(`raw_events`), before any normalisation. The framework is in place; the feed connectors and the
-normalisation of raw events into `Change`/`Signal` records are later stories, so no feeds ship yet.
+(`raw_events`), before any normalisation. The **NVD connector** is the first feed; OSV, vendor
+status, and security news follow the same seam.
 
 - **Seam** — a feed is an `IngestionSource` bean (`sourceId()` + `poll()`). `IngestionScheduler`
   discovers every such bean and polls it on `aegis.ingestion.poll-interval` (ISO-8601, default 15m),
@@ -129,4 +135,66 @@ normalisation of raw events into `Change`/`Signal` records are later stories, so
 - **Dedup** — `RawEventStore.saveIfNew` keys on `sourceId:externalId` (or `sourceId:sha256(payload)`
   when a feed has no id), enforced by a unique index, so overlapping re-polls are safe.
 - **Retry/backoff** — each poll is retried with bounded exponential backoff (`aegis.ingestion.retry.*`).
+- **Normalisation** — a connector only captures payloads; a separate drain turns unprocessed raw
+  events into records and stamps `raw_events.processed_at`. Fetching and parsing therefore fail
+  independently: a parser bug never loses data already captured — fix it, clear `processed_at`, and
+  the events replay.
 - Disable the scheduler with `AEGIS_INGESTION_ENABLED=false`.
+
+> **Writing a connector?** Build it its own `RestClient` with explicit connect/read timeouts (see
+> `NvdApiClient`). Do **not** inject the application's `RestClient` bean — that one points at the
+> internal ai-service and carries its `X-Service-Token` as a default header, which would be sent to
+> the external feed. A connector without a read timeout can also pin the shared ingestion thread.
+
+### NVD connector (CVE API 2.0)
+
+Polls [NVD](https://nvd.nist.gov/developers/vulnerabilities) for recently modified CVEs and
+normalises each into an **advisory**: the primary CVSS metric plus the affected
+(vendor, product, version-range) tuples that matching will resolve against registered components.
+
+- **Windowed polling** — each poll asks for `lastModStartDate`..`lastModEndDate` only. The window
+  starts at the newest `occurred_at` stored for the feed (which the connector sets to the CVE's
+  `lastModified`) minus `overlap`, so the cursor lives in the store and a restart resumes from what
+  was actually persisted. Before anything is stored the window is `initial-window` wide; anything
+  wider than NVD's 120-day limit is clamped.
+- **Revisions** — NVD rescores and re-scopes CVEs in place, so the external id is
+  `<cve-id>@<lastModified>`. Each revision is a distinct raw event rather than a duplicate, the raw
+  store keeps the full revision history, and the advisory row is updated in place.
+- **CVSS** — the newest generation wins (v3.1 → v3.0 → v2), preferring NVD's `Primary` metric, so
+  scoring gets one comparable number. A CVE still awaiting analysis simply has none.
+- **CPE** — parsed escape-aware (`vendor\:name` keeps its literal colon); `*` and `-` mean "no
+  concrete value". A match with no concrete vendor and product can identify nothing and is dropped,
+  as are non-`vulnerable` matches and negated nodes. Version ranges win over a concrete CPE version
+  when a match carries both.
+- **Untrusted input** — payloads are size-capped (`max-payload-bytes`), every field is optional, a
+  single CVE's affected list is bounded, and nothing here is fed to an LLM. An unparseable payload is
+  logged and marked processed rather than blocking the queue; the raw row stays for inspection.
+- **Rate limits** — NVD allows 5 requests per rolling 30s unauthenticated, 50 with a key. Set
+  `AEGIS_NVD_API_KEY` (never commit one); `page-delay` keeps multi-page fetches inside the limit.
+
+Turn the feed off on its own with `AEGIS_INGESTION_NVD_ENABLED=false` — the rest of the scheduler
+keeps running. It is **off by default** so the test suite and a plain local run never reach out to
+nvd.nist.gov.
+
+### Advisories API
+
+- `GET /api/advisories` — normalised advisories, most recently revised first, each with its affected
+  products. Paged like the inventory collections.
+- `GET /api/advisories/{sourceId}/{externalId}` — one advisory, e.g. `/api/advisories/nvd/CVE-2021-44228`.
+
+Read-only: advisories are written by connectors, never by a user. Both need the same Aegis domain
+read roles as the inventory API (`SERVICE_OWNER`, `ANALYST`, `COMPLIANCE_ADMIN`).
+
+### Seeing it work
+
+`docker compose up` enables the connector with a demo cadence (first poll ~1 minute after startup
+over a one-day window, instead of the 15-minute/two-day defaults). Within about two minutes:
+
+```bash
+curl -s localhost:8080/api/advisories -H "Authorization: Bearer $TOKEN" | jq '.totalElements'
+curl -s localhost:8080/api/advisories/nvd/CVE-2021-44228 -H "Authorization: Bearer $TOKEN" | jq
+```
+
+`$TOKEN` is an access token for a user holding a domain role — sign in through the frontend, or hit
+`/auth/login` on the gateway. Progress is visible in `docker compose logs -f aegis-core` (`nvd: N
+event(s)`, then `nvd: normalised N advisory/advisories`).

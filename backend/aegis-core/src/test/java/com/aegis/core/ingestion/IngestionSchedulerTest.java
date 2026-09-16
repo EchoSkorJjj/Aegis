@@ -5,7 +5,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 
@@ -98,6 +100,22 @@ class IngestionSchedulerTest {
             }
             stored.add(key);
             return true;
+        }
+
+        // The scheduler only ever stores; normalisation and watermarks are exercised elsewhere.
+
+        @Override
+        public List<StoredRawEvent> findUnprocessed(String sourceId, int limit) {
+            return List.of();
+        }
+
+        @Override
+        public void markProcessed(UUID id) {
+        }
+
+        @Override
+        public Optional<Instant> latestOccurredAt(String sourceId) {
+            return Optional.empty();
         }
     }
 }
