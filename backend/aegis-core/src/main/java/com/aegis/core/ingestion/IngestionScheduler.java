@@ -26,11 +26,14 @@ class IngestionScheduler {
     private final List<IngestionSource> sources;
     private final RawEventStore store;
     private final IngestionRetry retry;
+    private final IngestionFeedMetrics metrics;
 
-    IngestionScheduler(List<IngestionSource> sources, RawEventStore store, IngestionRetry retry) {
+    IngestionScheduler(
+            List<IngestionSource> sources, RawEventStore store, IngestionRetry retry, IngestionFeedMetrics metrics) {
         this.sources = sources;
         this.store = store;
         this.retry = retry;
+        this.metrics = metrics;
     }
 
     @Scheduled(
@@ -70,10 +73,12 @@ class IngestionScheduler {
                 }
             }
             log.info("ingestion source '{}': {} new, {} duplicate(s)", sourceId, stored, duplicates);
+            metrics.recordPollSuccess(sourceId, stored, duplicates);
             return stored;
         } catch (Exception ex) {
             // Isolate the failure: log it and let the other sources (and the next cycle) proceed.
             log.error("ingestion source '{}' failed after retries: {}", sourceId, ex.toString());
+            metrics.recordPollFailure(sourceId);
             return 0;
         }
     }

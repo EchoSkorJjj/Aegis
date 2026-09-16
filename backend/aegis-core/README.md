@@ -12,8 +12,9 @@ See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../..
 > component dependents); the ingestion framework (scheduled polling, dedup, raw-event store) runs three
 > connectors — the **NVD CVE feed** (CPE, CVSS and affected versions → advisories), **vendor status
 > pages** (Statuspage/RSS → vendor incidents), and **security news** (RSS/Atom → articles with the CVE
-> identifiers they mention) — unified for reading through the **`change_signals`** view. Matching,
-> scoring, and action workflows remain planned.
+> identifiers they mention) — unified for reading through the **`change_signals`** view, with
+> per-feed health/counts/last-success exposed as Prometheus metrics. Matching, scoring, and action
+> workflows remain planned.
 
 ## Modules (a modular monolith, split by seams later)
 
@@ -41,7 +42,9 @@ domain. See `ARCHITECTURE.md` for the topology.
   Plain relational store (no pgvector — RAG belongs to the ai-service). Flyway manages the schema.
 - **Auth** — OAuth2 resource server; validates identity-service's RS256 JWTs via its JWKS
   (`IDENTITY_JWKS_URI`), maps the `roles` claim, and authorizes per route.
-- **Observability** — `/actuator/health|info|prometheus`, traces to Zipkin (propagated to the ai-service).
+- **Observability** — `/actuator/health|info|prometheus`, traces to Zipkin (propagated to the
+  ai-service), and per-ingestion-feed health/counts/last-success metrics (see "Ingestion feed
+  health" below and `ops/README.md`).
 
 ### Key environment variables
 
@@ -66,6 +69,7 @@ domain. See `ARCHITECTURE.md` for the topology.
 | `AEGIS_VENDOR_STATUS_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → vendor-incident drain |
 | `AEGIS_INGESTION_NEWS_ENABLED` | `false` | Poll security news feeds (Docker Compose sets `true`) |
 | `AEGIS_NEWS_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → news-item drain |
+| `AEGIS_INGESTION_HEALTH_STALE_AFTER` | `PT45M` | How long since a feed's last success before `aegis_ingestion_health` reports unhealthy |
 
 The vendor and news feed lists are YAML (`aegis.ingestion.vendor-status.vendors`,
 `aegis.ingestion.news.feeds`), not env vars — each entry needs several fields.
@@ -281,6 +285,26 @@ Each response carries a `signalType` of `VULNERABILITY`, `VENDOR_OUTAGE`, or `SE
 you which table it was projected from. Read-only and behind the same Aegis domain read roles as the
 per-source APIs above.
 
+### Ingestion feed health (metrics, CS203-47)
+
+Per-feed health, record counts, and last-success time — exposed as Micrometer metrics on the
+existing `/actuator/prometheus` endpoint (no new REST surface; nothing here needs a JWT, since
+`/actuator/prometheus` is already public — see `SecurityConfig`). `IngestionFeedMetrics` registers
+one series per `IngestionSource` bean (`nvd`, `vendor-status`, `security-news` today) at startup:
+
+- `aegis_ingestion_health{source_id}` — 1 (healthy) or 0. Unhealthy if the feed has never
+  succeeded, its most recent poll attempt failed, or it's been longer than
+  `aegis.ingestion.health.stale-after` (default 45m) since its last success.
+- `aegis_ingestion_last_success_timestamp_seconds{source_id}` — epoch seconds of the last
+  successful poll.
+- `aegis_ingestion_poll_total{source_id,outcome}` and `aegis_ingestion_poll_records_total
+  {source_id,result}` — poll attempts and raw events observed (`stored`/`duplicate`).
+- `aegis_ingestion_normalize_records_total{source_id,result}` — records normalised, dropped, or
+  deferred for retry.
+
+See [`ops/README.md`](../../ops/README.md) for the full PromQL cookbook (finding unhealthy feeds,
+staleness queries, per-feed throughput).
+
 ### Seeing it work
 
 `docker compose up` enables all three connectors with a demo cadence (first poll ~1 minute after
@@ -301,6 +325,11 @@ curl -s "localhost:8080/api/news?cve=CVE-2021-44228" -H "Authorization: Bearer $
 
 ```bash
 curl -s localhost:8080/api/change-signals -H "Authorization: Bearer $TOKEN" | jq '.content[] | {signalType, title}'
+```
+
+```bash
+# Per-feed health/last-success/record-count metrics — no auth needed, direct to aegis-core.
+curl -s localhost:8082/actuator/prometheus | grep ^aegis_ingestion
 ```
 
 `$TOKEN` is an access token for a user holding a domain role (`SERVICE_OWNER`, `ANALYST` or

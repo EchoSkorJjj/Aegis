@@ -12,7 +12,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * poll. Every value has a sensible default, so connectors added by later stories need no extra config.
  */
 @ConfigurationProperties("aegis.ingestion")
-public record IngestionProperties(Retry retry, int normalizeMaxAttempts) {
+public record IngestionProperties(Retry retry, int normalizeMaxAttempts, Health health) {
 
     public IngestionProperties {
         if (retry == null) {
@@ -21,6 +21,9 @@ public record IngestionProperties(Retry retry, int normalizeMaxAttempts) {
         // How many times a raw event may fail normalisation transiently before the drainer drops it.
         if (normalizeMaxAttempts < 1) {
             normalizeMaxAttempts = 5;
+        }
+        if (health == null) {
+            health = new Health(null);
         }
     }
 
@@ -43,6 +46,21 @@ public record IngestionProperties(Retry retry, int normalizeMaxAttempts) {
             }
             if (maxDelay == null) {
                 maxDelay = Duration.ofSeconds(30);
+            }
+        }
+    }
+
+    /**
+     * A feed's per-source health gauge ({@code aegis.ingestion.health}) is unhealthy once it's been
+     * this long since its last successful poll — set well above the poll interval (the default,
+     * three times the 15-minute production interval, tolerates a couple of missed/retried cycles
+     * before flagging a genuine problem) so it doesn't flap between polls under normal operation.
+     */
+    public record Health(Duration staleAfter) {
+
+        public Health {
+            if (staleAfter == null) {
+                staleAfter = Duration.ofMinutes(45);
             }
         }
     }

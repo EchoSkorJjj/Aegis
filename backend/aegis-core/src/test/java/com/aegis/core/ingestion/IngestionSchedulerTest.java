@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -17,10 +18,14 @@ class IngestionSchedulerTest {
 
     private final InMemoryRawEventStore store = new InMemoryRawEventStore();
     private final IngestionRetry retry = new IngestionRetry(new IngestionProperties(
-            new IngestionProperties.Retry(2, Duration.ZERO, 2.0, Duration.ZERO), 5));
+            new IngestionProperties.Retry(2, Duration.ZERO, 2.0, Duration.ZERO), 5, null));
+    private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
 
     private IngestionScheduler scheduler(IngestionSource... sources) {
-        return new IngestionScheduler(List.of(sources), store, retry);
+        List<IngestionSource> sourceList = List.of(sources);
+        IngestionFeedMetrics metrics = new IngestionFeedMetrics(
+                registry, sourceList, new IngestionProperties(null, 5, null));
+        return new IngestionScheduler(sourceList, store, retry, metrics);
     }
 
     private static RawEvent event(String externalId) {
@@ -60,6 +65,39 @@ class IngestionSchedulerTest {
 
         assertThat(scheduler.runOnce()).isEqualTo(1);
         assertThat(store.stored).containsExactly("nvd|CVE-9");
+    }
+
+    @Test
+    void aSuccessfulPollRecordsHealthAndLastSuccessMetrics() {
+        IngestionScheduler scheduler = scheduler(
+                new FakeSource("nvd", List.of(event("CVE-1"), event("CVE-2"))));
+
+        scheduler.runOnce();
+
+        assertThat(registry.get("aegis.ingestion.health").tag("source_id", "nvd").gauge().value())
+                .isEqualTo(1);
+        assertThat(registry.get("aegis.ingestion.last.success.timestamp.seconds")
+                        .tag("source_id", "nvd").gauge().value())
+                .isNotNaN();
+        assertThat(registry.get("aegis.ingestion.poll")
+                .tag("source_id", "nvd").tag("outcome", "success").counter().count())
+                .isEqualTo(1);
+        assertThat(registry.get("aegis.ingestion.poll.records")
+                .tag("source_id", "nvd").tag("result", "stored").counter().count())
+                .isEqualTo(2);
+    }
+
+    @Test
+    void aFailingPollRecordsAnUnhealthyFeedAndAFailureCount() {
+        IngestionScheduler scheduler = scheduler(new FailingSource("broken"));
+
+        scheduler.runOnce();
+
+        assertThat(registry.get("aegis.ingestion.health").tag("source_id", "broken").gauge().value())
+                .isZero();
+        assertThat(registry.get("aegis.ingestion.poll")
+                .tag("source_id", "broken").tag("outcome", "failure").counter().count())
+                .isEqualTo(1);
     }
 
     private record FakeSource(String id, List<RawEvent> events) implements IngestionSource {

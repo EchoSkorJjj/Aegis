@@ -40,10 +40,12 @@ public class RawEventDrainer {
 
     private final RawEventStore rawEvents;
     private final int maxAttempts;
+    private final IngestionFeedMetrics metrics;
 
-    public RawEventDrainer(RawEventStore rawEvents, IngestionProperties properties) {
+    public RawEventDrainer(RawEventStore rawEvents, IngestionProperties properties, IngestionFeedMetrics metrics) {
         this.rawEvents = rawEvents;
         this.maxAttempts = properties.normalizeMaxAttempts();
+        this.metrics = metrics;
     }
 
     /** What a feed does with one captured payload. Throwing marks the event for retry or drops it. */
@@ -109,6 +111,7 @@ public class RawEventDrainer {
             log.info("{}: normalised {} record(s), {} dropped, {} deferred for retry",
                     sourceId, handled, dropped, deferred);
         }
+        metrics.recordNormalizeOutcome(sourceId, handled, dropped, deferred);
         return handled;
     }
 }
