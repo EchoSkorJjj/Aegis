@@ -6,8 +6,10 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import com.usermgmt.identity.audit.AuditEventType;
@@ -20,6 +22,8 @@ import com.usermgmt.identity.auth.mfa.webauthn.WebauthnAssertionService;
 import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.AssertionFinishRequest;
 import com.usermgmt.identity.auth.mfa.webauthn.WebauthnDtos.RequestOptionsResponse;
 import com.usermgmt.identity.common.ApiExceptions;
+import com.usermgmt.identity.org.OrganizationMember;
+import com.usermgmt.identity.org.OrganizationMemberRepository;
 import com.usermgmt.identity.user.Role;
 import com.usermgmt.identity.user.User;
 import com.usermgmt.identity.user.UserRepository;
@@ -36,6 +40,7 @@ public class AuthService {
 
     private final UserRepository users;
     private final RefreshTokenRepository refreshTokens;
+    private final OrganizationMemberRepository members;
     private final PasswordEncoder passwordEncoder;
     private final JwtEncoder jwtEncoder;
     private final LoginAttemptService loginAttempts;
@@ -52,6 +57,7 @@ public class AuthService {
 
     public AuthService(UserRepository users,
                        RefreshTokenRepository refreshTokens,
+                       OrganizationMemberRepository members,
                        PasswordEncoder passwordEncoder,
                        JwtEncoder jwtEncoder,
                        LoginAttemptService loginAttempts,
@@ -66,6 +72,7 @@ public class AuthService {
                        @Value("${identity.jwt.refresh-ttl-seconds:604800}") long refreshTtlSeconds) {
         this.users = users;
         this.refreshTokens = refreshTokens;
+        this.members = members;
         this.passwordEncoder = passwordEncoder;
         this.jwtEncoder = jwtEncoder;
         this.loginAttempts = loginAttempts;
@@ -89,6 +96,8 @@ public class AuthService {
         if (users.existsByEmail(normalized)) {
             throw new ApiExceptions.Conflict("Email already registered");
         }
+        // Registration creates the identity only (ADR 0001). Organizations are created separately via
+        // POST /orgs (or an admin invite) — a fresh account is org-less until it creates or joins one.
         User user = new User(UUID.randomUUID(), normalized, passwordEncoder.encode(rawPassword), displayName);
         user.getRoles().add(Role.USER);
         User saved = users.saveAndFlush(user); // flush so the verification-token FK sees the new user row
@@ -122,7 +131,7 @@ public class AuthService {
         List<MfaMethod> methods = mfa.availableFor(user);
         if (methods.isEmpty()) {
             audit.event(AuditEventType.LOGIN_SUCCEEDED).actor(user).log();
-            return AuthDtos.LoginResult.authenticated(issueTokens(user));
+            return AuthDtos.LoginResult.authenticated(issueTokens(user, resolveActiveOrg(user)));
         }
         MfaService.Challenge challenge = mfa.start(user, methods);
         audit.event(AuditEventType.MFA_CHALLENGE_ISSUED).actor(user).log();
@@ -138,7 +147,7 @@ public class AuthService {
         }
         User user = users.findById(userId)
                 .orElseThrow(() -> new ApiExceptions.Unauthorized("Invalid or expired code"));
-        AuthDtos.TokenResponse tokens = issueTokens(user);
+        AuthDtos.TokenResponse tokens = issueTokens(user, resolveActiveOrg(user));
         audit.event(AuditEventType.MFA_SUCCEEDED).actor(user).log();
         return tokens;
     }
@@ -163,7 +172,7 @@ public class AuthService {
         }
         User user = users.findById(userId)
                 .orElseThrow(() -> new ApiExceptions.Unauthorized("Passkey verification failed"));
-        AuthDtos.TokenResponse tokens = issueTokens(user);
+        AuthDtos.TokenResponse tokens = issueTokens(user, resolveActiveOrg(user));
         audit.event(AuditEventType.MFA_SUCCEEDED).actor(user).log();
         return tokens;
     }
@@ -202,6 +211,21 @@ public class AuthService {
         audit.event(AuditEventType.PASSWORD_CHANGED).actor(user).log();
     }
 
+    /**
+     * Switches the caller's active organization (ADR 0001): verifies membership, remembers it as the
+     * new default, and re-issues an access token scoped to that org. 403 if the caller is not a member.
+     */
+    @Transactional
+    public AuthDtos.TokenResponse switchOrg(UUID userId, UUID orgId) {
+        User user = users.findById(userId)
+                .orElseThrow(() -> new ApiExceptions.Unauthorized("Not authenticated"));
+        if (!members.existsByOrgIdAndUserId(orgId, userId)) {
+            throw new ApiExceptions.Forbidden("Not a member of that organization");
+        }
+        user.setLastActiveOrgId(orgId);
+        return issueTokens(user, orgId);
+    }
+
     /** Rotating refresh: the presented token is single-use and revoked on exchange. */
     @Transactional
     public AuthDtos.TokenResponse refresh(String rawRefreshToken) {
@@ -213,32 +237,63 @@ public class AuthService {
         stored.setRevoked(true);
         User user = users.findById(stored.getUserId())
                 .orElseThrow(() -> new ApiExceptions.Unauthorized("Invalid refresh token"));
-        AuthDtos.TokenResponse tokens = issueTokens(user);
+        AuthDtos.TokenResponse tokens = issueTokens(user, resolveActiveOrg(user));
         if (recordTokenRefresh) {
             audit.event(AuditEventType.TOKEN_REFRESHED).actor(user).log();
         }
         return tokens;
     }
 
-    private AuthDtos.TokenResponse issueTokens(User user) {
+    /**
+     * Issues an access + refresh pair scoped to one active org (ADR 0001): the {@code roles} claim is
+     * the user's platform-scoped roles plus the roles of their membership in {@code activeOrgId}, and
+     * the {@code org} claim is {@code activeOrgId} (omitted when null — an org-less user). Downstream
+     * (gateway, aegis-core) keeps reading {@code org} + {@code roles}, unaware of memberships.
+     */
+    private AuthDtos.TokenResponse issueTokens(User user, UUID activeOrgId) {
         Instant now = Instant.now();
-        List<String> roleNames = user.getRoles().stream().map(Enum::name).toList();
 
-        JwtClaimsSet claims = JwtClaimsSet.builder()
+        Set<Role> effectiveRoles = new HashSet<>();
+        user.getRoles().stream().filter(Role::isPlatformScoped).forEach(effectiveRoles::add);
+        if (activeOrgId != null) {
+            members.findByOrgIdAndUserId(activeOrgId, user.getId())
+                    .ifPresent(membership -> effectiveRoles.addAll(membership.getRoles()));
+        }
+        List<String> roleNames = effectiveRoles.stream().map(Enum::name).sorted().toList();
+
+        JwtClaimsSet.Builder claims = JwtClaimsSet.builder()
                 .issuer(issuer)
                 .issuedAt(now)
                 .expiresAt(now.plus(accessTtl))
                 .subject(user.getId().toString())
                 .claim("email", user.getEmail())
-                .claim("roles", roleNames)
-                .build();
-        String accessToken = jwtEncoder.encode(JwtEncoderParameters.from(claims)).getTokenValue();
+                .claim("roles", roleNames);
+        if (activeOrgId != null) {
+            claims.claim("org", activeOrgId.toString());
+        }
+        String accessToken =
+                jwtEncoder.encode(JwtEncoderParameters.from(claims.build())).getTokenValue();
 
         String rawRefresh = newOpaqueToken();
         refreshTokens.save(new RefreshToken(
                 UUID.randomUUID(), user.getId(), sha256(rawRefresh), now.plus(refreshTtl)));
 
         return new AuthDtos.TokenResponse(accessToken, rawRefresh, "Bearer", accessTtl.toSeconds());
+    }
+
+    /**
+     * The org a freshly issued token is scoped to: the remembered last-active org when the caller is
+     * still a member, else their first membership, else none (an org-less user).
+     */
+    private UUID resolveActiveOrg(User user) {
+        UUID last = user.getLastActiveOrgId();
+        if (last != null && members.existsByOrgIdAndUserId(last, user.getId())) {
+            return last;
+        }
+        return members.findByUserId(user.getId()).stream()
+                .findFirst()
+                .map(OrganizationMember::getOrgId)
+                .orElse(null);
     }
 
     private String newOpaqueToken() {

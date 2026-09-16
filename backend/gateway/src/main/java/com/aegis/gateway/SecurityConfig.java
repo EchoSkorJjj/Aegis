@@ -30,9 +30,11 @@ public class SecurityConfig {
                         // must pass through without a token.
                         .requestMatchers("/auth/**", "/oauth2/**").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info", "/actuator/prometheus").permitAll()
-                        // Coarse route rule: the admin area needs the ADMIN role. Everything else on
-                        // /api/** just needs a valid token; the service applies the owner-scoped rules.
-                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        // Coarse route rule: the platform-admin area needs PLATFORM_ADMIN (the
+                        // org-less operator; the retired ADMIN role migrated to it — ADR 0001).
+                        // Everything else on /api/** just needs a valid token; the service applies
+                        // the owner-scoped, org-scoped rules.
+                        .requestMatchers("/api/admin/**").hasRole("PLATFORM_ADMIN")
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth -> oauth

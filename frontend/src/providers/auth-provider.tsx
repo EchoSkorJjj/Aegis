@@ -10,17 +10,20 @@ import {
   useState,
 } from "react";
 
-import { authApi } from "@/lib/api";
+import { authApi, orgApi } from "@/lib/api";
 import { assertPasskey } from "@/lib/webauthn";
 import type {
   LoginInput,
   LoginResponse,
+  Membership,
   UserProfile,
   VerifyOtpInput,
 } from "@/lib/types";
 
 interface AuthContextValue {
   user: UserProfile | null;
+  /** The organizations the current user belongs to (drives the workspace switcher). */
+  organizations: Membership[];
   isLoading: boolean;
   /**
    * Submits the password. Resolves with the backend outcome: `mfaRequired` means
@@ -34,6 +37,10 @@ interface AuthContextValue {
   /** Completes 2FA with a passkey (WebAuthn assertion) for the pending challenge, then signs in. */
   loginWebauthn: (challengeId: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Switch the active organization (ADR 0001) and re-load the session. */
+  switchOrg: (orgId: string) => Promise<void>;
+  /** Create a new organization, become its owner, and switch into it. */
+  createOrg: (name: string) => Promise<void>;
   /** Re-reads the current user from the server (e.g. after a profile change). */
   refresh: () => Promise<void>;
 }
@@ -43,15 +50,23 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [user, setUser] = useState<UserProfile | null>(null);
+  const [organizations, setOrganizations] = useState<Membership[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // Ask the server who we are — the session lives in httpOnly cookies, so this
-  // is the only way the client learns whether it is signed in.
+  // is the only way the client learns whether it is signed in. When signed in we
+  // also load the caller's organizations for the workspace switcher.
   const loadUser = useCallback(async () => {
     try {
       setUser(await authApi.me());
+      try {
+        setOrganizations(await orgApi.list());
+      } catch {
+        setOrganizations([]);
+      }
     } catch {
       setUser(null);
+      setOrganizations([]);
     }
   }, []);
 
@@ -64,10 +79,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [loadUser]);
 
   const completeSignIn = useCallback(async () => {
-    setUser(await authApi.me());
+    await loadUser();
     router.push("/dashboard");
     router.refresh(); // re-run the proxy/layout now that cookies are set
-  }, [router]);
+  }, [loadUser, router]);
 
   const login = useCallback(
     async (input: LoginInput) => {
@@ -103,21 +118,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Best-effort — the cookies are cleared server-side regardless.
     }
     setUser(null);
+    setOrganizations([]);
     router.push("/login");
     router.refresh();
   }, [router]);
 
+  const switchOrg = useCallback(
+    async (orgId: string) => {
+      await authApi.switchOrg(orgId);
+      await loadUser();
+      router.refresh();
+    },
+    [loadUser, router],
+  );
+
+  const createOrg = useCallback(
+    async (name: string) => {
+      const org = await orgApi.create({ name });
+      await authApi.switchOrg(org.id); // scope the session to the new org
+      await loadUser();
+      router.refresh();
+    },
+    [loadUser, router],
+  );
+
   const value = useMemo(
     () => ({
       user,
+      organizations,
       isLoading,
       login,
       verifyOtp,
       loginWebauthn,
       logout,
+      switchOrg,
+      createOrg,
       refresh: loadUser,
     }),
-    [user, isLoading, login, verifyOtp, loginWebauthn, logout, loadUser],
+    [
+      user,
+      organizations,
+      isLoading,
+      login,
+      verifyOtp,
+      loginWebauthn,
+      logout,
+      switchOrg,
+      createOrg,
+      loadUser,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -1,4 +1,10 @@
-export type Role = "USER" | "ADMIN";
+export type Role =
+  | "USER"
+  | "PLATFORM_ADMIN"
+  | "ORG_ADMIN"
+  | "SERVICE_OWNER"
+  | "ANALYST"
+  | "COMPLIANCE_ADMIN";
 
 /** Second-factor methods the backend may offer. Mirrors the backend MfaMethod enum. */
 export type MfaMethod = "EMAIL_OTP" | "TOTP" | "WEBAUTHN";
@@ -7,15 +13,36 @@ export type MfaMethod = "EMAIL_OTP" | "TOTP" | "WEBAUTHN";
 export interface AuthConfig {
   mode: string;
   registrationEnabled: boolean;
+  /** Whether a signed-in user may create an organization (ADR 0001; gates the "Create organization" UI). */
+  organizationSignupEnabled: boolean;
   methods: { emailOtp: boolean; totp: boolean; webauthn: boolean };
 }
 
-/** Mirrors the backend UserResponse. */
+/** Lifecycle of an organization membership. Mirrors the backend MembershipStatus. */
+export type MembershipStatus = "INVITED" | "ACTIVE" | "SUSPENDED";
+
+/** One organization the current user belongs to (from GET /api/orgs) — drives the workspace switcher. */
+export interface Membership {
+  /** The organization's id. */
+  id: string;
+  name: string;
+  /** The caller's roles within this organization. */
+  roles: Role[];
+  status: MembershipStatus;
+}
+
+/**
+ * Mirrors the backend UserResponse. `roles` are the caller's effective roles in their active org
+ * (platform roles plus that org's membership roles); `orgId` is the active org, null when the user
+ * belongs to no organization yet.
+ */
 export interface UserProfile {
   id: string;
   email: string;
   displayName: string | null;
   roles: Role[];
+  /** The active organization (tenant); null for a user who has not created or joined one. */
+  orgId: string | null;
   enabled: boolean;
   emailVerified: boolean;
   createdAt: string;
@@ -111,10 +138,17 @@ export interface AcceptInviteInput {
   newPassword: string;
 }
 
-/** Admin-provisions an account; the backend emails an invite link. */
+/** Admin-provisions an account into the caller's org; the backend emails an invite link (new emails). */
 export interface InviteUserInput {
   email: string;
   displayName?: string;
+  /** Org roles granted on top of USER (org admins may not assign platform-level roles). */
+  roles?: Role[];
+}
+
+/** Create a new organization the caller will own (POST /api/orgs). */
+export interface CreateOrgInput {
+  name: string;
 }
 
 export interface UpdateProfileInput {

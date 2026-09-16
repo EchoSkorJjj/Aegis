@@ -26,6 +26,7 @@ class RegistrationDisabledIntegrationTest extends AbstractIntegrationTest {
 
         mvc.perform(get("/auth/config"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.registrationEnabled").value(false));
+                .andExpect(jsonPath("$.registrationEnabled").value(false))
+                .andExpect(jsonPath("$.organizationSignupEnabled").value(true));
     }
 }

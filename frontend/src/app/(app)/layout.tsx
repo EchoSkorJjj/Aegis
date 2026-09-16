@@ -5,6 +5,7 @@ import { useEffect } from "react";
 
 import { AppHeader } from "@/components/app/app-header";
 import { AppSidebar } from "@/components/app/app-sidebar";
+import { NoOrgScreen } from "@/components/app/no-org-screen";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAuth } from "@/providers/auth-provider";
@@ -26,6 +27,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         Loading…
       </div>
     );
+  }
+
+  // A signed-in user with no organization yet can't use the app shell — send them to create or
+  // join one first (ADR 0001). The platform admin is intentionally org-less (it operates across
+  // tenants), so it skips this gate.
+  const isPlatformAdmin = user.roles.includes("PLATFORM_ADMIN");
+  if (!user.orgId && !isPlatformAdmin) {
+    return <NoOrgScreen />;
   }
 
   return (

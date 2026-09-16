@@ -72,7 +72,7 @@ In Docker Compose it builds and starts alongside identity-service and the ai-ser
 Inventory endpoints are rooted at `/api/inventory`. Paginated entity collections and direct
 relationship collections default to name/ID ascending order. `SERVICE_OWNER`, `ANALYST`, and
 `COMPLIANCE_ADMIN` may read inventory; `ANALYST` and `COMPLIANCE_ADMIN` may create, update, delete,
-link, and unlink it. `ADMIN` remains a platform user-management role, not an Aegis domain role.
+link, and unlink it. `PLATFORM_ADMIN` and `ORG_ADMIN` are user-management roles, not Aegis domain roles.
 
 The map supports multiple owners per business service. Deleting an inventory entity cascades only
 its relationship rows; the related services, components, vendors, and owners remain intact. The

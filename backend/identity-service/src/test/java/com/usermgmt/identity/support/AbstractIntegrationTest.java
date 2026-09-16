@@ -28,7 +28,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @SpringBootTest(properties = {
         "identity.mfa.email-otp.enabled=false",
-        "identity.rate-limit.enabled=false" // exercised only by RateLimitIntegrationTest
+        "identity.rate-limit.enabled=false"
 })
 public abstract class AbstractIntegrationTest {
 

@@ -37,7 +37,7 @@ class AuditLogIntegrationTest extends AbstractIntegrationTest {
         User admin = new User(UUID.randomUUID(), "auditor@example.com",
                 passwordEncoder.encode("password123"), "Auditor");
         admin.getRoles().add(Role.USER);
-        admin.getRoles().add(Role.ADMIN);
+        admin.getRoles().add(Role.PLATFORM_ADMIN);
         users.save(admin);
 
         // Auditable activity for a normal user: register, a failed login, then a successful one.
