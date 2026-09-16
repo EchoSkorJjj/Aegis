@@ -17,7 +17,7 @@ import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
-import com.aegis.core.support.AbstractIntegrationTest;
+import com.aegis.core.support.AbstractInventoryIntegrationTest;
 import org.hibernate.Hibernate;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,9 +32,12 @@ import org.springframework.transaction.support.TransactionTemplate;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class InventoryPersistenceIntegrationTest extends AbstractIntegrationTest {
+class InventoryPersistenceIntegrationTest extends AbstractInventoryIntegrationTest {
 
     private static final PageRequest PAGE = PageRequest.of(0, 20, Sort.by("name", "id"));
+
+    /** Org for the raw-JDBC constraint checks, which bypass the store and so must supply org_id (ADR §6). */
+    private static final UUID ORG = UUID.fromString("11111111-1111-1111-1111-111111111111");
 
     @Autowired
     private InventoryService inventory;
@@ -150,53 +153,54 @@ class InventoryPersistenceIntegrationTest extends AbstractIntegrationTest {
     @Test
     void databaseConstraintsRejectInvalidRowsAndDuplicateEdges() {
         UUID componentId = UUID.randomUUID();
-        jdbc.update("insert into core.software_components (id, ecosystem, name, version) values (?, ?, ?, ?)",
-                componentId, "Maven", "db-check-" + componentId, "1");
+        jdbc.update("insert into core.software_components (id, ecosystem, name, version, org_id) values (?, ?, ?, ?, ?)",
+                componentId, "Maven", "db-check-" + componentId, "1", ORG);
 
         assertThatThrownBy(() -> jdbc.update(
-                "insert into core.software_component_dependencies (component_id, dependency_id) values (?, ?)",
-                componentId, componentId))
+                "insert into core.software_component_dependencies (component_id, dependency_id, org_id) values (?, ?, ?)",
+                componentId, componentId, ORG))
                 .isInstanceOf(DataIntegrityViolationException.class);
 
         UUID serviceId = UUID.randomUUID();
-        jdbc.update("insert into core.business_services (id, name, criticality) values (?, ?, ?)",
-                serviceId, "db-service-" + serviceId, "LOW");
+        jdbc.update("insert into core.business_services (id, name, criticality, org_id) values (?, ?, ?, ?)",
+                serviceId, "db-service-" + serviceId, "LOW", ORG);
 
         assertThatThrownBy(() -> jdbc.update(
-                "insert into core.business_services (id, name, criticality) values (?, ?, ?)",
-                UUID.randomUUID(), ("db-service-" + serviceId).toUpperCase(), "HIGH"))
+                "insert into core.business_services (id, name, criticality, org_id) values (?, ?, ?, ?)",
+                UUID.randomUUID(), ("db-service-" + serviceId).toUpperCase(), "HIGH", ORG))
                 .isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> jdbc.update(
-                "insert into core.software_components (id, ecosystem, name, version) values (?, ?, ?, ?)",
-                UUID.randomUUID(), "MAVEN", ("DB-CHECK-" + componentId).toUpperCase(), "1"))
+                "insert into core.software_components (id, ecosystem, name, version, org_id) values (?, ?, ?, ?, ?)",
+                UUID.randomUUID(), "MAVEN", ("DB-CHECK-" + componentId).toUpperCase(), "1", ORG))
                 .isInstanceOf(DataIntegrityViolationException.class);
 
         UUID vendorId = UUID.randomUUID();
         String vendorName = "db-vendor-" + vendorId;
-        jdbc.update("insert into core.third_party_vendors (id, name) values (?, ?)", vendorId, vendorName);
+        jdbc.update("insert into core.third_party_vendors (id, name, org_id) values (?, ?, ?)",
+                vendorId, vendorName, ORG);
         assertThatThrownBy(() -> jdbc.update(
-                "insert into core.third_party_vendors (id, name) values (?, ?)",
-                UUID.randomUUID(), vendorName.toUpperCase()))
+                "insert into core.third_party_vendors (id, name, org_id) values (?, ?, ?)",
+                UUID.randomUUID(), vendorName.toUpperCase(), ORG))
                 .isInstanceOf(DataIntegrityViolationException.class);
 
         UUID ownerId = UUID.randomUUID();
         String ownerName = "db-owner-" + ownerId;
-        jdbc.update("insert into core.owners (id, name) values (?, ?)", ownerId, ownerName);
+        jdbc.update("insert into core.owners (id, name, org_id) values (?, ?, ?)", ownerId, ownerName, ORG);
         assertThatThrownBy(() -> jdbc.update(
-                "insert into core.owners (id, name) values (?, ?)",
-                UUID.randomUUID(), ownerName.toUpperCase()))
+                "insert into core.owners (id, name, org_id) values (?, ?, ?)",
+                UUID.randomUUID(), ownerName.toUpperCase(), ORG))
                 .isInstanceOf(DataIntegrityViolationException.class);
 
-        jdbc.update("insert into core.business_service_components (business_service_id, component_id) values (?, ?)",
-                serviceId, componentId);
+        jdbc.update("insert into core.business_service_components (business_service_id, component_id, org_id)"
+                        + " values (?, ?, ?)", serviceId, componentId, ORG);
         assertThatThrownBy(() -> jdbc.update(
-                "insert into core.business_service_components (business_service_id, component_id) values (?, ?)",
-                serviceId, componentId))
+                "insert into core.business_service_components (business_service_id, component_id, org_id)"
+                        + " values (?, ?, ?)", serviceId, componentId, ORG))
                 .isInstanceOf(DataIntegrityViolationException.class);
 
         assertThatThrownBy(() -> jdbc.update(
-                "insert into core.business_services (id, name, criticality) values (?, ?, ?)",
-                UUID.randomUUID(), "invalid-criticality-" + serviceId, "EXTREME"))
+                "insert into core.business_services (id, name, criticality, org_id) values (?, ?, ?, ?)",
+                UUID.randomUUID(), "invalid-criticality-" + serviceId, "EXTREME", ORG))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 

@@ -83,6 +83,20 @@ services:
       CORS_ALLOWED_ORIGINS: http://localhost:3000
       # Dev only: seed the demo estate (services, owners, vendors, SBOM components) on startup.
       AEGIS_DEMO_SEED_ENABLED: "true"
+      # Ingest real CVEs from the NVD API 2.0. No API key is needed (NVD allows 5 requests per
+      # rolling 30s unauthenticated); set NVD_API_KEY in .env — which is git-ignored — to raise that
+      # to 50. Demo cadence: first poll ~1 min after startup over a one-day window, rather than the
+      # 15-minute/two-day production defaults, so `docker compose up` shows advisories quickly.
+      AEGIS_INGESTION_NVD_ENABLED: "true"
+      AEGIS_NVD_API_KEY: ${NVD_API_KEY:-}
+      AEGIS_INGESTION_POLL_INTERVAL: PT1M
+      AEGIS_NVD_INITIAL_WINDOW: P1D
+      # Poll the status pages of the five vendors the demo estate depends on (AWS via RSS, the rest
+      # via Statuspage JSON). No credentials — these are public pages.
+      AEGIS_INGESTION_VENDOR_STATUS_ENABLED: "true"
+      # Poll public security news/threat-intel RSS feeds (CISA, press, research blogs). No keys —
+      # credential-free feeds only.
+      AEGIS_INGESTION_NEWS_ENABLED: "true"
     ports:
       - "8082:8082"
     networks: [edge, internal]

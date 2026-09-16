@@ -6,7 +6,7 @@ import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.SoftwareComponent;
-import com.aegis.core.support.AbstractIntegrationTest;
+import com.aegis.core.support.AbstractInventoryIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,7 +24,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** The demo estate seeded through the real SBOM import, queried through the real graph API. */
-class DemoEstateIntegrationTest extends AbstractIntegrationTest {
+class DemoEstateIntegrationTest extends AbstractInventoryIntegrationTest {
 
     private static final PageRequest FIRST = PageRequest.of(0, 1);
     private static final PageRequest ALL = PageRequest.of(0, 100);

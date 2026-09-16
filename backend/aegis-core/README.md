@@ -9,15 +9,17 @@ See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../..
 > **Status:** the Spring Boot wiring, security, module seams, and AI port are in place. The inventory
 > module persists its core entities and direct relationships, exposes authenticated CRUD APIs, and
 > answers impact graph queries (component/vendor → impacted services + owners, including transitive
-> component dependents); the ingestion framework (scheduled polling, dedup, raw-event store) is
-> scaffolded with no feeds wired yet, and matching, scoring, and action workflows remain planned.
+> component dependents); the ingestion framework (scheduled polling, dedup, raw-event store) runs three
+> connectors — the **NVD CVE feed** (CPE, CVSS and affected versions → advisories), **vendor status
+> pages** (Statuspage/RSS → vendor incidents), and **security news** (RSS/Atom → articles with the CVE
+> identifiers they mention). Matching, scoring, and action workflows remain planned.
 
 ## Modules (a modular monolith, split by seams later)
 
 | Package | Responsibility |
 |---|---|
 | `inventory` | Services, components, vendors, SBOM dependencies, ownership — the map |
-| `ingestion` | Scheduled feed polling (OSV / NVD / vendor) → normalised advisories *(queue seam)* |
+| `ingestion` | Scheduled feed polling (NVD, vendor status, security news) → advisories, incidents, news |
 | `matching`  | Advisory package + version range → components → impacted services/owners → findings |
 | `scoring`   | Deterministic impact score per service and owner, with a "why" breakdown |
 | `actions`   | Execute human-approved responses (PR / ticket / memo), audited |
@@ -52,8 +54,20 @@ domain. See `ARCHITECTURE.md` for the topology.
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | SPA origins allowed in dev |
 | `ZIPKIN_ENDPOINT` | `http://localhost:9411/api/v2/spans` | Trace collector |
 | `AEGIS_DEMO_SEED_ENABLED` | `false` | Load the demo estate at startup (dev/demo only) |
-| `AEGIS_INGESTION_ENABLED` | `true` | Run the feed scheduler (no feeds are wired yet) |
+| `AEGIS_INGESTION_ENABLED` | `true` | Run the feed scheduler |
 | `AEGIS_INGESTION_POLL_INTERVAL` | `PT15M` | Feed poll cadence (ISO-8601 duration) |
+| `AEGIS_INGESTION_NVD_ENABLED` | `false` | Poll the NVD CVE API (Docker Compose sets `true`) |
+| `AEGIS_NVD_API_KEY` | *(empty)* | Optional NVD key: raises the rate limit from 5 to 50 req/30s |
+| `AEGIS_NVD_INITIAL_WINDOW` | `P2D` | How far back the very first poll reaches (NVD caps at 120 days) |
+| `AEGIS_NVD_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → advisory drain |
+| `AEGIS_NVD_BASE_URL` | NVD 2.0 API | Override the feed endpoint (used by tests and mirrors) |
+| `AEGIS_INGESTION_VENDOR_STATUS_ENABLED` | `false` | Poll vendor status pages (Docker Compose sets `true`) |
+| `AEGIS_VENDOR_STATUS_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → vendor-incident drain |
+| `AEGIS_INGESTION_NEWS_ENABLED` | `false` | Poll security news feeds (Docker Compose sets `true`) |
+| `AEGIS_NEWS_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → news-item drain |
+
+The vendor and news feed lists are YAML (`aegis.ingestion.vendor-status.vendors`,
+`aegis.ingestion.news.feeds`), not env vars — each entry needs several fields.
 
 ## Build & test
 
@@ -119,8 +133,8 @@ through three hops.
 ## Ingestion
 
 Scheduled polling of external feeds into an append-only, de-duplicated **raw-event store**
-(`raw_events`), before any normalisation. The framework is in place; the feed connectors and the
-normalisation of raw events into `Change`/`Signal` records are later stories, so no feeds ship yet.
+(`raw_events`), before any normalisation. The **NVD connector** is the first feed; OSV, vendor
+status, and security news follow the same seam.
 
 - **Seam** — a feed is an `IngestionSource` bean (`sourceId()` + `poll()`). `IngestionScheduler`
   discovers every such bean and polls it on `aegis.ingestion.poll-interval` (ISO-8601, default 15m),
@@ -129,4 +143,152 @@ normalisation of raw events into `Change`/`Signal` records are later stories, so
 - **Dedup** — `RawEventStore.saveIfNew` keys on `sourceId:externalId` (or `sourceId:sha256(payload)`
   when a feed has no id), enforced by a unique index, so overlapping re-polls are safe.
 - **Retry/backoff** — each poll is retried with bounded exponential backoff (`aegis.ingestion.retry.*`).
+- **Normalisation** — a connector only captures payloads; `RawEventDrainer` turns unprocessed raw
+  events into records and stamps `raw_events.processed_at`. Fetching and parsing therefore fail
+  independently: a parser bug never loses data already captured — fix it, clear `processed_at`, and
+  the events replay. An event the handler cannot parse is still marked processed, so one bad payload
+  never becomes a poison pill.
 - Disable the scheduler with `AEGIS_INGESTION_ENABLED=false`.
+
+> **Writing a connector?** Use `FeedHttpClient` (or build your own `RestClient` with explicit
+> connect/read timeouts, as `NvdApiClient` does). Do **not** inject the application's `RestClient`
+> bean — that one points at the internal ai-service and carries its `X-Service-Token` as a default
+> header, which would be sent to the external feed. A connector without a read timeout can also pin
+> the shared ingestion thread. For RSS/Atom, parse through `SyndicationFeedParser` rather than rolling
+> your own XML: it is hardened against XXE, and that hardening should exist in exactly one place.
+
+### NVD connector (CVE API 2.0)
+
+Polls [NVD](https://nvd.nist.gov/developers/vulnerabilities) for recently modified CVEs and
+normalises each into an **advisory**: the primary CVSS metric plus the affected
+(vendor, product, version-range) tuples that matching will resolve against registered components.
+
+- **Windowed polling** — each poll asks for `lastModStartDate`..`lastModEndDate` only. The window
+  starts at the newest `occurred_at` stored for the feed (which the connector sets to the CVE's
+  `lastModified`) minus `overlap`, so the cursor lives in the store and a restart resumes from what
+  was actually persisted. Before anything is stored the window is `initial-window` wide; anything
+  wider than NVD's 120-day limit is clamped.
+- **Revisions** — NVD rescores and re-scopes CVEs in place, so the external id is
+  `<cve-id>@<lastModified>`. Each revision is a distinct raw event rather than a duplicate, the raw
+  store keeps the full revision history, and the advisory row is updated in place.
+- **CVSS** — the newest generation wins (v3.1 → v3.0 → v2), preferring NVD's `Primary` metric, so
+  scoring gets one comparable number. A CVE still awaiting analysis simply has none.
+- **CPE** — parsed escape-aware (`vendor\:name` keeps its literal colon); `*` and `-` mean "no
+  concrete value". A match with no concrete vendor and product can identify nothing and is dropped,
+  as are non-`vulnerable` matches and negated nodes. Version ranges win over a concrete CPE version
+  when a match carries both.
+- **Untrusted input** — payloads are size-capped (`max-payload-bytes`), every field is optional, a
+  single CVE's affected list is bounded, and nothing here is fed to an LLM. An unparseable payload is
+  logged and marked processed rather than blocking the queue; the raw row stays for inspection.
+- **Rate limits** — NVD allows 5 requests per rolling 30s unauthenticated, 50 with a key. Set
+  `AEGIS_NVD_API_KEY` (never commit one); `page-delay` keeps multi-page fetches inside the limit.
+
+Turn the feed off on its own with `AEGIS_INGESTION_NVD_ENABLED=false` — the rest of the scheduler
+keeps running. It is **off by default** so the test suite and a plain local run never reach out to
+nvd.nist.gov.
+
+### Advisories API
+
+- `GET /api/advisories` — normalised advisories, most recently revised first, each with its affected
+  products. Paged like the inventory collections.
+- `GET /api/advisories/{sourceId}/{externalId}` — one advisory, e.g. `/api/advisories/nvd/CVE-2021-44228`.
+
+Read-only: advisories are written by connectors, never by a user. Both need the same Aegis domain
+read roles as the inventory API (`SERVICE_OWNER`, `ANALYST`, `COMPLIANCE_ADMIN`).
+
+### Vendor status connector (Statuspage / RSS)
+
+Polls the status pages of the third parties the estate depends on and normalises each outage into a
+**vendor incident**: who is impaired, what the vendor calls it, when it started, and whether it is
+resolved. Matching will resolve `vendorName` against the inventory's registered vendors to reach the
+affected services, the way advisories resolve through components.
+
+- **Two formats** — `statuspage` reads the Atlassian Statuspage JSON API
+  (`/api/v2/incidents.json`), which most hosted status pages speak and which carries a stable id, a
+  lifecycle status, an impact level and a resolution time. `rss` reads an RSS 2.0 or Atom feed for
+  vendors that publish no API (AWS, for one); those carry no status or impact, so both stay null
+  rather than being invented.
+- **Whole-document capture** — a status page has no window or cursor API, so each poll stores the
+  document as one raw event keyed `<vendor-key>@<sha256 of the document>`. An unchanged page hashes
+  to an event already stored and de-duplicates away; any edit is a new event. One raw event therefore
+  normalises into many incidents.
+- **Updated in place** — incidents are keyed `(source, <vendor-key>:<incident-id>)`, so a vendor
+  moving an incident from *investigating* to *resolved* updates the same row rather than adding one.
+- **Per-vendor isolation** — the framework already isolates one *feed's* failure from another's, but
+  this connector speaks to many vendors, so it also catches per vendor: one status page being down,
+  slow or malformed must not cost the others their poll.
+- **Untrusted content** — documents are size-capped, and the XML reader is hardened against XXE
+  (DOCTYPE declarations rejected, external entities never resolved, no entity expansion), so a
+  hostile feed cannot read local files or reach internal hosts.
+
+Configured vendors ship as the five the demo estate depends on — AWS (RSS), Cloudflare, Stripe,
+Auth0 and Snowflake (Statuspage). Their `name` values match the inventory's vendor names on purpose.
+Replace them per deployment. Turn the feed off on its own with
+`AEGIS_INGESTION_VENDOR_STATUS_ENABLED=false`; like NVD it is **off by default** so tests and plain
+local runs never reach third-party pages.
+
+### Vendor incidents API
+
+- `GET /api/vendor-incidents` — normalised incidents, most recently started first.
+- `GET /api/vendor-incidents/{sourceId}/{externalId}` — one incident, e.g.
+  `/api/vendor-incidents/vendor-status/cloudflare:qc2v4gxy3gfw`.
+
+Read-only, and behind the same Aegis domain read roles as the inventory and advisory APIs.
+
+### Security news connector (RSS / news feeds)
+
+Polls security news and threat-intel publishers and normalises each article into a **news item**.
+
+- **Credential-free feeds only** — an RSS or Atom URL, never a "news API" needing a key, because that
+  would put a secret in configuration. Defaults ship as CISA advisories, The Hacker News,
+  BleepingComputer, SANS ISC and Krebs on Security.
+- **CVE extraction is the point.** An advisory names an affected package and an incident names an
+  impaired vendor, but an article only tells a story. So the connector pulls the CVE identifiers out
+  of each title and summary by plain pattern match — never by a model — giving matching something
+  deterministic to join on: article → advisory → component → service. An article naming no CVE still
+  lands; it simply carries no join.
+- **Whole-document capture, per-feed isolation, size caps** — same shape as the vendor status
+  connector, and the same hardened XML parser.
+- **Prompt-injection posture.** News is the most attacker-influenceable content the platform ingests.
+  Nothing here reaches an LLM; the only interpretation applied is the CVE regex, and everything else
+  stays inert text. When the AI steps land, that guardrail lives at the ai-service boundary.
+
+### News API
+
+- `GET /api/news` — normalised articles, most recently published first.
+- `GET /api/news?cve=CVE-2021-44228` — only articles mentioning that CVE (case-insensitive). This is
+  the join matching will use.
+- `GET /api/news/{sourceId}/{externalId}` — one article.
+
+Read-only, behind the same Aegis domain read roles as the other domain APIs.
+
+### Seeing it work
+
+`docker compose up` enables all three connectors with a demo cadence (first poll ~1 minute after
+startup; NVD over a one-day window, instead of the 15-minute/two-day defaults). Within about two
+minutes:
+
+```bash
+curl -s localhost:8080/api/advisories -H "Authorization: Bearer $TOKEN" | jq '.totalElements'
+```
+
+```bash
+curl -s localhost:8080/api/vendor-incidents -H "Authorization: Bearer $TOKEN" | jq '.content[0]'
+```
+
+```bash
+curl -s "localhost:8080/api/news?cve=CVE-2021-44228" -H "Authorization: Bearer $TOKEN" | jq '.content[].title'
+```
+
+`$TOKEN` is an access token for a user holding a domain role (`SERVICE_OWNER`, `ANALYST` or
+`COMPLIANCE_ADMIN`) — note that `PLATFORM_ADMIN` deliberately is not one. Progress shows in
+`docker compose logs -f aegis-core`:
+
+```
+ingestion source 'nvd': 2286 new, 0 duplicate(s)
+nvd: normalised 2286 record(s), 0 unparseable
+ingestion source 'vendor-status': 5 new, 0 duplicate(s)
+vendor-status: 238 incident(s) normalised
+ingestion source 'security-news': 5 new, 0 duplicate(s)
+security-news: 147 article(s) normalised
+```

@@ -12,20 +12,33 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+
 import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.InventoryStore.ServiceComponentLink;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
+import com.aegis.core.tenant.CurrentOrg;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
-/** JPA adapter for the inventory domain entities and explicit relationship records. */
+/**
+ * JPA adapter for the inventory domain, org-scoped (ADR §6). Every method resolves the caller's active
+ * org via {@link #scope()} — which also binds it on the DB session for the RLS backstop — then reads
+ * only that org's rows and stamps that org onto every write. The application layer (service,
+ * controller, port) is unaware of tenancy; isolation lives here and in the DB.
+ */
 @Repository
 public class JpaInventoryStore implements InventoryStore {
 
+    @PersistenceContext
+    private EntityManager entityManager;
+
+    private final CurrentOrg currentOrg;
     private final BusinessServiceJpaRepository services;
     private final SoftwareComponentJpaRepository components;
     private final ThirdPartyVendorJpaRepository vendors;
@@ -36,6 +49,7 @@ public class JpaInventoryStore implements InventoryStore {
     private final ComponentDependencyJpaRepository componentDependencies;
 
     public JpaInventoryStore(
+            CurrentOrg currentOrg,
             BusinessServiceJpaRepository services,
             SoftwareComponentJpaRepository components,
             ThirdPartyVendorJpaRepository vendors,
@@ -44,6 +58,7 @@ public class JpaInventoryStore implements InventoryStore {
             ServiceVendorJpaRepository serviceVendors,
             ServiceOwnerJpaRepository serviceOwners,
             ComponentDependencyJpaRepository componentDependencies) {
+        this.currentOrg = currentOrg;
         this.services = services;
         this.components = components;
         this.vendors = vendors;
@@ -54,145 +69,179 @@ public class JpaInventoryStore implements InventoryStore {
         this.componentDependencies = componentDependencies;
     }
 
+    /**
+     * The caller's active org (403 if none), also bound as the transaction-local {@code
+     * aegis.current_org} GUC so Postgres RLS enforces isolation as a backstop when the app connects as
+     * a non-superuser. Always runs inside the calling service's transaction, so the GUC lands on that
+     * transaction's connection.
+     */
+    private UUID scope() {
+        UUID org = currentOrg.require();
+        entityManager.createNativeQuery("select set_config('aegis.current_org', :org, true)")
+                .setParameter("org", org.toString())
+                .getSingleResult();
+        return org;
+    }
+
     @Override
     public BusinessService save(BusinessService value) {
+        UUID org = scope();
+        value.assignOrg(org);
         return services.save(value);
     }
 
     @Override
     public Optional<BusinessService> findBusinessService(UUID id) {
-        return services.findById(id);
+        return services.findByIdAndOrgId(id, scope());
     }
 
     @Override
     public Page<BusinessService> findBusinessServices(Pageable pageable) {
-        return services.findAll(pageable);
+        return services.findByOrgId(scope(), pageable);
     }
 
     @Override
     public Optional<BusinessService> findBusinessServiceByName(String name) {
-        return services.findByNameIgnoreCase(name);
+        return services.findByNameIgnoreCaseAndOrgId(name, scope());
     }
 
     @Override
     public boolean businessServiceNameExists(String name, UUID excludingId) {
-        return excludingId == null ? services.existsByNameIgnoreCase(name)
-                : services.existsByNameIgnoreCaseAndIdNot(name, excludingId);
+        UUID org = scope();
+        return excludingId == null ? services.existsByNameIgnoreCaseAndOrgId(name, org)
+                : services.existsByNameIgnoreCaseAndOrgIdAndIdNot(name, org, excludingId);
     }
 
     @Override
     public void deleteBusinessService(UUID id) {
+        scope();
         services.deleteById(id);
     }
 
     @Override
     public SoftwareComponent save(SoftwareComponent value) {
+        UUID org = scope();
+        value.assignOrg(org);
         return components.save(value);
     }
 
     @Override
     public Optional<SoftwareComponent> findSoftwareComponent(UUID id) {
-        return components.findById(id);
+        return components.findByIdAndOrgId(id, scope());
     }
 
     @Override
     public Page<SoftwareComponent> findSoftwareComponents(Pageable pageable) {
-        return components.findAll(pageable);
+        return components.findByOrgId(scope(), pageable);
     }
 
     @Override
     public Optional<SoftwareComponent> findSoftwareComponentByCoordinates(String ecosystem, String name, String version) {
-        return components.findByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCase(ecosystem, name, version);
+        return components.findByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCaseAndOrgId(
+                ecosystem, name, version, scope());
     }
 
     @Override
     public boolean softwareComponentCoordinatesExist(
             String ecosystem, String name, String version, UUID excludingId) {
+        UUID org = scope();
         return excludingId == null
-                ? components.existsByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCase(ecosystem, name, version)
-                : components.existsByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCaseAndIdNot(
-                        ecosystem, name, version, excludingId);
+                ? components.existsByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCaseAndOrgId(
+                        ecosystem, name, version, org)
+                : components.existsByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCaseAndOrgIdAndIdNot(
+                        ecosystem, name, version, org, excludingId);
     }
 
     @Override
     public void deleteSoftwareComponent(UUID id) {
+        scope();
         components.deleteById(id);
     }
 
     @Override
     public ThirdPartyVendor save(ThirdPartyVendor value) {
+        UUID org = scope();
+        value.assignOrg(org);
         return vendors.save(value);
     }
 
     @Override
     public Optional<ThirdPartyVendor> findThirdPartyVendor(UUID id) {
-        return vendors.findById(id);
+        return vendors.findByIdAndOrgId(id, scope());
     }
 
     @Override
     public Page<ThirdPartyVendor> findThirdPartyVendors(Pageable pageable) {
-        return vendors.findAll(pageable);
+        return vendors.findByOrgId(scope(), pageable);
     }
 
     @Override
     public Optional<ThirdPartyVendor> findThirdPartyVendorByName(String name) {
-        return vendors.findByNameIgnoreCase(name);
+        return vendors.findByNameIgnoreCaseAndOrgId(name, scope());
     }
 
     @Override
     public boolean thirdPartyVendorNameExists(String name, UUID excludingId) {
-        return excludingId == null ? vendors.existsByNameIgnoreCase(name)
-                : vendors.existsByNameIgnoreCaseAndIdNot(name, excludingId);
+        UUID org = scope();
+        return excludingId == null ? vendors.existsByNameIgnoreCaseAndOrgId(name, org)
+                : vendors.existsByNameIgnoreCaseAndOrgIdAndIdNot(name, org, excludingId);
     }
 
     @Override
     public void deleteThirdPartyVendor(UUID id) {
+        scope();
         vendors.deleteById(id);
     }
 
     @Override
     public Owner save(Owner value) {
+        UUID org = scope();
+        value.assignOrg(org);
         return owners.save(value);
     }
 
     @Override
     public Optional<Owner> findOwner(UUID id) {
-        return owners.findById(id);
+        return owners.findByIdAndOrgId(id, scope());
     }
 
     @Override
     public Page<Owner> findOwners(Pageable pageable) {
-        return owners.findAll(pageable);
+        return owners.findByOrgId(scope(), pageable);
     }
 
     @Override
     public Optional<Owner> findOwnerByName(String name) {
-        return owners.findByNameIgnoreCase(name);
+        return owners.findByNameIgnoreCaseAndOrgId(name, scope());
     }
 
     @Override
     public boolean ownerNameExists(String name, UUID excludingId) {
-        return excludingId == null ? owners.existsByNameIgnoreCase(name)
-                : owners.existsByNameIgnoreCaseAndIdNot(name, excludingId);
+        UUID org = scope();
+        return excludingId == null ? owners.existsByNameIgnoreCaseAndOrgId(name, org)
+                : owners.existsByNameIgnoreCaseAndOrgIdAndIdNot(name, org, excludingId);
     }
 
     @Override
     public void deleteOwner(UUID id) {
+        scope();
         owners.deleteById(id);
     }
 
     @Override
     public boolean serviceComponentExists(UUID serviceId, UUID componentId) {
+        scope();
         return serviceComponents.existsById(new ServiceComponentEntity.Key(serviceId, componentId));
     }
 
     @Override
     public void addServiceComponent(UUID serviceId, UUID componentId) {
-        serviceComponents.save(new ServiceComponentEntity(serviceId, componentId));
+        serviceComponents.save(new ServiceComponentEntity(serviceId, componentId, scope()));
     }
 
     @Override
     public boolean removeServiceComponent(UUID serviceId, UUID componentId) {
+        scope();
         ServiceComponentEntity.Key key = new ServiceComponentEntity.Key(serviceId, componentId);
         if (!serviceComponents.existsById(key)) {
             return false;
@@ -203,21 +252,23 @@ public class JpaInventoryStore implements InventoryStore {
 
     @Override
     public Page<SoftwareComponent> findServiceComponents(UUID serviceId, Pageable pageable) {
-        return components.findForService(serviceId, pageable);
+        return components.findForService(serviceId, scope(), pageable);
     }
 
     @Override
     public boolean serviceVendorExists(UUID serviceId, UUID vendorId) {
+        scope();
         return serviceVendors.existsById(new ServiceVendorEntity.Key(serviceId, vendorId));
     }
 
     @Override
     public void addServiceVendor(UUID serviceId, UUID vendorId) {
-        serviceVendors.save(new ServiceVendorEntity(serviceId, vendorId));
+        serviceVendors.save(new ServiceVendorEntity(serviceId, vendorId, scope()));
     }
 
     @Override
     public boolean removeServiceVendor(UUID serviceId, UUID vendorId) {
+        scope();
         ServiceVendorEntity.Key key = new ServiceVendorEntity.Key(serviceId, vendorId);
         if (!serviceVendors.existsById(key)) {
             return false;
@@ -228,21 +279,23 @@ public class JpaInventoryStore implements InventoryStore {
 
     @Override
     public Page<ThirdPartyVendor> findServiceVendors(UUID serviceId, Pageable pageable) {
-        return vendors.findForService(serviceId, pageable);
+        return vendors.findForService(serviceId, scope(), pageable);
     }
 
     @Override
     public boolean serviceOwnerExists(UUID serviceId, UUID ownerId) {
+        scope();
         return serviceOwners.existsById(new ServiceOwnerEntity.Key(serviceId, ownerId));
     }
 
     @Override
     public void addServiceOwner(UUID serviceId, UUID ownerId) {
-        serviceOwners.save(new ServiceOwnerEntity(serviceId, ownerId));
+        serviceOwners.save(new ServiceOwnerEntity(serviceId, ownerId, scope()));
     }
 
     @Override
     public boolean removeServiceOwner(UUID serviceId, UUID ownerId) {
+        scope();
         ServiceOwnerEntity.Key key = new ServiceOwnerEntity.Key(serviceId, ownerId);
         if (!serviceOwners.existsById(key)) {
             return false;
@@ -253,21 +306,23 @@ public class JpaInventoryStore implements InventoryStore {
 
     @Override
     public Page<Owner> findServiceOwners(UUID serviceId, Pageable pageable) {
-        return owners.findForService(serviceId, pageable);
+        return owners.findForService(serviceId, scope(), pageable);
     }
 
     @Override
     public boolean componentDependencyExists(UUID componentId, UUID dependencyId) {
+        scope();
         return componentDependencies.existsById(new ComponentDependencyEntity.Key(componentId, dependencyId));
     }
 
     @Override
     public void addComponentDependency(UUID componentId, UUID dependencyId) {
-        componentDependencies.save(new ComponentDependencyEntity(componentId, dependencyId));
+        componentDependencies.save(new ComponentDependencyEntity(componentId, dependencyId, scope()));
     }
 
     @Override
     public boolean removeComponentDependency(UUID componentId, UUID dependencyId) {
+        scope();
         ComponentDependencyEntity.Key key = new ComponentDependencyEntity.Key(componentId, dependencyId);
         if (!componentDependencies.existsById(key)) {
             return false;
@@ -278,41 +333,42 @@ public class JpaInventoryStore implements InventoryStore {
 
     @Override
     public Page<SoftwareComponent> findComponentDependencies(UUID componentId, Pageable pageable) {
-        return components.findDependencies(componentId, pageable);
+        return components.findDependencies(componentId, scope(), pageable);
     }
 
     @Override
     public Set<UUID> findComponentIdsDependingOn(Collection<UUID> dependencyIds) {
-        return componentDependencies.findByDependencyIdIn(dependencyIds).stream()
+        return componentDependencies.findByDependencyIdInAndOrgId(dependencyIds, scope()).stream()
                 .map(ComponentDependencyEntity::getComponentId)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
     @Override
     public List<ServiceComponentLink> findServiceComponentLinks(Collection<UUID> componentIds) {
-        return serviceComponents.findByComponentIdIn(componentIds).stream()
+        return serviceComponents.findByComponentIdInAndOrgId(componentIds, scope()).stream()
                 .map(link -> new ServiceComponentLink(link.getBusinessServiceId(), link.getComponentId()))
                 .toList();
     }
 
     @Override
     public Map<UUID, BusinessService> findBusinessServicesByIds(Collection<UUID> ids) {
-        return services.findAllById(ids).stream()
+        return services.findByIdInAndOrgId(ids, scope()).stream()
                 .collect(Collectors.toMap(BusinessService::getId, Function.identity()));
     }
 
     @Override
     public Map<UUID, SoftwareComponent> findSoftwareComponentsByIds(Collection<UUID> ids) {
-        return components.findAllById(ids).stream()
+        return components.findByIdInAndOrgId(ids, scope()).stream()
                 .collect(Collectors.toMap(SoftwareComponent::getId, Function.identity()));
     }
 
     @Override
     public Map<UUID, List<Owner>> findOwnersForServices(Collection<UUID> serviceIds) {
-        List<ServiceOwnerEntity> links = serviceOwners.findByBusinessServiceIdIn(serviceIds);
-        Map<UUID, Owner> ownerById = owners.findAllById(links.stream()
+        UUID org = scope();
+        List<ServiceOwnerEntity> links = serviceOwners.findByBusinessServiceIdInAndOrgId(serviceIds, org);
+        Map<UUID, Owner> ownerById = owners.findByIdInAndOrgId(links.stream()
                         .map(ServiceOwnerEntity::getOwnerId)
-                        .collect(Collectors.toCollection(LinkedHashSet::new)))
+                        .collect(Collectors.toCollection(LinkedHashSet::new)), org)
                 .stream()
                 .collect(Collectors.toMap(Owner::getId, Function.identity()));
 
@@ -326,7 +382,7 @@ public class JpaInventoryStore implements InventoryStore {
 
     @Override
     public List<UUID> findServiceIdsForVendor(UUID vendorId) {
-        return serviceVendors.findByVendorId(vendorId).stream()
+        return serviceVendors.findByVendorIdAndOrgId(vendorId, scope()).stream()
                 .map(ServiceVendorEntity::getBusinessServiceId)
                 .toList();
     }

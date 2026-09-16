@@ -6,8 +6,8 @@
  * as a Spring bean, and the {@link com.aegis.core.ingestion.IngestionScheduler} discovers and polls
  * them, applying per-source retry/backoff and isolating one feed's failure from the others.
  *
- * <p>Connectors (CVE/NVD, vendor status, security news) and the normalisation of raw events into
- * {@code Change}/{@code Signal} records are later stories; this package is the framework only.
- * Deterministic — no AI here.
+ * <p>This package is the framework; {@link com.aegis.core.ingestion.nvd} is the first connector and
+ * {@link com.aegis.core.ingestion.advisory} holds the normalised output it feeds to matching. Vendor
+ * status and security-news connectors are later stories. Deterministic — no AI here.
  */
 package com.aegis.core.ingestion;

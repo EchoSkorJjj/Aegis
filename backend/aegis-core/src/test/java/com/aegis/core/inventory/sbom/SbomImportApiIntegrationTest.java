@@ -8,7 +8,7 @@ import java.util.UUID;
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.domain.BusinessCriticality;
-import com.aegis.core.support.AbstractIntegrationTest;
+import com.aegis.core.support.AbstractInventoryIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
@@ -25,7 +25,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-class SbomImportApiIntegrationTest extends AbstractIntegrationTest {
+class SbomImportApiIntegrationTest extends AbstractInventoryIntegrationTest {
 
     private static final String PATH = "/api/inventory/services/{serviceId}/sbom";
 

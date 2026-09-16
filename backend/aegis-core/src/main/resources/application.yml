@@ -46,16 +46,122 @@ aegis:
   # Opt-in: load the fictional demo estate (classpath:demo/) at startup. Idempotent; dev/demo only.
   demo:
     seed-enabled: ${AEGIS_DEMO_SEED_ENABLED:false}
-  # Ingestion framework (E5). No feeds are wired yet — connectors register as IngestionSource beans
-  # and the scheduler discovers them. Disable with enabled=false; poll-interval is an ISO-8601 duration.
+  # Ingestion framework (E5). Connectors register as IngestionSource beans and the scheduler
+  # discovers them. Disable with enabled=false; poll-interval is an ISO-8601 duration.
   ingestion:
     enabled: ${AEGIS_INGESTION_ENABLED:true}
     poll-interval: ${AEGIS_INGESTION_POLL_INTERVAL:PT15M}
+    # How many times a raw event may fail normalisation transiently (a DB blip, a lost upsert race)
+    # before the drainer gives up and drops it. A definitively malformed payload is dropped on the first try.
+    normalize-max-attempts: 5
     retry:
       max-attempts: 3
       initial-delay: PT1S
       multiplier: 2.0
       max-delay: PT30S
+    # NVD CVE API 2.0 connector. Off by default so the test suite and a plain local run never reach
+    # out to nvd.nist.gov; Docker Compose turns it on. The API key is optional — it raises NVD's rate
+    # limit from 5 to 50 requests per rolling 30s. Supply it through the environment, never here.
+    nvd:
+      enabled: ${AEGIS_INGESTION_NVD_ENABLED:false}
+      base-url: ${AEGIS_NVD_BASE_URL:https://services.nvd.nist.gov/rest/json/cves/2.0}
+      api-key: ${AEGIS_NVD_API_KEY:}
+      # How far back the first poll reaches, before a watermark exists. NVD caps a window at 120 days.
+      initial-window: ${AEGIS_NVD_INITIAL_WINDOW:P2D}
+      # Re-poll slightly before the watermark so an advisory revised mid-poll is never skipped.
+      overlap: PT10M
+      results-per-page: 1000
+      max-pages: 10
+      # NVD asks for >=6s between unauthenticated requests.
+      page-delay: PT6S
+      connect-timeout: PT5S
+      read-timeout: PT30S
+      # Feed content is untrusted: cap what a single CVE may push into the raw-event store. A CVE
+      # enumerating thousands of CPEs exceeds 1 MB, so this is deliberately well above the typical size.
+      max-payload-bytes: 5242880
+      # Cap the whole HTTP response (a page of up to 1000 CVEs), distinct from the per-CVE cap above,
+      # so a compromised endpoint cannot stream an unbounded body into memory.
+      max-response-bytes: 67108864
+      # Waive the SSRF guard's public-address check — set true only for an internal/mirrored NVD host.
+      allow-private-hosts: false
+      # Cadence of the raw-event -> advisory drain, and how many events one drain handles.
+      normalize-interval: ${AEGIS_NVD_NORMALIZE_INTERVAL:PT1M}
+      normalize-batch-size: 200
+    # Vendor status/outage connector. Off by default, like the NVD feed, so nothing reaches out to
+    # third-party status pages during tests or a plain local run.
+    #
+    # The vendor list is YAML rather than env vars because each entry needs four fields. `name` is
+    # what matching will resolve against the inventory's registered vendors, so it must match how the
+    # vendor is named there — these defaults mirror the demo estate. Replace them per deployment with
+    # the suppliers the estate actually depends on.
+    vendor-status:
+      enabled: ${AEGIS_INGESTION_VENDOR_STATUS_ENABLED:false}
+      connect-timeout: PT5S
+      read-timeout: PT15S
+      # Untrusted third-party documents: cap what one vendor's page may push into the raw store.
+      max-payload-bytes: 2097152
+      # Cap the whole HTTP response (>= max-payload-bytes); bound and re-check redirects for SSRF;
+      # allow-private-hosts waives the public-address check (internal/mirrored pages only).
+      max-response-bytes: 8388608
+      max-redirects: 5
+      allow-private-hosts: false
+      normalize-interval: ${AEGIS_VENDOR_STATUS_NORMALIZE_INTERVAL:PT1M}
+      normalize-batch-size: 50
+      vendors:
+        - key: aws
+          name: Amazon Web Services
+          url: https://status.aws.amazon.com/rss/all.rss
+          format: rss
+        - key: cloudflare
+          name: Cloudflare
+          url: https://www.cloudflarestatus.com/api/v2/incidents.json
+          format: statuspage
+        - key: stripe
+          name: Stripe
+          url: https://www.stripestatus.com/api/v2/incidents.json
+          format: statuspage
+        - key: auth0
+          name: Auth0
+          url: https://auth0.statuspage.io/api/v2/incidents.json
+          format: statuspage
+        - key: snowflake
+          name: Snowflake
+          url: https://status.snowflake.com/api/v2/incidents.json
+          format: statuspage
+    # Security news / threat intel connector. Off by default like the other feeds.
+    #
+    # Only credential-free RSS/Atom feeds: a "news API" needing a key would put a secret in config,
+    # and every worthwhile security publisher offers a feed. Articles are matched to the estate by
+    # the CVE identifiers they mention, extracted by pattern — never by a model.
+    news:
+      enabled: ${AEGIS_INGESTION_NEWS_ENABLED:false}
+      connect-timeout: PT5S
+      read-timeout: PT15S
+      # Untrusted third-party prose: cap what one publisher's document may push into the raw store.
+      max-payload-bytes: 4194304
+      # Cap the whole HTTP response (>= max-payload-bytes); bound and re-check redirects for SSRF;
+      # allow-private-hosts waives the public-address check (internal/mirrored feeds only).
+      max-response-bytes: 8388608
+      max-redirects: 5
+      allow-private-hosts: false
+      normalize-interval: ${AEGIS_NEWS_NORMALIZE_INTERVAL:PT1M}
+      normalize-batch-size: 50
+      feeds:
+        - key: cisa
+          name: CISA Cybersecurity Advisories
+          url: https://www.cisa.gov/cybersecurity-advisories/all.xml
+        - key: thehackernews
+          name: The Hacker News
+          url: https://feeds.feedburner.com/TheHackersNews
+        - key: bleepingcomputer
+          name: BleepingComputer
+          url: https://www.bleepingcomputer.com/feed/
+        - key: sans-isc
+          name: SANS Internet Storm Center
+          url: https://isc.sans.edu/rssfeed.xml
+        - key: krebs
+          name: Krebs on Security
+          url: https://krebsonsecurity.com/feed/
 
 springdoc:
   swagger-ui:

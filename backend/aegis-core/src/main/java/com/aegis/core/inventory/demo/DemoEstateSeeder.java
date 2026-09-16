@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.util.List;
+import java.util.UUID;
 
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
@@ -28,6 +29,14 @@ import tools.jackson.databind.ObjectMapper;
 public class DemoEstateSeeder {
 
     public static final String ESTATE_RESOURCE = "demo/estate.json";
+
+    /**
+     * The org the demo estate is seeded into (ADR §6). A fixed id so the seed is idempotent and tests
+     * can act as this tenant; the same literal backfills pre-tenant rows in migration V8. To browse
+     * the demo estate through the app, a matching organization must exist in identity-service and the
+     * viewing user be a member of it.
+     */
+    public static final UUID DEMO_ORG_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
 
     private final InventoryService inventory;
     private final InventoryStore store;

@@ -48,6 +48,14 @@ class RawEventEntity implements Persistable<UUID> {
     @Column(name = "ingested_at", nullable = false, updatable = false)
     private Instant ingestedAt;
 
+    /** Set once normalisation has consumed this event; null means "still queued". */
+    @Column(name = "processed_at")
+    private Instant processedAt;
+
+    /** Transient normalisation failures so far; the drainer gives up once this reaches its cap. */
+    @Column(name = "attempts", nullable = false)
+    private int attempts;
+
     protected RawEventEntity() {
         // Required by JPA.
     }
@@ -85,5 +93,29 @@ class RawEventEntity implements Persistable<UUID> {
 
     Instant getIngestedAt() {
         return ingestedAt;
+    }
+
+    String getSourceId() {
+        return sourceId;
+    }
+
+    String getExternalId() {
+        return externalId;
+    }
+
+    String getContentType() {
+        return contentType;
+    }
+
+    String getPayload() {
+        return payload;
+    }
+
+    Instant getOccurredAt() {
+        return occurredAt;
+    }
+
+    int getAttempts() {
+        return attempts;
     }
 }
