@@ -91,6 +91,9 @@ services:
       AEGIS_NVD_API_KEY: ${NVD_API_KEY:-}
       AEGIS_INGESTION_POLL_INTERVAL: PT1M
       AEGIS_NVD_INITIAL_WINDOW: P1D
+      # Poll the status pages of the five vendors the demo estate depends on (AWS via RSS, the rest
+      # via Statuspage JSON). No credentials — these are public pages.
+      AEGIS_INGESTION_VENDOR_STATUS_ENABLED: "true"
     ports:
       - "8082:8082"
     networks: [edge, internal]

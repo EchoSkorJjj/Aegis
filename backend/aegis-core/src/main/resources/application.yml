@@ -79,6 +79,42 @@ aegis:
       # Cadence of the raw-event -> advisory drain, and how many events one drain handles.
       normalize-interval: ${AEGIS_NVD_NORMALIZE_INTERVAL:PT1M}
       normalize-batch-size: 200
+    # Vendor status/outage connector. Off by default, like the NVD feed, so nothing reaches out to
+    # third-party status pages during tests or a plain local run.
+    #
+    # The vendor list is YAML rather than env vars because each entry needs four fields. `name` is
+    # what matching will resolve against the inventory's registered vendors, so it must match how the
+    # vendor is named there — these defaults mirror the demo estate. Replace them per deployment with
+    # the suppliers the estate actually depends on.
+    vendor-status:
+      enabled: ${AEGIS_INGESTION_VENDOR_STATUS_ENABLED:false}
+      connect-timeout: PT5S
+      read-timeout: PT15S
+      # Untrusted third-party documents: cap what one vendor's page may push into the raw store.
+      max-payload-bytes: 2097152
+      normalize-interval: ${AEGIS_VENDOR_STATUS_NORMALIZE_INTERVAL:PT1M}
+      normalize-batch-size: 50
+      vendors:
+        - key: aws
+          name: Amazon Web Services
+          url: https://status.aws.amazon.com/rss/all.rss
+          format: rss
+        - key: cloudflare
+          name: Cloudflare
+          url: https://www.cloudflarestatus.com/api/v2/incidents.json
+          format: statuspage
+        - key: stripe
+          name: Stripe
+          url: https://www.stripestatus.com/api/v2/incidents.json
+          format: statuspage
+        - key: auth0
+          name: Auth0
+          url: https://auth0.statuspage.io/api/v2/incidents.json
+          format: statuspage
+        - key: snowflake
+          name: Snowflake
+          url: https://status.snowflake.com/api/v2/incidents.json
+          format: statuspage
 
 springdoc:
   swagger-ui:
