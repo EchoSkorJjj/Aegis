@@ -56,9 +56,10 @@ tokens directly.
 
 ### Getting an admin
 
-Admin endpoints require the `ADMIN` role. An initial admin is **seeded from config on startup** —
-**opt-in** (no default admin unless configured) and **idempotent** (creates the user if missing,
-grants ADMIN if not already held). This is the same pattern as Keycloak (`KEYCLOAK_ADMIN`) and
+Admin endpoints require an admin role — `PLATFORM_ADMIN` (the org-less platform operator) or, scoped
+to a single organization, `ORG_ADMIN`. An initial platform admin is **seeded from config on startup**
+— **opt-in** (no default admin unless configured) and **idempotent** (creates the user if missing,
+grants `PLATFORM_ADMIN` if not already held). This is the same pattern as Keycloak (`KEYCLOAK_ADMIN`) and
 Grafana (`GF_SECURITY_ADMIN_*`); the password is used only when creating a new admin and is never
 logged. `docker compose up` already sets dev credentials:
 

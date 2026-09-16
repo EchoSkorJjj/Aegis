@@ -41,7 +41,8 @@ public enum AuditEventType {
     USER_INVITED(SUCCESS),
     USER_UPDATED(SUCCESS),
     USER_ROLES_CHANGED(SUCCESS),
-    USER_DELETED(SUCCESS);
+    USER_DELETED(SUCCESS),
+    USER_REMOVED_FROM_ORG(SUCCESS);
 
     private final AuditOutcome defaultOutcome;
 

@@ -25,6 +25,8 @@ export function proxy(request: NextRequest) {
     pathname.startsWith("/dashboard/") ||
     pathname === "/admin" ||
     pathname.startsWith("/admin/") ||
+    pathname === "/organizations" ||
+    pathname.startsWith("/organizations/") ||
     pathname === "/settings" ||
     pathname.startsWith("/settings/");
   if (isProtected) {
@@ -50,6 +52,8 @@ export const config = {
     "/dashboard/:path*",
     "/admin",
     "/admin/:path*",
+    "/organizations",
+    "/organizations/:path*",
     "/settings",
     "/settings/:path*",
     "/login",

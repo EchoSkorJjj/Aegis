@@ -63,7 +63,7 @@ public class SecurityConfig {
         return http.build();
     }
 
-    /** Maps the JWT "roles" claim (e.g. ["USER","ADMIN"]) to ROLE_* authorities. */
+    /** Maps the JWT "roles" claim (e.g. ["USER","ORG_ADMIN"]) to ROLE_* authorities. */
     private JwtAuthenticationConverter jwtAuthenticationConverter() {
         JwtGrantedAuthoritiesConverter authorities = new JwtGrantedAuthoritiesConverter();
         authorities.setAuthoritiesClaimName("roles");

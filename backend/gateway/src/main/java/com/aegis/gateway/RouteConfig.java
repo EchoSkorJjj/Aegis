@@ -35,6 +35,9 @@ public class RouteConfig {
                 // gateway (see SecurityConfig: anyRequest authenticated); identity-service applies
                 // the per-endpoint role rules.
                 .route(path("/users/**"), http())
+                // Organizations + membership / workspace switching (ADR 0001) — authenticated at the
+                // edge; identity-service verifies membership.
+                .route(path("/orgs/**"), http())
                 .before(uri(identityUri))
                 .build();
     }

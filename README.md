@@ -36,11 +36,12 @@ the stack; all are wired into Docker Compose.
 - Per-account login lockout and per-IP rate limiting on `/auth/*`.
 
 **Authorization & accounts**
-- Platform roles `USER` / `ADMIN` and Aegis domain roles `SERVICE_OWNER` / `ANALYST` /
-  `COMPLIANCE_ADMIN`, persisted and issued by identity-service and mapped to Spring `ROLE_*`
-  authorities. Platform roles are not aliases for domain roles.
-- The opt-in bootstrap account starts with `USER` + `ADMIN`; an administrator assigns domain roles
-  through the user-management API before those users access domain APIs.
+- Platform roles `USER` / `PLATFORM_ADMIN` / `ORG_ADMIN` and Aegis domain roles `SERVICE_OWNER` /
+  `ANALYST` / `COMPLIANCE_ADMIN`, persisted and issued by identity-service and mapped to Spring
+  `ROLE_*` authorities. `PLATFORM_ADMIN` is the org-less platform operator; `ORG_ADMIN` administers a
+  single organization. Platform roles are not aliases for domain roles.
+- The opt-in bootstrap account starts with `USER` + `PLATFORM_ADMIN`; an administrator assigns domain
+  roles through the user-management API before those users access domain APIs.
 - Public sign-up toggle (flip to invite-only), admin invite flow, email verification, password reset,
   and self-service change-password — one backend flag drives both the API and the UI.
 

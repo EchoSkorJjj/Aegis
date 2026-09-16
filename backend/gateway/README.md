@@ -28,7 +28,7 @@ team already knows. The reactive flavour is `spring-cloud-starter-gateway-server
 - **Here (authentication + coarse authorisation):** validate the JWT against identity-service's JWKS
   (`IDENTITY_JWKS_URI`; Boot builds a lazy decoder, so startup never blocks on identity-service),
   map the `roles` claim to `ROLE_*`, and enforce route-level rules — e.g. `/api/admin/**` requires
-  `ADMIN`; `/auth/**` and `/oauth2/**` are public pass-through.
+  `PLATFORM_ADMIN`; `/auth/**` and `/oauth2/**` are public pass-through.
 - **Downstream (fine-grained authorisation):** each service decides "can this user act on *this*
   finding or service?" The gateway cannot know that.
 

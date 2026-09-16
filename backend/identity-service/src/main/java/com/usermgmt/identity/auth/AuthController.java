@@ -15,6 +15,7 @@ import com.usermgmt.identity.auth.AuthDtos.RegisterRequest;
 import com.usermgmt.identity.auth.AuthDtos.ResendVerificationRequest;
 import com.usermgmt.identity.auth.AuthDtos.ResetPasswordRequest;
 import com.usermgmt.identity.auth.AuthDtos.SelectMethodRequest;
+import com.usermgmt.identity.auth.AuthDtos.SwitchOrgRequest;
 import com.usermgmt.identity.auth.AuthDtos.TokenResponse;
 import com.usermgmt.identity.auth.AuthDtos.VerifyEmailRequest;
 import com.usermgmt.identity.auth.AuthDtos.VerifyOtpRequest;
@@ -46,22 +47,26 @@ public class AuthController {
     private final MfaSettings mfa;
     private final String authMode;
     private final boolean registrationEnabled;
+    private final boolean orgSignupEnabled;
 
     public AuthController(AuthService auth, AccountService accounts, MfaSettings mfa,
                           @Value("${identity.auth.mode:local}") String authMode,
-                          @Value("${identity.registration.enabled:true}") boolean registrationEnabled) {
+                          @Value("${identity.registration.enabled:true}") boolean registrationEnabled,
+                          @Value("${identity.org-signup.enabled:true}") boolean orgSignupEnabled) {
         this.auth = auth;
         this.accounts = accounts;
         this.mfa = mfa;
         this.authMode = authMode;
         this.registrationEnabled = registrationEnabled;
+        this.orgSignupEnabled = orgSignupEnabled;
     }
 
     /** Public auth config for the SPA: login mode, self-registration, and enabled MFA methods. */
     @GetMapping("/config")
     public AuthConfigResponse config() {
-        return new AuthConfigResponse(authMode, registrationEnabled, new AuthConfigResponse.Methods(
-                mfa.isEmailOtpEnabled(), mfa.isTotpEnabled(), mfa.isWebauthnEnabled()));
+        return new AuthConfigResponse(authMode, registrationEnabled, orgSignupEnabled,
+                new AuthConfigResponse.Methods(
+                        mfa.isEmailOtpEnabled(), mfa.isTotpEnabled(), mfa.isWebauthnEnabled()));
     }
 
     @PostMapping("/register")
@@ -120,6 +125,14 @@ public class AuthController {
     @SecurityRequirement(name = "bearer-jwt")
     public void logoutAll(@AuthenticationPrincipal Jwt jwt) {
         auth.logoutAll(UUID.fromString(jwt.getSubject()));
+    }
+
+    /** Switches the caller's active organization and returns a new token scoped to it (ADR 0001). */
+    @PostMapping("/switch-org")
+    @SecurityRequirement(name = "bearer-jwt")
+    public TokenResponse switchOrg(@Valid @RequestBody SwitchOrgRequest req,
+                                   @AuthenticationPrincipal Jwt jwt) {
+        return auth.switchOrg(UUID.fromString(jwt.getSubject()), req.orgId());
     }
 
     /** Authenticated self-service password change; signs the account out of all sessions. */
