@@ -75,7 +75,7 @@ public class GlobalExceptionHandler {
     /** Database constraints remain the final guard against concurrent duplicate writes. */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ApiError> integrityConflict(DataIntegrityViolationException ex, HttpServletRequest req) {
-        return build(HttpStatus.CONFLICT, "Inventory data conflicts with an existing record or relationship", req);
+        return build(HttpStatus.CONFLICT, "Request conflicts with an existing record or relationship", req);
     }
 
     private ResponseEntity<ApiError> build(HttpStatus status, String message, HttpServletRequest req) {

@@ -12,14 +12,16 @@ See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../..
 > component dependents); the ingestion framework (scheduled polling, dedup, raw-event store) runs three
 > connectors — the **NVD CVE feed** (CPE, CVSS and affected versions → advisories), **vendor status
 > pages** (Statuspage/RSS → vendor incidents), and **security news** (RSS/Atom → articles with the CVE
-> identifiers they mention). Matching, scoring, and action workflows remain planned.
+> identifiers they mention) — unified for reading through the **`change_signals`** view, with
+> per-feed health/counts/last-success exposed as Prometheus metrics. Matching, scoring, and action
+> workflows remain planned.
 
 ## Modules (a modular monolith, split by seams later)
 
 | Package | Responsibility |
 |---|---|
 | `inventory` | Services, components, vendors, SBOM dependencies, ownership — the map |
-| `ingestion` | Scheduled feed polling (NVD, vendor status, security news) → advisories, incidents, news |
+| `ingestion` | Scheduled feed polling (NVD, vendor status, security news) → advisories, incidents, news, unified into `change_signals` |
 | `matching`  | Advisory package + version range → components → impacted services/owners → findings |
 | `scoring`   | Deterministic impact score per service and owner, with a "why" breakdown |
 | `actions`   | Execute human-approved responses (PR / ticket / memo), audited |
@@ -40,7 +42,9 @@ domain. See `ARCHITECTURE.md` for the topology.
   Plain relational store (no pgvector — RAG belongs to the ai-service). Flyway manages the schema.
 - **Auth** — OAuth2 resource server; validates identity-service's RS256 JWTs via its JWKS
   (`IDENTITY_JWKS_URI`), maps the `roles` claim, and authorizes per route.
-- **Observability** — `/actuator/health|info|prometheus`, traces to Zipkin (propagated to the ai-service).
+- **Observability** — `/actuator/health|info|prometheus`, traces to Zipkin (propagated to the
+  ai-service), and per-ingestion-feed health/counts/last-success metrics (see "Ingestion feed
+  health" below and `ops/README.md`).
 
 ### Key environment variables
 
@@ -65,6 +69,7 @@ domain. See `ARCHITECTURE.md` for the topology.
 | `AEGIS_VENDOR_STATUS_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → vendor-incident drain |
 | `AEGIS_INGESTION_NEWS_ENABLED` | `false` | Poll security news feeds (Docker Compose sets `true`) |
 | `AEGIS_NEWS_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → news-item drain |
+| `AEGIS_INGESTION_HEALTH_STALE_AFTER` | `PT45M` | How long since a feed's last success before `aegis_ingestion_health` reports unhealthy |
 
 The vendor and news feed lists are YAML (`aegis.ingestion.vendor-status.vendors`,
 `aegis.ingestion.news.feeds`), not env vars — each entry needs several fields.
@@ -149,6 +154,17 @@ status, and security news follow the same seam.
   the events replay. An event the handler cannot parse is still marked processed, so one bad payload
   never becomes a poison pill.
 - Disable the scheduler with `AEGIS_INGESTION_ENABLED=false`.
+- **Resilience is tested against mocked feeds, not live external calls** (CS203-47): every connector
+  test spins up a real local HTTP server (`com.sun.net.httpserver.HttpServer`) or hand-built fixture,
+  never nvd.nist.gov or a real status page. Covered: a feed returning an error status or being
+  completely unreachable (`NvdSourceTest`, and the pre-existing per-vendor/per-publisher isolation in
+  `VendorStatusSourceTest`/`NewsSourceTest`), a persistently failing poll exhausting retry/backoff
+  (`IngestionRetryTest`), one failing source not blocking the others (`IngestionSchedulerTest`), and
+  malformed/invalid payloads at both the parser level (`NvdAdvisoryParserTest`,
+  `StatuspageFeedReaderTest`, `SyndicationFeedParserTest`) and end to end through the real drain path
+  (`*NormalizerIntegrationTest.marksAnUnparseableDocumentProcessedRatherThanBlockingTheQueue`, and
+  `RawEventDrainerTest` for the drain loop's own accounting) — a bad payload is dropped, never a
+  poison pill that wedges the queue.
 
 > **Writing a connector?** Use `FeedHttpClient` (or build your own `RestClient` with explicit
 > connect/read timeouts, as `NvdApiClient` does). Do **not** inject the application's `RestClient`
@@ -262,6 +278,44 @@ Polls security news and threat-intel publishers and normalises each article into
 
 Read-only, behind the same Aegis domain read roles as the other domain APIs.
 
+### Change signals API (unified view)
+
+Advisories, vendor incidents, and news items are each written by their own connector, but matching,
+scoring, and the frontend need to treat "a real-world change" uniformly. `change_signals` is a
+read-only database view (`V10__change_signals_view.sql`) that `union all`s the three normalised
+tables into one shape — it owns no data of its own; each source's connector remains the sole writer
+of its own idempotently-upserted table.
+
+- `GET /api/change-signals` — every signal from every source, most recently occurred first
+  (`occurredAt` is each row's revision/update/publish timestamp, coalesced down to when it was first
+  ingested).
+- `GET /api/change-signals/{id}` — one signal by its id (the underlying advisory/incident/news row's
+  own id).
+
+Each response carries a `signalType` of `VULNERABILITY`, `VENDOR_OUTAGE`, or `SECURITY_NEWS` telling
+you which table it was projected from. Read-only and behind the same Aegis domain read roles as the
+per-source APIs above.
+
+### Ingestion feed health (metrics, CS203-47)
+
+Per-feed health, record counts, and last-success time — exposed as Micrometer metrics on the
+existing `/actuator/prometheus` endpoint (no new REST surface; nothing here needs a JWT, since
+`/actuator/prometheus` is already public — see `SecurityConfig`). `IngestionFeedMetrics` registers
+one series per `IngestionSource` bean (`nvd`, `vendor-status`, `security-news` today) at startup:
+
+- `aegis_ingestion_health{source_id}` — 1 (healthy) or 0. Unhealthy if the feed has never
+  succeeded, its most recent poll attempt failed, or it's been longer than
+  `aegis.ingestion.health.stale-after` (default 45m) since its last success.
+- `aegis_ingestion_last_success_timestamp_seconds{source_id}` — epoch seconds of the last
+  successful poll.
+- `aegis_ingestion_poll_total{source_id,outcome}` and `aegis_ingestion_poll_records_total
+  {source_id,result}` — poll attempts and raw events observed (`stored`/`duplicate`).
+- `aegis_ingestion_normalize_records_total{source_id,result}` — records normalised, dropped, or
+  deferred for retry.
+
+See [`ops/README.md`](../../ops/README.md) for the full PromQL cookbook (finding unhealthy feeds,
+staleness queries, per-feed throughput).
+
 ### Seeing it work
 
 `docker compose up` enables all three connectors with a demo cadence (first poll ~1 minute after
@@ -278,6 +332,15 @@ curl -s localhost:8080/api/vendor-incidents -H "Authorization: Bearer $TOKEN" | 
 
 ```bash
 curl -s "localhost:8080/api/news?cve=CVE-2021-44228" -H "Authorization: Bearer $TOKEN" | jq '.content[].title'
+```
+
+```bash
+curl -s localhost:8080/api/change-signals -H "Authorization: Bearer $TOKEN" | jq '.content[] | {signalType, title}'
+```
+
+```bash
+# Per-feed health/last-success/record-count metrics — no auth needed, direct to aegis-core.
+curl -s localhost:8082/actuator/prometheus | grep ^aegis_ingestion
 ```
 
 `$TOKEN` is an access token for a user holding a domain role (`SERVICE_OWNER`, `ANALYST` or

@@ -14,6 +14,8 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsInRelativeOrder;
+import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -69,14 +71,21 @@ class NewsItemApiIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void listsArticlesMostRecentlyPublishedFirst() throws Exception {
-        String externalId = uniqueExternalId();
-        seedItem(externalId, Instant.parse("2099-12-31T00:00:00Z"), List.of("CVE-2021-44228"));
+        String newer = uniqueExternalId();
+        String older = uniqueExternalId();
+        seedItem(older, Instant.parse("2099-01-01T00:00:00Z"), List.of("CVE-2021-45046"));
+        seedItem(newer, Instant.parse("2099-12-31T00:00:00Z"), List.of("CVE-2021-44228"));
 
-        mvc.perform(get("/api/news").with(role("ANALYST")))
+        // Ordering asserted over this test's own two rows (relative order); the projection — including
+        // the batched CVE-reference load unique to the list path — on the newer row located by id.
+        // Immune to whatever else shares the database.
+        mvc.perform(get("/api/news?size=100").with(role("ANALYST")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content[0].externalId").value(externalId))
-                .andExpect(jsonPath("$.content[0].feedName").value("The Hacker News"))
-                .andExpect(jsonPath("$.content[0].cveReferences[0]").value("CVE-2021-44228"));
+                .andExpect(jsonPath("$.content[*].externalId", containsInRelativeOrder(newer, older)))
+                .andExpect(jsonPath("$.content[?(@.externalId=='" + newer + "')].feedName",
+                        hasItem("The Hacker News")))
+                .andExpect(jsonPath("$.content[?(@.externalId=='" + newer + "')].cveReferences[0]",
+                        hasItem("CVE-2021-44228")));
     }
 
     @Test

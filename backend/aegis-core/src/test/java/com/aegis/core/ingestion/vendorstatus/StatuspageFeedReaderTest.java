@@ -12,6 +12,7 @@ import org.springframework.core.io.ClassPathResource;
 import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class StatuspageFeedReaderTest {
 
@@ -95,5 +96,17 @@ class StatuspageFeedReaderTest {
 
         assertThat(reader.read(payload, CLOUDFLARE)).singleElement()
                 .satisfies(incident -> assertThat(incident.title()).isEqualTo("Brief"));
+    }
+
+    /**
+     * CS203-47: resilience — a malformed document must throw (so {@code VendorStatusNormalizer} wraps
+     * it as {@code UnparseableEventException} and the drainer drops it, per
+     * {@code VendorStatusNormalizerIntegrationTest.marksAnUnparseableDocumentProcessedRatherThanBlockingTheQueue}),
+     * never silently produce an empty or partial result.
+     */
+    @Test
+    void rejectsMalformedJson() {
+        assertThatThrownBy(() -> reader.read("{not json", CLOUDFLARE))
+                .isInstanceOf(RuntimeException.class);
     }
 }

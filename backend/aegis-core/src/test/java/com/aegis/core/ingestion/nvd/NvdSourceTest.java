@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
 /**
@@ -45,12 +46,22 @@ class NvdSourceTest {
     private final List<String> requestedUris = new ArrayList<>();
     private final Deque<String> responses = new ArrayDeque<>();
     private final FakeRawEventStore store = new FakeRawEventStore();
+    /** CS203-47: when set, the server answers every request with this status instead of a 200. */
+    private volatile Integer failWithStatus;
 
     @BeforeEach
     void startServer() throws IOException {
         server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
         server.createContext("/rest/json/cves/2.0", exchange -> {
             requestedUris.add(exchange.getRequestURI().toString());
+            if (failWithStatus != null) {
+                byte[] body = "simulated feed failure".getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(failWithStatus, body.length);
+                try (OutputStream out = exchange.getResponseBody()) {
+                    out.write(body);
+                }
+                return;
+            }
             byte[] body = (responses.isEmpty() ? "{\"totalResults\":0,\"vulnerabilities\":[]}" : responses.poll())
                     .getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
@@ -159,6 +170,38 @@ class NvdSourceTest {
         List<RawEvent> events = source(properties(2, 10, 32)).poll();
 
         assertThat(events).isEmpty();
+    }
+
+    // CS203-47: resilience — a feed that is down or unreachable must surface as a thrown exception,
+    // never as a silently empty/partial result, so the framework's retry/backoff and per-feed health
+    // metrics (aegis_ingestion_health, aegis_ingestion_poll_total{outcome="failure"}) can act on it.
+
+    @Test
+    void propagatesANonSuccessfulHttpStatusRatherThanSwallowingIt() {
+        // NVD's own rate-limit replies (403/429) and any 5xx all look like this to the client.
+        failWithStatus = 429;
+
+        assertThatThrownBy(() -> source(properties()).poll())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("429");
+    }
+
+    @Test
+    void propagatesAServerErrorRatherThanSwallowingIt() {
+        failWithStatus = 500;
+
+        assertThatThrownBy(() -> source(properties()).poll())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("500");
+    }
+
+    @Test
+    void propagatesAConnectionFailureWhenTheFeedIsUnreachable() {
+        NvdProperties properties = properties();
+        server.stop(0); // the feed is not just erroring, it's completely unreachable
+
+        assertThatThrownBy(() -> source(properties).poll())
+                .isInstanceOf(Exception.class);
     }
 
     private NvdSource source(NvdProperties properties) {
