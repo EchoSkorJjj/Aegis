@@ -12,14 +12,15 @@ See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../..
 > component dependents); the ingestion framework (scheduled polling, dedup, raw-event store) runs three
 > connectors — the **NVD CVE feed** (CPE, CVSS and affected versions → advisories), **vendor status
 > pages** (Statuspage/RSS → vendor incidents), and **security news** (RSS/Atom → articles with the CVE
-> identifiers they mention). Matching, scoring, and action workflows remain planned.
+> identifiers they mention) — unified for reading through the **`change_signals`** view. Matching,
+> scoring, and action workflows remain planned.
 
 ## Modules (a modular monolith, split by seams later)
 
 | Package | Responsibility |
 |---|---|
 | `inventory` | Services, components, vendors, SBOM dependencies, ownership — the map |
-| `ingestion` | Scheduled feed polling (NVD, vendor status, security news) → advisories, incidents, news |
+| `ingestion` | Scheduled feed polling (NVD, vendor status, security news) → advisories, incidents, news, unified into `change_signals` |
 | `matching`  | Advisory package + version range → components → impacted services/owners → findings |
 | `scoring`   | Deterministic impact score per service and owner, with a "why" breakdown |
 | `actions`   | Execute human-approved responses (PR / ticket / memo), audited |
@@ -262,6 +263,24 @@ Polls security news and threat-intel publishers and normalises each article into
 
 Read-only, behind the same Aegis domain read roles as the other domain APIs.
 
+### Change signals API (unified view)
+
+Advisories, vendor incidents, and news items are each written by their own connector, but matching,
+scoring, and the frontend need to treat "a real-world change" uniformly. `change_signals` is a
+read-only database view (`V10__change_signals_view.sql`) that `union all`s the three normalised
+tables into one shape — it owns no data of its own; each source's connector remains the sole writer
+of its own idempotently-upserted table.
+
+- `GET /api/change-signals` — every signal from every source, most recently occurred first
+  (`occurredAt` is each row's revision/update/publish timestamp, coalesced down to when it was first
+  ingested).
+- `GET /api/change-signals/{id}` — one signal by its id (the underlying advisory/incident/news row's
+  own id).
+
+Each response carries a `signalType` of `VULNERABILITY`, `VENDOR_OUTAGE`, or `SECURITY_NEWS` telling
+you which table it was projected from. Read-only and behind the same Aegis domain read roles as the
+per-source APIs above.
+
 ### Seeing it work
 
 `docker compose up` enables all three connectors with a demo cadence (first poll ~1 minute after
@@ -278,6 +297,10 @@ curl -s localhost:8080/api/vendor-incidents -H "Authorization: Bearer $TOKEN" | 
 
 ```bash
 curl -s "localhost:8080/api/news?cve=CVE-2021-44228" -H "Authorization: Bearer $TOKEN" | jq '.content[].title'
+```
+
+```bash
+curl -s localhost:8080/api/change-signals -H "Authorization: Bearer $TOKEN" | jq '.content[] | {signalType, title}'
 ```
 
 `$TOKEN` is an access token for a user holding a domain role (`SERVICE_OWNER`, `ANALYST` or
