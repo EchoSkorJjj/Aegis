@@ -154,6 +154,17 @@ status, and security news follow the same seam.
   the events replay. An event the handler cannot parse is still marked processed, so one bad payload
   never becomes a poison pill.
 - Disable the scheduler with `AEGIS_INGESTION_ENABLED=false`.
+- **Resilience is tested against mocked feeds, not live external calls** (CS203-47): every connector
+  test spins up a real local HTTP server (`com.sun.net.httpserver.HttpServer`) or hand-built fixture,
+  never nvd.nist.gov or a real status page. Covered: a feed returning an error status or being
+  completely unreachable (`NvdSourceTest`, and the pre-existing per-vendor/per-publisher isolation in
+  `VendorStatusSourceTest`/`NewsSourceTest`), a persistently failing poll exhausting retry/backoff
+  (`IngestionRetryTest`), one failing source not blocking the others (`IngestionSchedulerTest`), and
+  malformed/invalid payloads at both the parser level (`NvdAdvisoryParserTest`,
+  `StatuspageFeedReaderTest`, `SyndicationFeedParserTest`) and end to end through the real drain path
+  (`*NormalizerIntegrationTest.marksAnUnparseableDocumentProcessedRatherThanBlockingTheQueue`, and
+  `RawEventDrainerTest` for the drain loop's own accounting) — a bad payload is dropped, never a
+  poison pill that wedges the queue.
 
 > **Writing a connector?** Use `FeedHttpClient` (or build your own `RestClient` with explicit
 > connect/read timeouts, as `NvdApiClient` does). Do **not** inject the application's `RestClient`
