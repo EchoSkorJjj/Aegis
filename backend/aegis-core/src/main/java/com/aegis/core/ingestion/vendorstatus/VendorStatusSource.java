@@ -7,7 +7,10 @@ import java.util.Optional;
 
 import com.aegis.core.ingestion.IngestionSource;
 import com.aegis.core.ingestion.RawEvent;
+import com.aegis.core.ingestion.feed.Digests;
+import com.aegis.core.ingestion.feed.FeedHttpClient;
 import com.aegis.core.ingestion.vendorstatus.VendorStatusProperties.Vendor;
+import io.micrometer.observation.ObservationRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -36,11 +39,12 @@ class VendorStatusSource implements IngestionSource {
 
     private static final Logger log = LoggerFactory.getLogger(VendorStatusSource.class);
 
-    private final VendorStatusClient client;
+    private final FeedHttpClient client;
     private final VendorStatusProperties properties;
 
-    VendorStatusSource(VendorStatusClient client, VendorStatusProperties properties) {
-        this.client = client;
+    VendorStatusSource(VendorStatusProperties properties, ObservationRegistry observationRegistry) {
+        this.client = new FeedHttpClient(
+                properties.connectTimeout(), properties.readTimeout(), observationRegistry);
         this.properties = properties;
     }
 

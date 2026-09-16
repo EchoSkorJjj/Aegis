@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 
+import com.aegis.core.ingestion.feed.SyndicationFeedParser;
 import com.aegis.core.ingestion.incident.VendorIncident;
 import com.aegis.core.ingestion.vendorstatus.VendorStatusProperties.Format;
 import com.aegis.core.ingestion.vendorstatus.VendorStatusProperties.Vendor;
@@ -11,14 +12,17 @@ import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+/**
+ * Mapping from feed entries onto vendor incidents. The XML itself — formats, id fallbacks, and the
+ * XXE hardening — is {@link SyndicationFeedParser}'s contract and is asserted in its own test.
+ */
 class RssFeedReaderTest {
 
     private static final Vendor AWS = new Vendor(
             "aws", "Amazon Web Services", "https://status.aws.amazon.com/rss/all.rss", Format.RSS);
 
-    private final RssFeedReader reader = new RssFeedReader();
+    private final RssFeedReader reader = new RssFeedReader(new SyndicationFeedParser());
 
     private static String fixture() throws Exception {
         return new ClassPathResource("vendorstatus/aws-status.rss")
@@ -38,7 +42,7 @@ class RssFeedReaderTest {
         assertThat(first.url()).isEqualTo("https://status.aws.amazon.com/");
         assertThat(first.externalId())
                 .isEqualTo("aws:https://status.aws.amazon.com/#multipleservices-me-central-1_1789468030");
-        // Zone-abbreviation pubDate; PDT is UTC-7.
+        // AWS stamps pubDate with a zone abbreviation rather than an offset; PDT is UTC-7.
         assertThat(first.startedAt()).isEqualTo(Instant.parse("2026-09-15T10:27:10Z"));
         assertThat(first.lastUpdateAt()).isEqualTo(Instant.parse("2026-09-15T10:27:10Z"));
     }
@@ -50,94 +54,27 @@ class RssFeedReaderTest {
         assertThat(incident.status()).isNull();
         assertThat(incident.impact()).isNull();
         assertThat(incident.resolvedAt()).isNull();
+        assertThat(incident.resolved()).isFalse();
     }
 
     @Test
-    void fallsBackToAStableHashWhenAnItemHasNoGuid() throws Exception {
-        // The second fixture item has no <guid>, so the id falls back to its link.
-        VendorIncident incident = reader.read(fixture(), AWS).get(1);
+    void scopesExternalIdsByVendorSoTwoVendorsCannotCollide() throws Exception {
+        Vendor other = new Vendor("other", "Other Vendor", "https://status.example.com/feed.rss", Format.RSS);
 
-        assertThat(incident.externalId()).isEqualTo("aws:https://status.aws.amazon.com/");
-        // Re-reading the same document must produce the same id, or every poll would duplicate it.
-        assertThat(reader.read(fixture(), AWS).get(1).externalId()).isEqualTo(incident.externalId());
+        assertThat(reader.read(fixture(), AWS).get(0).externalId()).startsWith("aws:");
+        assertThat(reader.read(fixture(), other).get(0).externalId()).startsWith("other:");
     }
 
     @Test
-    void hashesTheEntryWhenItHasNeitherGuidNorLink() {
+    void fallsBackToAPlaceholderTitleWhenAnEntryHasNone() {
         String feed = """
                 <?xml version="1.0"?>
                 <rss version="2.0"><channel>
-                  <item><title>No identifiers at all</title><pubDate>Mon, 14 Sep 2026 11:05:00 GMT</pubDate></item>
+                  <item><link>https://status.example.com/1</link></item>
                 </channel></rss>
                 """;
 
-        String externalId = reader.read(feed, AWS).get(0).externalId();
-
-        assertThat(externalId).startsWith("aws:sha256:");
-        assertThat(reader.read(feed, AWS).get(0).externalId()).isEqualTo(externalId);
-    }
-
-    @Test
-    void readsAtomEntriesToo() {
-        String feed = """
-                <?xml version="1.0" encoding="utf-8"?>
-                <feed xmlns="http://www.w3.org/2005/Atom">
-                  <title>Vendor status</title>
-                  <entry>
-                    <id>urn:incident:42</id>
-                    <title>Partial degradation</title>
-                    <link href="https://status.example.com/incidents/42"/>
-                    <updated>2026-09-16T02:03:10Z</updated>
-                    <summary>Some customers may see elevated error rates.</summary>
-                  </entry>
-                </feed>
-                """;
-
-        VendorIncident incident = reader.read(feed, AWS).get(0);
-
-        assertThat(incident.externalId()).isEqualTo("aws:urn:incident:42");
-        assertThat(incident.title()).isEqualTo("Partial degradation");
-        assertThat(incident.url()).isEqualTo("https://status.example.com/incidents/42");
-        assertThat(incident.summary()).isEqualTo("Some customers may see elevated error rates.");
-        assertThat(incident.startedAt()).isEqualTo(Instant.parse("2026-09-16T02:03:10Z"));
-    }
-
-    @Test
-    void rejectsXxeRatherThanResolvingAnExternalEntity() {
-        // The classic attack: a hostile status page trying to read a local file through the parser.
-        String hostile = """
-                <?xml version="1.0"?>
-                <!DOCTYPE rss [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
-                <rss version="2.0"><channel>
-                  <item><title>&xxe;</title></item>
-                </channel></rss>
-                """;
-
-        assertThatThrownBy(() -> reader.read(hostile, AWS))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("not parseable XML");
-    }
-
-    @Test
-    void rejectsEntityExpansionBombs() {
-        // "Billion laughs": also DOCTYPE-based, so disallowing DOCTYPE stops it before expansion.
-        String bomb = """
-                <?xml version="1.0"?>
-                <!DOCTYPE lolz [
-                  <!ENTITY lol "lol">
-                  <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
-                  <!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">
-                ]>
-                <rss version="2.0"><channel><item><title>&lol3;</title></item></channel></rss>
-                """;
-
-        assertThatThrownBy(() -> reader.read(bomb, AWS)).isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void rejectsMalformedXml() {
-        assertThatThrownBy(() -> reader.read("<rss><channel><item></rss>", AWS))
-                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(reader.read(feed, AWS).get(0).title()).isEqualTo("(untitled incident)");
     }
 
     @Test

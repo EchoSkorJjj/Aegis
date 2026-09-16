@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>The Hacker News</title>
+    <link>https://thehackernews.com</link>
+    <description>Security news</description>
+
+    <item>
+      <title>Critical Apache Log4j Flaw CVE-2021-44228 Under Active Exploitation</title>
+      <link>https://thehackernews.com/2021/12/log4shell.html</link>
+      <pubDate>Fri, 10 Dec 2021 08:15:00 GMT</pubDate>
+      <guid isPermaLink="false">tag:thehackernews.com,2021:post-1</guid>
+      <description>&lt;p&gt;Attackers are actively exploiting &lt;b&gt;CVE-2021-44228&lt;/b&gt;, also tracked as
+        Log4Shell. A follow-up issue, cve-2021-45046, was disclosed days later.&lt;/p&gt;</description>
+    </item>
+
+    <item>
+      <title>Researchers Detail New Phishing Campaign Targeting Finance Teams</title>
+      <link>https://thehackernews.com/2026/09/phishing.html</link>
+      <pubDate>Tue, 15 Sep 2026 09:00:00 GMT</pubDate>
+      <guid isPermaLink="false">tag:thehackernews.com,2026:post-2</guid>
+      <description>&lt;p&gt;No specific vulnerability is named in this campaign &amp;amp; the lure is
+        a spoofed invoice.&lt;/p&gt;</description>
+    </item>
+
+    <item>
+      <title>Patch Tuesday Round-Up</title>
+      <link>https://thehackernews.com/2026/09/patch-tuesday.html</link>
+      <pubDate>Wed, 09 Sep 2026 17:30:00 GMT</pubDate>
+      <guid isPermaLink="false">tag:thehackernews.com,2026:post-3</guid>
+      <description>Fixes shipped for CVE-2026-1111, CVE-2026-2222 and CVE-2026-1111 again.</description>
+    </item>
+  </channel>
+</rss>

@@ -115,6 +115,35 @@ aegis:
           name: Snowflake
           url: https://status.snowflake.com/api/v2/incidents.json
           format: statuspage
+    # Security news / threat intel connector. Off by default like the other feeds.
+    #
+    # Only credential-free RSS/Atom feeds: a "news API" needing a key would put a secret in config,
+    # and every worthwhile security publisher offers a feed. Articles are matched to the estate by
+    # the CVE identifiers they mention, extracted by pattern — never by a model.
+    news:
+      enabled: ${AEGIS_INGESTION_NEWS_ENABLED:false}
+      connect-timeout: PT5S
+      read-timeout: PT15S
+      # Untrusted third-party prose: cap what one publisher's document may push into the raw store.
+      max-payload-bytes: 4194304
+      normalize-interval: ${AEGIS_NEWS_NORMALIZE_INTERVAL:PT1M}
+      normalize-batch-size: 50
+      feeds:
+        - key: cisa
+          name: CISA Cybersecurity Advisories
+          url: https://www.cisa.gov/cybersecurity-advisories/all.xml
+        - key: thehackernews
+          name: The Hacker News
+          url: https://feeds.feedburner.com/TheHackersNews
+        - key: bleepingcomputer
+          name: BleepingComputer
+          url: https://www.bleepingcomputer.com/feed/
+        - key: sans-isc
+          name: SANS Internet Storm Center
+          url: https://isc.sans.edu/rssfeed.xml
+        - key: krebs
+          name: Krebs on Security
+          url: https://krebsonsecurity.com/feed/
 
 springdoc:
   swagger-ui:

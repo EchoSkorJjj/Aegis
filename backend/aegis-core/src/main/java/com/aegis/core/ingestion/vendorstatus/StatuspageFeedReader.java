@@ -3,6 +3,7 @@ package com.aegis.core.ingestion.vendorstatus;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.aegis.core.ingestion.feed.FeedTimestamps;
 import com.aegis.core.ingestion.incident.VendorIncident;
 import com.aegis.core.ingestion.vendorstatus.VendorStatusProperties.Vendor;
 import com.fasterxml.jackson.annotation.JsonProperty;

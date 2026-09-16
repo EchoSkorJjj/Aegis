@@ -94,6 +94,9 @@ services:
       # Poll the status pages of the five vendors the demo estate depends on (AWS via RSS, the rest
       # via Statuspage JSON). No credentials — these are public pages.
       AEGIS_INGESTION_VENDOR_STATUS_ENABLED: "true"
+      # Poll public security news/threat-intel RSS feeds (CISA, press, research blogs). No keys —
+      # credential-free feeds only.
+      AEGIS_INGESTION_NEWS_ENABLED: "true"
     ports:
       - "8082:8082"
     networks: [edge, internal]

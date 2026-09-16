@@ -1,4 +1,4 @@
-package com.aegis.core.ingestion.vendorstatus;
+package com.aegis.core.ingestion.feed;
 
 import java.time.Instant;
 

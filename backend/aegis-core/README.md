@@ -9,17 +9,17 @@ See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../..
 > **Status:** the Spring Boot wiring, security, module seams, and AI port are in place. The inventory
 > module persists its core entities and direct relationships, exposes authenticated CRUD APIs, and
 > answers impact graph queries (component/vendor → impacted services + owners, including transitive
-> component dependents); the ingestion framework (scheduled polling, dedup, raw-event store) runs two
-> connectors — the **NVD CVE feed**, normalising CPE, CVSS and affected product versions into
-> advisories, and **vendor status pages** (Statuspage/RSS), normalising outages into vendor incidents.
-> Matching, scoring, and action workflows remain planned.
+> component dependents); the ingestion framework (scheduled polling, dedup, raw-event store) runs three
+> connectors — the **NVD CVE feed** (CPE, CVSS and affected versions → advisories), **vendor status
+> pages** (Statuspage/RSS → vendor incidents), and **security news** (RSS/Atom → articles with the CVE
+> identifiers they mention). Matching, scoring, and action workflows remain planned.
 
 ## Modules (a modular monolith, split by seams later)
 
 | Package | Responsibility |
 |---|---|
 | `inventory` | Services, components, vendors, SBOM dependencies, ownership — the map |
-| `ingestion` | Scheduled feed polling (NVD, vendor status) → normalised advisories and incidents |
+| `ingestion` | Scheduled feed polling (NVD, vendor status, security news) → advisories, incidents, news |
 | `matching`  | Advisory package + version range → components → impacted services/owners → findings |
 | `scoring`   | Deterministic impact score per service and owner, with a "why" breakdown |
 | `actions`   | Execute human-approved responses (PR / ticket / memo), audited |
@@ -63,9 +63,11 @@ domain. See `ARCHITECTURE.md` for the topology.
 | `AEGIS_NVD_BASE_URL` | NVD 2.0 API | Override the feed endpoint (used by tests and mirrors) |
 | `AEGIS_INGESTION_VENDOR_STATUS_ENABLED` | `false` | Poll vendor status pages (Docker Compose sets `true`) |
 | `AEGIS_VENDOR_STATUS_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → vendor-incident drain |
+| `AEGIS_INGESTION_NEWS_ENABLED` | `false` | Poll security news feeds (Docker Compose sets `true`) |
+| `AEGIS_NEWS_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → news-item drain |
 
-The vendor list itself is YAML (`aegis.ingestion.vendor-status.vendors`), not an env var — each entry
-needs a key, a display name, a URL and a format.
+The vendor and news feed lists are YAML (`aegis.ingestion.vendor-status.vendors`,
+`aegis.ingestion.news.feeds`), not env vars — each entry needs several fields.
 
 ## Build & test
 
@@ -148,10 +150,12 @@ status, and security news follow the same seam.
   never becomes a poison pill.
 - Disable the scheduler with `AEGIS_INGESTION_ENABLED=false`.
 
-> **Writing a connector?** Build it its own `RestClient` with explicit connect/read timeouts (see
-> `NvdApiClient`). Do **not** inject the application's `RestClient` bean — that one points at the
-> internal ai-service and carries its `X-Service-Token` as a default header, which would be sent to
-> the external feed. A connector without a read timeout can also pin the shared ingestion thread.
+> **Writing a connector?** Use `FeedHttpClient` (or build your own `RestClient` with explicit
+> connect/read timeouts, as `NvdApiClient` does). Do **not** inject the application's `RestClient`
+> bean — that one points at the internal ai-service and carries its `X-Service-Token` as a default
+> header, which would be sent to the external feed. A connector without a read timeout can also pin
+> the shared ingestion thread. For RSS/Atom, parse through `SyndicationFeedParser` rather than rolling
+> your own XML: it is hardened against XXE, and that hardening should exist in exactly one place.
 
 ### NVD connector (CVE API 2.0)
 
@@ -231,10 +235,38 @@ local runs never reach third-party pages.
 
 Read-only, and behind the same Aegis domain read roles as the inventory and advisory APIs.
 
+### Security news connector (RSS / news feeds)
+
+Polls security news and threat-intel publishers and normalises each article into a **news item**.
+
+- **Credential-free feeds only** — an RSS or Atom URL, never a "news API" needing a key, because that
+  would put a secret in configuration. Defaults ship as CISA advisories, The Hacker News,
+  BleepingComputer, SANS ISC and Krebs on Security.
+- **CVE extraction is the point.** An advisory names an affected package and an incident names an
+  impaired vendor, but an article only tells a story. So the connector pulls the CVE identifiers out
+  of each title and summary by plain pattern match — never by a model — giving matching something
+  deterministic to join on: article → advisory → component → service. An article naming no CVE still
+  lands; it simply carries no join.
+- **Whole-document capture, per-feed isolation, size caps** — same shape as the vendor status
+  connector, and the same hardened XML parser.
+- **Prompt-injection posture.** News is the most attacker-influenceable content the platform ingests.
+  Nothing here reaches an LLM; the only interpretation applied is the CVE regex, and everything else
+  stays inert text. When the AI steps land, that guardrail lives at the ai-service boundary.
+
+### News API
+
+- `GET /api/news` — normalised articles, most recently published first.
+- `GET /api/news?cve=CVE-2021-44228` — only articles mentioning that CVE (case-insensitive). This is
+  the join matching will use.
+- `GET /api/news/{sourceId}/{externalId}` — one article.
+
+Read-only, behind the same Aegis domain read roles as the other domain APIs.
+
 ### Seeing it work
 
-`docker compose up` enables both connectors with a demo cadence (first poll ~1 minute after startup;
-NVD over a one-day window, instead of the 15-minute/two-day defaults). Within about two minutes:
+`docker compose up` enables all three connectors with a demo cadence (first poll ~1 minute after
+startup; NVD over a one-day window, instead of the 15-minute/two-day defaults). Within about two
+minutes:
 
 ```bash
 curl -s localhost:8080/api/advisories -H "Authorization: Bearer $TOKEN" | jq '.totalElements'
@@ -242,6 +274,10 @@ curl -s localhost:8080/api/advisories -H "Authorization: Bearer $TOKEN" | jq '.t
 
 ```bash
 curl -s localhost:8080/api/vendor-incidents -H "Authorization: Bearer $TOKEN" | jq '.content[0]'
+```
+
+```bash
+curl -s "localhost:8080/api/news?cve=CVE-2021-44228" -H "Authorization: Bearer $TOKEN" | jq '.content[].title'
 ```
 
 `$TOKEN` is an access token for a user holding a domain role (`SERVICE_OWNER`, `ANALYST` or
@@ -252,5 +288,7 @@ curl -s localhost:8080/api/vendor-incidents -H "Authorization: Bearer $TOKEN" | 
 ingestion source 'nvd': 2286 new, 0 duplicate(s)
 nvd: normalised 2286 record(s), 0 unparseable
 ingestion source 'vendor-status': 5 new, 0 duplicate(s)
-vendor-status: 63 incident(s) normalised
+vendor-status: 238 incident(s) normalised
+ingestion source 'security-news': 5 new, 0 duplicate(s)
+security-news: 147 article(s) normalised
 ```
