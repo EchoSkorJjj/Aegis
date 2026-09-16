@@ -13,6 +13,8 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsInRelativeOrder;
+import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -35,8 +37,9 @@ class VendorIncidentApiIntegrationTest extends AbstractIntegrationTest {
     }
 
     /**
-     * The suite shares one database, so each test seeds its own incident id. The far-future start
-     * pins it to the top of the default "most recently started" ordering whatever order tests run in.
+     * The suite shares one database, so each test seeds its own incident id. Assertions target these
+     * own rows (by id and by relative order), never an absolute list position, so rows seeded by other
+     * suites cannot perturb them.
      */
     private VendorIncident seedIncident(String externalId, Instant startedAt) {
         return incidents.upsert(new VendorIncident(
@@ -76,17 +79,21 @@ class VendorIncidentApiIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void listsIncidentsMostRecentlyStartedFirst() throws Exception {
-        String externalId = uniqueExternalId();
-        seedIncident(externalId, Instant.parse("2099-12-31T00:00:00Z"));
+        String newer = uniqueExternalId();
+        String older = uniqueExternalId();
+        seedIncident(older, Instant.parse("2099-01-01T00:00:00Z"));
+        seedIncident(newer, Instant.parse("2099-12-31T00:00:00Z"));
 
-        mvc.perform(get("/api/vendor-incidents").with(role("ANALYST")))
+        // Ordering asserted over this test's own two rows (relative order); the projection on the newer
+        // row located by id. Immune to whatever else shares the database.
+        mvc.perform(get("/api/vendor-incidents?size=100").with(role("ANALYST")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content[0].externalId").value(externalId))
-                .andExpect(jsonPath("$.content[0].vendorKey").value("cloudflare"))
-                .andExpect(jsonPath("$.content[0].vendorName").value("Cloudflare"))
-                .andExpect(jsonPath("$.content[0].status").value("monitoring"))
-                .andExpect(jsonPath("$.content[0].impact").value("minor"))
-                .andExpect(jsonPath("$.content[0].resolved").value(false));
+                .andExpect(jsonPath("$.content[*].externalId", containsInRelativeOrder(newer, older)))
+                .andExpect(jsonPath("$.content[?(@.externalId=='" + newer + "')].vendorKey", hasItem("cloudflare")))
+                .andExpect(jsonPath("$.content[?(@.externalId=='" + newer + "')].vendorName", hasItem("Cloudflare")))
+                .andExpect(jsonPath("$.content[?(@.externalId=='" + newer + "')].status", hasItem("monitoring")))
+                .andExpect(jsonPath("$.content[?(@.externalId=='" + newer + "')].impact", hasItem("minor")))
+                .andExpect(jsonPath("$.content[?(@.externalId=='" + newer + "')].resolved", hasItem(false)));
     }
 
     @Test

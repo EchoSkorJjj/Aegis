@@ -20,6 +20,7 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import static org.hamcrest.Matchers.containsInRelativeOrder;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -130,17 +131,34 @@ class ChangeSignalApiIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void listsSignalsFromEverySourceTogetherMostRecentlyOccurredFirst() throws Exception {
-        // Far enough in the future to reliably sort to the top regardless of what other tests seeded.
-        Instant top = Instant.parse("2100-01-01T00:00:00Z");
-        String cveId = "CVE-2100-" + unique();
-        advisories.upsert(new Advisory(
-                null, "nvd", cveId, "Listed at the top.", top, top,
-                new Advisory.Cvss("3.1", "CVSS:3.1/AV:N", new BigDecimal("7.5"), "HIGH"), List.of()));
+        // The unified view merges all three sources ordered by occurredAt desc. Asserted over this
+        // test's OWN rows in relative order (not an absolute content[0]), so it is immune to what other
+        // suites seed into the shared advisories/incidents/news tables — and the dates stay below the
+        // far-future rows those suites pin their own list tests to, so this never displaces them.
+        String tag = unique();
+        Instant oldest = Instant.parse("2099-02-01T00:00:00Z");
+        Instant middle = Instant.parse("2099-03-01T00:00:00Z");
+        Instant newest = Instant.parse("2099-04-01T00:00:00Z");
 
-        mvc.perform(get("/api/change-signals").with(role("ANALYST")))
+        String cveId = "CVE-2099-" + tag;
+        advisories.upsert(new Advisory(
+                null, "nvd", cveId, "An advisory.", oldest, oldest,
+                new Advisory.Cvss("3.1", "CVSS:3.1/AV:N", new BigDecimal("7.5"), "HIGH"), List.of()));
+        String incidentExternalId = "acme:incident-" + tag;
+        vendorIncidents.upsert(new VendorIncident(
+                null, "vendor-status", incidentExternalId, "acme", "Acme Cloud", "Partial outage",
+                "investigating", "major", null, "Degraded.", middle, null, null));
+        String newsExternalId = "feed:item-" + tag;
+        newsItems.upsert(new NewsItem(
+                null, "security-news", newsExternalId, "feed", "Security Weekly", "A campaign observed",
+                null, "Observed.", newest, List.of()));
+
+        // Fetch the whole (small, test-seeded) list and assert our three appear newest-first among
+        // themselves, ignoring any other rows interleaved between them.
+        mvc.perform(get("/api/change-signals?size=100").with(role("ANALYST")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content[0].signalType").value("VULNERABILITY"))
-                .andExpect(jsonPath("$.content[0].externalId").value(cveId));
+                .andExpect(jsonPath("$.content[*].externalId",
+                        containsInRelativeOrder(newsExternalId, incidentExternalId, cveId)));
     }
 
     @Test

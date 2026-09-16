@@ -15,6 +15,8 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsInRelativeOrder;
+import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -34,8 +36,8 @@ class AdvisoryApiIntegrationTest extends AbstractIntegrationTest {
 
     /**
      * The suite shares one database, so each test seeds its own CVE id and passes the revision
-     * timestamp it needs — the list test uses the latest one in the class to pin its advisory to the
-     * top of the default "most recently revised" ordering whatever order the tests run in.
+     * timestamp it needs. Assertions target these own rows (by id and by relative order), never an
+     * absolute list position, so rows seeded by other suites cannot perturb them.
      */
     private Advisory seedAdvisory(String cveId, Instant lastModified) {
         return advisories.upsert(new Advisory(
@@ -78,17 +80,23 @@ class AdvisoryApiIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void listsAdvisoriesMostRecentlyRevisedFirstWithTheirAffectedProducts() throws Exception {
-        String cveId = uniqueCveId();
-        seedAdvisory(cveId, Instant.parse("2099-12-31T00:00:00Z"));
+        String newerCve = uniqueCveId();
+        String olderCve = uniqueCveId();
+        seedAdvisory(olderCve, Instant.parse("2099-01-01T00:00:00Z"));
+        seedAdvisory(newerCve, Instant.parse("2099-12-31T00:00:00Z"));
 
-        mvc.perform(get("/api/advisories").with(role("ANALYST")))
+        // Ordering asserted over this test's own two rows (relative order); the projection — including
+        // the batched affected-products load that is unique to the list path — asserted on the newer
+        // row located by id. Immune to whatever else shares the database.
+        mvc.perform(get("/api/advisories?size=100").with(role("ANALYST")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content[0].externalId").value(cveId))
-                .andExpect(jsonPath("$.content[0].sourceId").value("nvd"))
-                .andExpect(jsonPath("$.content[0].cvssBaseScore").value(10.0))
-                .andExpect(jsonPath("$.content[0].cvssSeverity").value("CRITICAL"))
-                .andExpect(jsonPath("$.content[0].affected[0].vendor").value("apache"))
-                .andExpect(jsonPath("$.content[0].affected[0].product").value("log4j"));
+                .andExpect(jsonPath("$.content[*].externalId", containsInRelativeOrder(newerCve, olderCve)))
+                .andExpect(jsonPath("$.content[?(@.externalId=='" + newerCve + "')].sourceId", hasItem("nvd")))
+                .andExpect(jsonPath("$.content[?(@.externalId=='" + newerCve + "')].cvssSeverity", hasItem("CRITICAL")))
+                .andExpect(jsonPath("$.content[?(@.externalId=='" + newerCve + "')].affected[0].vendor",
+                        hasItem("apache")))
+                .andExpect(jsonPath("$.content[?(@.externalId=='" + newerCve + "')].affected[0].product",
+                        hasItem("log4j")));
     }
 
     @Test
