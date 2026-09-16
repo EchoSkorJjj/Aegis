@@ -26,4 +26,9 @@ interface RawEventRepository extends JpaRepository<RawEventEntity, UUID> {
     @Modifying
     @Query("update RawEventEntity e set e.processedAt = :processedAt where e.id = :id and e.processedAt is null")
     int markProcessed(@Param("id") UUID id, @Param("processedAt") Instant processedAt);
+
+    /** Advance the transient-failure counter; updated by query for the same reason as {@link #markProcessed}. */
+    @Modifying
+    @Query("update RawEventEntity e set e.attempts = e.attempts + 1 where e.id = :id")
+    int incrementAttempts(@Param("id") UUID id);
 }

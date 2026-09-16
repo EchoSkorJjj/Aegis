@@ -50,6 +50,9 @@ class JpaNewsItemStore implements NewsItemStore {
     @Override
     @Transactional
     public NewsItem upsert(NewsItem item) {
+        // Concurrency (scale-out): a concurrent insert of the same (source_id, external_id) loses the
+        // unique constraint here; that surfaces to the drainer as a transient failure and is retried as
+        // an update on the next run, so no extra locking is needed.
         NewsItemEntity entity = items
                 .findBySourceIdAndExternalId(item.sourceId(), item.externalId())
                 .orElseGet(() -> new NewsItemEntity(UUID.randomUUID(), item.sourceId(), item.externalId()));

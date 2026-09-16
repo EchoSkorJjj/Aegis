@@ -1,5 +1,6 @@
 package com.aegis.core.inventory.demo;
 
+import com.aegis.core.tenant.CurrentOrg;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
@@ -15,13 +16,18 @@ class DemoEstateRunner implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(DemoEstateRunner.class);
 
     private final DemoEstateSeeder seeder;
+    private final CurrentOrg currentOrg;
 
-    DemoEstateRunner(DemoEstateSeeder seeder) {
+    DemoEstateRunner(DemoEstateSeeder seeder, CurrentOrg currentOrg) {
         this.seeder = seeder;
+        this.currentOrg = currentOrg;
     }
 
     @Override
     public void run(ApplicationArguments args) {
-        log.info("Demo estate seeded ({} business services)", seeder.seed());
+        // Startup has no request/token, so establish the demo org explicitly for the seed's writes.
+        int[] seeded = {0};
+        currentOrg.runAs(DemoEstateSeeder.DEMO_ORG_ID, () -> seeded[0] = seeder.seed());
+        log.info("Demo estate seeded ({} business services)", seeded[0]);
     }
 }

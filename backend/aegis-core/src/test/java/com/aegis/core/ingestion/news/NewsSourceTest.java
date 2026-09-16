@@ -62,7 +62,7 @@ class NewsSourceTest {
     private NewsSource source(int maxPayloadBytes, Feed... feeds) {
         return new NewsSource(
                 new NewsProperties(true, List.of(feeds), Duration.ofSeconds(2), Duration.ofSeconds(5),
-                        maxPayloadBytes, 50),
+                        maxPayloadBytes, 50, 8L * 1024 * 1024, 5, true),
                 ObservationRegistry.NOOP);
     }
 

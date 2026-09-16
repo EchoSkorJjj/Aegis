@@ -51,6 +51,9 @@ aegis:
   ingestion:
     enabled: ${AEGIS_INGESTION_ENABLED:true}
     poll-interval: ${AEGIS_INGESTION_POLL_INTERVAL:PT15M}
+    # How many times a raw event may fail normalisation transiently (a DB blip, a lost upsert race)
+    # before the drainer gives up and drops it. A definitively malformed payload is dropped on the first try.
+    normalize-max-attempts: 5
     retry:
       max-attempts: 3
       initial-delay: PT1S
@@ -76,6 +79,11 @@ aegis:
       # Feed content is untrusted: cap what a single CVE may push into the raw-event store. A CVE
       # enumerating thousands of CPEs exceeds 1 MB, so this is deliberately well above the typical size.
       max-payload-bytes: 5242880
+      # Cap the whole HTTP response (a page of up to 1000 CVEs), distinct from the per-CVE cap above,
+      # so a compromised endpoint cannot stream an unbounded body into memory.
+      max-response-bytes: 67108864
+      # Waive the SSRF guard's public-address check — set true only for an internal/mirrored NVD host.
+      allow-private-hosts: false
       # Cadence of the raw-event -> advisory drain, and how many events one drain handles.
       normalize-interval: ${AEGIS_NVD_NORMALIZE_INTERVAL:PT1M}
       normalize-batch-size: 200
@@ -92,6 +100,11 @@ aegis:
       read-timeout: PT15S
       # Untrusted third-party documents: cap what one vendor's page may push into the raw store.
       max-payload-bytes: 2097152
+      # Cap the whole HTTP response (>= max-payload-bytes); bound and re-check redirects for SSRF;
+      # allow-private-hosts waives the public-address check (internal/mirrored pages only).
+      max-response-bytes: 8388608
+      max-redirects: 5
+      allow-private-hosts: false
       normalize-interval: ${AEGIS_VENDOR_STATUS_NORMALIZE_INTERVAL:PT1M}
       normalize-batch-size: 50
       vendors:
@@ -126,6 +139,11 @@ aegis:
       read-timeout: PT15S
       # Untrusted third-party prose: cap what one publisher's document may push into the raw store.
       max-payload-bytes: 4194304
+      # Cap the whole HTTP response (>= max-payload-bytes); bound and re-check redirects for SSRF;
+      # allow-private-hosts waives the public-address check (internal/mirrored feeds only).
+      max-response-bytes: 8388608
+      max-redirects: 5
+      allow-private-hosts: false
       normalize-interval: ${AEGIS_NEWS_NORMALIZE_INTERVAL:PT1M}
       normalize-batch-size: 50
       feeds:

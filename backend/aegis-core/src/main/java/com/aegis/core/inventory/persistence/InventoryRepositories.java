@@ -15,61 +15,85 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+// Every read is scoped to the caller's org (ADR §6): the adapter passes the active org and these
+// methods filter on it, so one tenant never sees another's inventory. Deletes and edge existence go
+// through PK lookups the service has already org-verified via an org-scoped find, and the tenant GUC
+// (set by the adapter) lets Postgres RLS backstop it all.
+
 interface BusinessServiceJpaRepository extends JpaRepository<BusinessService, UUID> {
-    Optional<BusinessService> findByNameIgnoreCase(String name);
-    boolean existsByNameIgnoreCase(String name);
-    boolean existsByNameIgnoreCaseAndIdNot(String name, UUID id);
+    Optional<BusinessService> findByIdAndOrgId(UUID id, UUID orgId);
+    Page<BusinessService> findByOrgId(UUID orgId, Pageable pageable);
+    List<BusinessService> findByIdInAndOrgId(Collection<UUID> ids, UUID orgId);
+    Optional<BusinessService> findByNameIgnoreCaseAndOrgId(String name, UUID orgId);
+    boolean existsByNameIgnoreCaseAndOrgId(String name, UUID orgId);
+    boolean existsByNameIgnoreCaseAndOrgIdAndIdNot(String name, UUID orgId, UUID id);
 }
 
 interface SoftwareComponentJpaRepository extends JpaRepository<SoftwareComponent, UUID> {
-    Optional<SoftwareComponent> findByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCase(
-            String ecosystem, String name, String version);
-    boolean existsByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCase(String ecosystem, String name, String version);
-    boolean existsByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCaseAndIdNot(
-            String ecosystem, String name, String version, UUID id);
+    Optional<SoftwareComponent> findByIdAndOrgId(UUID id, UUID orgId);
+    Page<SoftwareComponent> findByOrgId(UUID orgId, Pageable pageable);
+    List<SoftwareComponent> findByIdInAndOrgId(Collection<UUID> ids, UUID orgId);
+    Optional<SoftwareComponent> findByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCaseAndOrgId(
+            String ecosystem, String name, String version, UUID orgId);
+    boolean existsByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCaseAndOrgId(
+            String ecosystem, String name, String version, UUID orgId);
+    boolean existsByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCaseAndOrgIdAndIdNot(
+            String ecosystem, String name, String version, UUID orgId, UUID id);
 
-    @Query("select c from SoftwareComponent c where c.id in "
-            + "(select r.componentId from ServiceComponentEntity r where r.businessServiceId = :serviceId)")
-    Page<SoftwareComponent> findForService(@Param("serviceId") UUID serviceId, Pageable pageable);
+    @Query("select c from SoftwareComponent c where c.orgId = :orgId and c.id in "
+            + "(select r.componentId from ServiceComponentEntity r "
+            + "where r.businessServiceId = :serviceId and r.orgId = :orgId)")
+    Page<SoftwareComponent> findForService(
+            @Param("serviceId") UUID serviceId, @Param("orgId") UUID orgId, Pageable pageable);
 
-    @Query("select c from SoftwareComponent c where c.id in "
-            + "(select r.dependencyId from ComponentDependencyEntity r where r.componentId = :componentId)")
-    Page<SoftwareComponent> findDependencies(@Param("componentId") UUID componentId, Pageable pageable);
+    @Query("select c from SoftwareComponent c where c.orgId = :orgId and c.id in "
+            + "(select r.dependencyId from ComponentDependencyEntity r "
+            + "where r.componentId = :componentId and r.orgId = :orgId)")
+    Page<SoftwareComponent> findDependencies(
+            @Param("componentId") UUID componentId, @Param("orgId") UUID orgId, Pageable pageable);
 }
 
 interface ThirdPartyVendorJpaRepository extends JpaRepository<ThirdPartyVendor, UUID> {
-    Optional<ThirdPartyVendor> findByNameIgnoreCase(String name);
-    boolean existsByNameIgnoreCase(String name);
-    boolean existsByNameIgnoreCaseAndIdNot(String name, UUID id);
+    Optional<ThirdPartyVendor> findByIdAndOrgId(UUID id, UUID orgId);
+    Page<ThirdPartyVendor> findByOrgId(UUID orgId, Pageable pageable);
+    Optional<ThirdPartyVendor> findByNameIgnoreCaseAndOrgId(String name, UUID orgId);
+    boolean existsByNameIgnoreCaseAndOrgId(String name, UUID orgId);
+    boolean existsByNameIgnoreCaseAndOrgIdAndIdNot(String name, UUID orgId, UUID id);
 
-    @Query("select v from ThirdPartyVendor v where v.id in "
-            + "(select r.vendorId from ServiceVendorEntity r where r.businessServiceId = :serviceId)")
-    Page<ThirdPartyVendor> findForService(@Param("serviceId") UUID serviceId, Pageable pageable);
+    @Query("select v from ThirdPartyVendor v where v.orgId = :orgId and v.id in "
+            + "(select r.vendorId from ServiceVendorEntity r "
+            + "where r.businessServiceId = :serviceId and r.orgId = :orgId)")
+    Page<ThirdPartyVendor> findForService(
+            @Param("serviceId") UUID serviceId, @Param("orgId") UUID orgId, Pageable pageable);
 }
 
 interface OwnerJpaRepository extends JpaRepository<Owner, UUID> {
-    Optional<Owner> findByNameIgnoreCase(String name);
-    boolean existsByNameIgnoreCase(String name);
-    boolean existsByNameIgnoreCaseAndIdNot(String name, UUID id);
+    Optional<Owner> findByIdAndOrgId(UUID id, UUID orgId);
+    Page<Owner> findByOrgId(UUID orgId, Pageable pageable);
+    List<Owner> findByIdInAndOrgId(Collection<UUID> ids, UUID orgId);
+    Optional<Owner> findByNameIgnoreCaseAndOrgId(String name, UUID orgId);
+    boolean existsByNameIgnoreCaseAndOrgId(String name, UUID orgId);
+    boolean existsByNameIgnoreCaseAndOrgIdAndIdNot(String name, UUID orgId, UUID id);
 
-    @Query("select o from Owner o where o.id in "
-            + "(select r.ownerId from ServiceOwnerEntity r where r.businessServiceId = :serviceId)")
-    Page<Owner> findForService(@Param("serviceId") UUID serviceId, Pageable pageable);
+    @Query("select o from Owner o where o.orgId = :orgId and o.id in "
+            + "(select r.ownerId from ServiceOwnerEntity r "
+            + "where r.businessServiceId = :serviceId and r.orgId = :orgId)")
+    Page<Owner> findForService(@Param("serviceId") UUID serviceId, @Param("orgId") UUID orgId, Pageable pageable);
 }
 
 interface ServiceComponentJpaRepository extends JpaRepository<ServiceComponentEntity, ServiceComponentEntity.Key> {
-    List<ServiceComponentEntity> findByComponentIdIn(Collection<UUID> componentIds);
+    List<ServiceComponentEntity> findByComponentIdInAndOrgId(Collection<UUID> componentIds, UUID orgId);
 }
 
 interface ServiceVendorJpaRepository extends JpaRepository<ServiceVendorEntity, ServiceVendorEntity.Key> {
-    List<ServiceVendorEntity> findByVendorId(UUID vendorId);
+    List<ServiceVendorEntity> findByVendorIdAndOrgId(UUID vendorId, UUID orgId);
 }
 
 interface ServiceOwnerJpaRepository extends JpaRepository<ServiceOwnerEntity, ServiceOwnerEntity.Key> {
-    List<ServiceOwnerEntity> findByBusinessServiceIdIn(Collection<UUID> businessServiceIds);
+    List<ServiceOwnerEntity> findByBusinessServiceIdInAndOrgId(Collection<UUID> businessServiceIds, UUID orgId);
 }
 
 interface ComponentDependencyJpaRepository extends JpaRepository<ComponentDependencyEntity, ComponentDependencyEntity.Key> {
-    /** Direct dependents: components whose {@code dependencyId} is one of the given components. */
-    List<ComponentDependencyEntity> findByDependencyIdIn(Collection<UUID> dependencyIds);
+    /** Direct dependents (one BFS level): components whose {@code dependencyId} is one of the given components. */
+    List<ComponentDependencyEntity> findByDependencyIdInAndOrgId(Collection<UUID> dependencyIds, UUID orgId);
 }

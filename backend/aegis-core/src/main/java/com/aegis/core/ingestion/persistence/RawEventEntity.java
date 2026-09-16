@@ -52,6 +52,10 @@ class RawEventEntity implements Persistable<UUID> {
     @Column(name = "processed_at")
     private Instant processedAt;
 
+    /** Transient normalisation failures so far; the drainer gives up once this reaches its cap. */
+    @Column(name = "attempts", nullable = false)
+    private int attempts;
+
     protected RawEventEntity() {
         // Required by JPA.
     }
@@ -109,5 +113,9 @@ class RawEventEntity implements Persistable<UUID> {
 
     Instant getOccurredAt() {
         return occurredAt;
+    }
+
+    int getAttempts() {
+        return attempts;
     }
 }

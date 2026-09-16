@@ -14,21 +14,26 @@ import jakarta.persistence.Table;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.SourceType;
 
+// Relationship rows carry org_id (ADR §6) so tenant scoping and RLS reach the edges too, not just the
+// entities. Both endpoints of an edge are always in the same org, so it equals either endpoint's org.
+
 @Entity
 @Table(name = "business_service_components")
 @IdClass(ServiceComponentEntity.Key.class)
 class ServiceComponentEntity {
     @Id @Column(name = "business_service_id") private UUID businessServiceId;
     @Id @Column(name = "component_id") private UUID componentId;
+    @Column(name = "org_id", nullable = false) private UUID orgId;
     @CreationTimestamp(source = SourceType.DB)
     @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
 
     protected ServiceComponentEntity() {
     }
 
-    ServiceComponentEntity(UUID businessServiceId, UUID componentId) {
+    ServiceComponentEntity(UUID businessServiceId, UUID componentId, UUID orgId) {
         this.businessServiceId = businessServiceId;
         this.componentId = componentId;
+        this.orgId = orgId;
     }
 
     UUID getBusinessServiceId() {
@@ -68,15 +73,17 @@ class ServiceComponentEntity {
 class ServiceVendorEntity {
     @Id @Column(name = "business_service_id") private UUID businessServiceId;
     @Id @Column(name = "vendor_id") private UUID vendorId;
+    @Column(name = "org_id", nullable = false) private UUID orgId;
     @CreationTimestamp(source = SourceType.DB)
     @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
 
     protected ServiceVendorEntity() {
     }
 
-    ServiceVendorEntity(UUID businessServiceId, UUID vendorId) {
+    ServiceVendorEntity(UUID businessServiceId, UUID vendorId, UUID orgId) {
         this.businessServiceId = businessServiceId;
         this.vendorId = vendorId;
+        this.orgId = orgId;
     }
 
     UUID getBusinessServiceId() {
@@ -103,15 +110,17 @@ class ServiceVendorEntity {
 class ServiceOwnerEntity {
     @Id @Column(name = "business_service_id") private UUID businessServiceId;
     @Id @Column(name = "owner_id") private UUID ownerId;
+    @Column(name = "org_id", nullable = false) private UUID orgId;
     @CreationTimestamp(source = SourceType.DB)
     @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
 
     protected ServiceOwnerEntity() {
     }
 
-    ServiceOwnerEntity(UUID businessServiceId, UUID ownerId) {
+    ServiceOwnerEntity(UUID businessServiceId, UUID ownerId, UUID orgId) {
         this.businessServiceId = businessServiceId;
         this.ownerId = ownerId;
+        this.orgId = orgId;
     }
 
     UUID getBusinessServiceId() {
@@ -138,15 +147,17 @@ class ServiceOwnerEntity {
 class ComponentDependencyEntity {
     @Id @Column(name = "component_id") private UUID componentId;
     @Id @Column(name = "dependency_id") private UUID dependencyId;
+    @Column(name = "org_id", nullable = false) private UUID orgId;
     @CreationTimestamp(source = SourceType.DB)
     @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
 
     protected ComponentDependencyEntity() {
     }
 
-    ComponentDependencyEntity(UUID componentId, UUID dependencyId) {
+    ComponentDependencyEntity(UUID componentId, UUID dependencyId, UUID orgId) {
         this.componentId = componentId;
         this.dependencyId = dependencyId;
+        this.orgId = orgId;
     }
 
     UUID getComponentId() {

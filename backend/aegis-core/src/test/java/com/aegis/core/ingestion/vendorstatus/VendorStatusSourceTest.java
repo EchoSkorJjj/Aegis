@@ -66,7 +66,8 @@ class VendorStatusSourceTest {
 
     private VendorStatusSource source(int maxPayloadBytes, Vendor... vendors) {
         VendorStatusProperties properties = new VendorStatusProperties(
-                true, List.of(vendors), Duration.ofSeconds(2), Duration.ofSeconds(5), maxPayloadBytes, 50);
+                true, List.of(vendors), Duration.ofSeconds(2), Duration.ofSeconds(5), maxPayloadBytes, 50,
+                8L * 1024 * 1024, 5, true);
         return new VendorStatusSource(properties, ObservationRegistry.NOOP);
     }
 

@@ -65,7 +65,7 @@ public class SyndicationFeedParser {
         String title = firstNonBlank(text(node, "title"));
         String link = firstNonBlank(text(node, "link"), attribute(node, "link", "href"));
         String summary = firstNonBlank(
-                text(node, "description"), text(node, "summary"), text(node, "content"));
+                text(node, "description"), text(node, "summary"), text(node, "content"), text(node, "encoded"));
         String published = firstNonBlank(
                 text(node, "pubDate"), text(node, "updated"), text(node, "published"));
 
@@ -90,6 +90,9 @@ public class SyndicationFeedParser {
     private static Document parseSecurely(String xml) {
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            // Namespace-aware so elements are matched by local name — Atom (default namespace) and
+            // namespaced extensions like content:encoded resolve, not just unprefixed RSS 2.0.
+            factory.setNamespaceAware(true);
             factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
             factory.setFeature(DISALLOW_DOCTYPE, true);
             factory.setFeature(EXTERNAL_GENERAL_ENTITIES, false);
@@ -128,7 +131,7 @@ public class SyndicationFeedParser {
     }
 
     private static List<Element> elementsNamed(Document document, String tag) {
-        NodeList nodes = document.getElementsByTagName(tag);
+        NodeList nodes = document.getElementsByTagNameNS("*", tag);
         List<Element> elements = new ArrayList<>();
         for (int i = 0; i < nodes.getLength(); i++) {
             if (nodes.item(i) instanceof Element element) {
@@ -140,7 +143,7 @@ public class SyndicationFeedParser {
 
     /** The first direct-or-nested child with this tag, trimmed; null when absent or blank. */
     private static String text(Element parent, String tag) {
-        NodeList nodes = parent.getElementsByTagName(tag);
+        NodeList nodes = parent.getElementsByTagNameNS("*", tag);
         if (nodes.getLength() == 0) {
             return null;
         }
@@ -150,7 +153,7 @@ public class SyndicationFeedParser {
     }
 
     private static String attribute(Element parent, String tag, String attribute) {
-        NodeList nodes = parent.getElementsByTagName(tag);
+        NodeList nodes = parent.getElementsByTagNameNS("*", tag);
         if (nodes.getLength() == 0 || !(nodes.item(0) instanceof Element element)) {
             return null;
         }

@@ -6,6 +6,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.aegis.core.ingestion.RawEventDrainer;
+import com.aegis.core.ingestion.UnparseableEventException;
 import com.aegis.core.ingestion.incident.VendorIncident;
 import com.aegis.core.ingestion.incident.VendorIncidentStore;
 import com.aegis.core.ingestion.vendorstatus.VendorStatusProperties.Format;
@@ -67,8 +68,15 @@ class VendorStatusNormalizer {
     int drain() {
         int[] written = {0};
         drainer.drain(VendorStatusSource.SOURCE_ID, batchSize, event -> {
-            Vendor vendor = vendorFor(event.externalId());
-            List<VendorIncident> parsed = readerFor(vendor).read(event.payload(), vendor);
+            List<VendorIncident> parsed;
+            try {
+                // Terminal (drop, keeping the raw row): a malformed document, or a vendor no longer
+                // configured. Only the upsert below is transient and worth retrying.
+                Vendor vendor = vendorFor(event.externalId());
+                parsed = readerFor(vendor).read(event.payload(), vendor);
+            } catch (RuntimeException terminal) {
+                throw new UnparseableEventException(VendorStatusSource.SOURCE_ID, event.externalId(), terminal);
+            }
             parsed.forEach(incidents::upsert);
             written[0] += parsed.size();
         });
@@ -79,8 +87,9 @@ class VendorStatusNormalizer {
     }
 
     /**
-     * @throws IllegalStateException the event names a vendor no longer configured — its document stays
-     *     in the raw store, and re-adding the vendor lets it replay
+     * @throws IllegalStateException the event names a vendor no longer configured. The drainer treats
+     *     that as terminal and drops the event; its raw payload is retained, so re-adding the vendor
+     *     and clearing {@code processed_at} replays it.
      */
     private Vendor vendorFor(String externalId) {
         String key = VendorStatusSource.vendorKeyOf(externalId);

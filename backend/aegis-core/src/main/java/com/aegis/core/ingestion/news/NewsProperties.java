@@ -19,7 +19,10 @@ public record NewsProperties(
         Duration connectTimeout,
         Duration readTimeout,
         int maxPayloadBytes,
-        int normalizeBatchSize) {
+        int normalizeBatchSize,
+        long maxResponseBytes,
+        int maxRedirects,
+        boolean allowPrivateHosts) {
 
     public NewsProperties {
         feeds = feeds == null ? List.of() : List.copyOf(feeds);
@@ -36,6 +39,13 @@ public record NewsProperties(
         }
         if (normalizeBatchSize < 1) {
             normalizeBatchSize = 50;
+        }
+        // Cap the whole HTTP response so a publisher cannot stream an unbounded body into memory.
+        if (maxResponseBytes < 1) {
+            maxResponseBytes = 8L * 1024 * 1024;
+        }
+        if (maxRedirects < 0) {
+            maxRedirects = 5;
         }
     }
 

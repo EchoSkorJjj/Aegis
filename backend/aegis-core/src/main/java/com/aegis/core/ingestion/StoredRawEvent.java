@@ -15,5 +15,6 @@ public record StoredRawEvent(
         String contentType,
         String payload,
         Instant occurredAt,
-        Instant ingestedAt) {
+        Instant ingestedAt,
+        int attempts) {
 }

@@ -183,7 +183,9 @@ class NvdSourceTest {
                 Duration.ofSeconds(2),
                 Duration.ofSeconds(5),
                 maxPayloadBytes,
-                200);
+                200,
+                64L * 1024 * 1024,
+                true); // allow localhost in tests
     }
 
     /** The lastModStartDate the connector asked for, back as an instant. */
@@ -229,6 +231,10 @@ class NvdSourceTest {
 
         @Override
         public void markProcessed(UUID id) {
+        }
+
+        @Override
+        public void recordFailure(UUID id) {
         }
 
         @Override

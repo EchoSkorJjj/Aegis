@@ -71,6 +71,12 @@ class JpaRawEventStore implements RawEventStore {
     }
 
     @Override
+    @Transactional
+    public void recordFailure(UUID id) {
+        events.incrementAttempts(id);
+    }
+
+    @Override
     public Optional<Instant> latestOccurredAt(String sourceId) {
         return Optional.ofNullable(events.findLatestOccurredAt(sourceId));
     }
@@ -83,7 +89,8 @@ class JpaRawEventStore implements RawEventStore {
                 entity.getContentType(),
                 entity.getPayload(),
                 entity.getOccurredAt(),
-                entity.getIngestedAt());
+                entity.getIngestedAt(),
+                entity.getAttempts());
     }
 
     static String dedupKey(String sourceId, RawEvent event) {

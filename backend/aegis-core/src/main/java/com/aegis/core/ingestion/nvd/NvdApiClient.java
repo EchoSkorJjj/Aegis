@@ -4,7 +4,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.aegis.core.ingestion.feed.OutboundHttp;
 import io.micrometer.observation.ObservationRegistry;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
@@ -27,10 +29,16 @@ class NvdApiClient {
     private final RestClient http;
     private final ObjectMapper objectMapper;
     private final int resultsPerPage;
+    private final long maxResponseBytes;
+    private final String baseUrl;
+    private final boolean allowPrivateHosts;
 
     NvdApiClient(NvdProperties properties, ObjectMapper objectMapper, ObservationRegistry observationRegistry) {
         this.objectMapper = objectMapper;
         this.resultsPerPage = properties.resultsPerPage();
+        this.maxResponseBytes = properties.maxResponseBytes();
+        this.baseUrl = properties.baseUrl();
+        this.allowPrivateHosts = properties.allowPrivateHosts();
 
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(properties.connectTimeout());
@@ -52,6 +60,8 @@ class NvdApiClient {
      * the ingestion framework's retry/backoff handles (including NVD's 403/429 rate-limit replies).
      */
     NvdPage fetch(Instant start, Instant end, int startIndex) throws Exception {
+        // Guard against a compromised/misconfigured base URL steering the fetch at an internal host.
+        OutboundHttp.requireFetchable(baseUrl, allowPrivateHosts);
         String body = http.get()
                 .uri(uri -> uri
                         .queryParam("lastModStartDate", NvdTimestamps.format(start))
@@ -59,8 +69,14 @@ class NvdApiClient {
                         .queryParam("resultsPerPage", resultsPerPage)
                         .queryParam("startIndex", startIndex)
                         .build())
-                .retrieve()
-                .body(String.class);
+                .exchange((request, response) -> {
+                    HttpStatusCode status = response.getStatusCode();
+                    if (!status.is2xxSuccessful()) {
+                        // Non-2xx (incl. NVD's 403/429 rate-limit replies) — the framework's retry/backoff handles it.
+                        throw new IllegalStateException("NVD fetch failed: HTTP " + status.value());
+                    }
+                    return OutboundHttp.readCapped(response.getBody(), maxResponseBytes);
+                });
 
         JsonNode root = objectMapper.readTree(body == null ? "{}" : body);
         int totalResults = root.path("totalResults").asInt(0);

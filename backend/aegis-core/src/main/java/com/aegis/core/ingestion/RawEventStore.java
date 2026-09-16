@@ -27,6 +27,13 @@ public interface RawEventStore {
     void markProcessed(UUID id);
 
     /**
+     * Record that normalisation failed transiently on this event, advancing its attempt count. The
+     * event stays queued (unprocessed) so a later run can retry it; the drainer stops retrying once
+     * the count reaches its cap.
+     */
+    void recordFailure(UUID id);
+
+    /**
      * The newest {@code occurredAt} stored for a feed, or empty when it has ingested nothing.
      * Connectors use this as their poll watermark, which keeps the cursor in the store rather than
      * in connector-owned state — so a restart resumes from what was actually persisted.

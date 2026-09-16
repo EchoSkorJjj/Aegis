@@ -12,11 +12,15 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * poll. Every value has a sensible default, so connectors added by later stories need no extra config.
  */
 @ConfigurationProperties("aegis.ingestion")
-public record IngestionProperties(Retry retry) {
+public record IngestionProperties(Retry retry, int normalizeMaxAttempts) {
 
     public IngestionProperties {
         if (retry == null) {
             retry = new Retry(0, null, 0, null);
+        }
+        // How many times a raw event may fail normalisation transiently before the drainer drops it.
+        if (normalizeMaxAttempts < 1) {
+            normalizeMaxAttempts = 5;
         }
     }
 

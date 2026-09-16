@@ -1,6 +1,8 @@
 package com.aegis.core.ingestion.nvd;
 
 import com.aegis.core.ingestion.RawEventDrainer;
+import com.aegis.core.ingestion.UnparseableEventException;
+import com.aegis.core.ingestion.advisory.Advisory;
 import com.aegis.core.ingestion.advisory.AdvisoryStore;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -42,7 +44,14 @@ class NvdNormalizer {
      * the drain can be tested without waiting on the scheduler.
      */
     int drain() {
-        return drainer.drain(NvdSource.SOURCE_ID, batchSize,
-                event -> advisories.upsert(parser.parse(event.payload())));
+        return drainer.drain(NvdSource.SOURCE_ID, batchSize, event -> {
+            Advisory advisory;
+            try {
+                advisory = parser.parse(event.payload());
+            } catch (RuntimeException parseError) {
+                throw new UnparseableEventException(NvdSource.SOURCE_ID, event.externalId(), parseError);
+            }
+            advisories.upsert(advisory);
+        });
     }
 }

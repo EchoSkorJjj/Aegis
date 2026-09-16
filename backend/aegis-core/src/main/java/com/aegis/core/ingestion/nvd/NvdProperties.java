@@ -24,7 +24,9 @@ public record NvdProperties(
         Duration connectTimeout,
         Duration readTimeout,
         int maxPayloadBytes,
-        int normalizeBatchSize) {
+        int normalizeBatchSize,
+        long maxResponseBytes,
+        boolean allowPrivateHosts) {
 
     public NvdProperties {
         if (baseUrl == null || baseUrl.isBlank()) {
@@ -66,6 +68,11 @@ public record NvdProperties(
         }
         if (normalizeBatchSize < 1) {
             normalizeBatchSize = 200;
+        }
+        // Cap the whole HTTP response (not just one CVE) so a compromised endpoint cannot stream an
+        // unbounded body into memory; set well above a legitimate 1000-CVE page.
+        if (maxResponseBytes < 1) {
+            maxResponseBytes = 64L * 1024 * 1024;
         }
     }
 }

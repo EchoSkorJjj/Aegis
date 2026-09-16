@@ -13,7 +13,7 @@ class IngestionRetryTest {
     /** Zero delays keep the test instant while still exercising the attempt/backoff loop. */
     private static IngestionRetry retryWith(int maxAttempts) {
         return new IngestionRetry(new IngestionProperties(
-                new IngestionProperties.Retry(maxAttempts, Duration.ZERO, 2.0, Duration.ZERO)));
+                new IngestionProperties.Retry(maxAttempts, Duration.ZERO, 2.0, Duration.ZERO), 5));
     }
 
     @Test

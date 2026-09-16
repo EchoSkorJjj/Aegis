@@ -44,7 +44,12 @@ class VendorStatusSource implements IngestionSource {
 
     VendorStatusSource(VendorStatusProperties properties, ObservationRegistry observationRegistry) {
         this.client = new FeedHttpClient(
-                properties.connectTimeout(), properties.readTimeout(), observationRegistry);
+                properties.connectTimeout(),
+                properties.readTimeout(),
+                properties.maxResponseBytes(),
+                properties.maxRedirects(),
+                properties.allowPrivateHosts(),
+                observationRegistry);
         this.properties = properties;
     }
 

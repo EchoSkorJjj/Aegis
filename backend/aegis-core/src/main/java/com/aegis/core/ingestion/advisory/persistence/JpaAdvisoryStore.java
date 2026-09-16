@@ -31,6 +31,9 @@ class JpaAdvisoryStore implements AdvisoryStore {
     @Override
     @Transactional
     public Advisory upsert(Advisory advisory) {
+        // Concurrency (scale-out): if another instance inserts this (source_id, external_id) first, the
+        // insert here loses the unique constraint and surfaces to the drainer as a transient failure —
+        // retried as an update on the next run — so no extra locking is needed.
         AdvisoryEntity entity = advisories
                 .findBySourceIdAndExternalId(advisory.sourceId(), advisory.externalId())
                 .orElseGet(() -> new AdvisoryEntity(

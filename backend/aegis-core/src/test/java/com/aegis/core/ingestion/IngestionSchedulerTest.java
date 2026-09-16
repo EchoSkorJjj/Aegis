@@ -17,7 +17,7 @@ class IngestionSchedulerTest {
 
     private final InMemoryRawEventStore store = new InMemoryRawEventStore();
     private final IngestionRetry retry = new IngestionRetry(new IngestionProperties(
-            new IngestionProperties.Retry(2, Duration.ZERO, 2.0, Duration.ZERO)));
+            new IngestionProperties.Retry(2, Duration.ZERO, 2.0, Duration.ZERO), 5));
 
     private IngestionScheduler scheduler(IngestionSource... sources) {
         return new IngestionScheduler(List.of(sources), store, retry);
@@ -111,6 +111,10 @@ class IngestionSchedulerTest {
 
         @Override
         public void markProcessed(UUID id) {
+        }
+
+        @Override
+        public void recordFailure(UUID id) {
         }
 
         @Override

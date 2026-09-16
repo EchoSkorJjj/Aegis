@@ -29,6 +29,14 @@ public abstract class InventoryEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    /**
+     * The owning organization (tenant). Immutable once set; assigned from the caller's active org at
+     * creation ({@link #assignOrg}). See ADR §6 — every domain read is scoped to it and every write
+     * stamped with it.
+     */
+    @Column(name = "org_id", nullable = false, updatable = false)
+    private UUID orgId;
+
     protected InventoryEntity() {
         // Required by JPA. Application code uses the validating UUID constructor.
     }
@@ -42,6 +50,21 @@ public abstract class InventoryEntity {
 
     public UUID getId() {
         return id;
+    }
+
+    public UUID getOrgId() {
+        return orgId;
+    }
+
+    /**
+     * Stamp the owning org, once. Called by the persistence adapter from the caller's active org just
+     * before the first save; a no-op on an already-owned (loaded) entity, so an update keeps its
+     * original tenant.
+     */
+    public void assignOrg(UUID orgId) {
+        if (this.orgId == null) {
+            this.orgId = requireNonNull(orgId, "orgId");
+        }
     }
 
     public Instant getCreatedAt() {

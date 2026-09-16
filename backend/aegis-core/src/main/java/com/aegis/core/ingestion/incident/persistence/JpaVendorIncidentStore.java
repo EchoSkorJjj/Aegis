@@ -28,6 +28,9 @@ class JpaVendorIncidentStore implements VendorIncidentStore {
     @Override
     @Transactional
     public VendorIncident upsert(VendorIncident incident) {
+        // Concurrency (scale-out): a concurrent insert of the same (source_id, external_id) loses the
+        // unique constraint here; that surfaces to the drainer as a transient failure and is retried as
+        // an update on the next run, so no extra locking is needed.
         VendorIncidentEntity entity = incidents
                 .findBySourceIdAndExternalId(incident.sourceId(), incident.externalId())
                 .orElseGet(() -> new VendorIncidentEntity(
