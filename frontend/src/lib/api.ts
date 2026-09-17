@@ -1,7 +1,12 @@
 import type {
   AcceptInviteInput,
   AuthConfig,
+  BusinessService,
+  BusinessServiceInput,
   ChangePasswordInput,
+  ChangeSignal,
+  ChangeSignalFacets,
+  ComponentImpact,
   CreateOrgInput,
   ForgotPasswordInput,
   InviteUserInput,
@@ -10,14 +15,22 @@ import type {
   Membership,
   MfaChallenge,
   MfaStatus,
+  Owner,
+  OwnerInput,
+  Page,
   Passkey,
   RecoveryCodes,
   RegisterInput,
   ResetPasswordInput,
+  SbomImportResult,
   SelectMethodInput,
+  SoftwareComponent,
+  SoftwareComponentInput,
+  ThirdPartyVendor,
   TotpInit,
   UpdateProfileInput,
   UserProfile,
+  VendorImpact,
   VerifyOtpInput,
 } from "@/lib/types";
 import type {
@@ -71,6 +84,26 @@ async function bffFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const text = await response.text();
   return (text ? JSON.parse(text) : undefined) as T;
 }
+
+/** Build a query string from defined, non-empty params (leading "?" included, or "" when empty). */
+function qs(params: Record<string, string | number | undefined>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") search.set(key, String(value));
+  }
+  const query = search.toString();
+  return query ? `?${query}` : "";
+}
+
+/** Query params common to the paginated + filterable list endpoints. `sort` is Spring's "field,dir". */
+type ListParams = {
+  page?: number;
+  size?: number;
+  search?: string;
+  from?: string;
+  to?: string;
+  sort?: string;
+};
 
 export const authApi = {
   /** Public: login mode + which MFA methods are enabled (drives the login/settings UI). */
@@ -202,6 +235,150 @@ export const adminApi = {
       method: "POST",
       body: JSON.stringify(input),
     });
+  },
+};
+
+/**
+ * The estate map (aegis-core inventory), proxied through the BFF. Scoped to the caller's active
+ * organization server-side; the backend enforces the domain read/write roles (403 passed through).
+ */
+export const inventoryApi = {
+  listServices(params: ListParams & { criticality?: string } = {}) {
+    return bffFetch<Page<BusinessService>>(`/api/inventory/services${qs(params)}`);
+  },
+  getService(id: string) {
+    return bffFetch<BusinessService>(`/api/inventory/services/${id}`);
+  },
+  createService(input: BusinessServiceInput) {
+    return bffFetch<BusinessService>("/api/inventory/services", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  updateService(id: string, input: BusinessServiceInput) {
+    return bffFetch<BusinessService>(`/api/inventory/services/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  },
+  deleteService(id: string) {
+    return bffFetch<void>(`/api/inventory/services/${id}`, { method: "DELETE" });
+  },
+
+  listComponents(params: ListParams & { ecosystem?: string; excludeLinkedToService?: string } = {}) {
+    return bffFetch<Page<SoftwareComponent>>(`/api/inventory/components${qs(params)}`);
+  },
+  /** Distinct component ecosystems in the caller's org — powers the ecosystem filter select. */
+  componentEcosystems() {
+    return bffFetch<string[]>("/api/inventory/components/ecosystems");
+  },
+  createComponent(input: SoftwareComponentInput) {
+    return bffFetch<SoftwareComponent>("/api/inventory/components", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  updateComponent(id: string, input: SoftwareComponentInput) {
+    return bffFetch<SoftwareComponent>(`/api/inventory/components/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  },
+  deleteComponent(id: string) {
+    return bffFetch<void>(`/api/inventory/components/${id}`, { method: "DELETE" });
+  },
+
+  listVendors(params: ListParams & { excludeLinkedToService?: string } = {}) {
+    return bffFetch<Page<ThirdPartyVendor>>(`/api/inventory/vendors${qs(params)}`);
+  },
+  createVendor(input: { name: string }) {
+    return bffFetch<ThirdPartyVendor>("/api/inventory/vendors", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  updateVendor(id: string, input: { name: string }) {
+    return bffFetch<ThirdPartyVendor>(`/api/inventory/vendors/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  },
+  deleteVendor(id: string) {
+    return bffFetch<void>(`/api/inventory/vendors/${id}`, { method: "DELETE" });
+  },
+
+  // ---- Owners (people / teams accountable for services) ------------------------------------
+  listOwners(params: ListParams & { excludeLinkedToService?: string } = {}) {
+    return bffFetch<Page<Owner>>(`/api/inventory/owners${qs(params)}`);
+  },
+  createOwner(input: OwnerInput) {
+    return bffFetch<Owner>("/api/inventory/owners", { method: "POST", body: JSON.stringify(input) });
+  },
+  updateOwner(id: string, input: OwnerInput) {
+    return bffFetch<Owner>(`/api/inventory/owners/${id}`, { method: "PUT", body: JSON.stringify(input) });
+  },
+  deleteOwner(id: string) {
+    return bffFetch<void>(`/api/inventory/owners/${id}`, { method: "DELETE" });
+  },
+
+  // ---- Service composition: the components / vendors / owners linked to one service ---------
+  listServiceComponents(serviceId: string, params: { page?: number; size?: number } = {}) {
+    return bffFetch<Page<SoftwareComponent>>(`/api/inventory/services/${serviceId}/components${qs(params)}`);
+  },
+  addServiceComponent(serviceId: string, componentId: string) {
+    return bffFetch<void>(`/api/inventory/services/${serviceId}/components/${componentId}`, { method: "POST" });
+  },
+  removeServiceComponent(serviceId: string, componentId: string) {
+    return bffFetch<void>(`/api/inventory/services/${serviceId}/components/${componentId}`, { method: "DELETE" });
+  },
+  listServiceVendors(serviceId: string, params: { page?: number; size?: number } = {}) {
+    return bffFetch<Page<ThirdPartyVendor>>(`/api/inventory/services/${serviceId}/vendors${qs(params)}`);
+  },
+  addServiceVendor(serviceId: string, vendorId: string) {
+    return bffFetch<void>(`/api/inventory/services/${serviceId}/vendors/${vendorId}`, { method: "POST" });
+  },
+  removeServiceVendor(serviceId: string, vendorId: string) {
+    return bffFetch<void>(`/api/inventory/services/${serviceId}/vendors/${vendorId}`, { method: "DELETE" });
+  },
+  listServiceOwners(serviceId: string, params: { page?: number; size?: number } = {}) {
+    return bffFetch<Page<Owner>>(`/api/inventory/services/${serviceId}/owners${qs(params)}`);
+  },
+  addServiceOwner(serviceId: string, ownerId: string) {
+    return bffFetch<void>(`/api/inventory/services/${serviceId}/owners/${ownerId}`, { method: "POST" });
+  },
+  removeServiceOwner(serviceId: string, ownerId: string) {
+    return bffFetch<void>(`/api/inventory/services/${serviceId}/owners/${ownerId}`, { method: "DELETE" });
+  },
+
+  /**
+   * Import a service's components and dependency edges from a CycloneDX JSON SBOM. `cyclonedxJson`
+   * is the raw file text; the backend parses it, is additive + idempotent, and returns a summary.
+   */
+  importSbom(serviceId: string, cyclonedxJson: string) {
+    return bffFetch<SbomImportResult>(`/api/inventory/services/${serviceId}/sbom`, {
+      method: "POST",
+      body: cyclonedxJson,
+    });
+  },
+
+  /** Services + owners impacted by a component, including those reached transitively. */
+  componentImpact(id: string) {
+    return bffFetch<ComponentImpact>(`/api/inventory/components/${id}/impact`);
+  },
+  /** Services + owners impacted by a vendor (direct dependency only). */
+  vendorImpact(id: string) {
+    return bffFetch<VendorImpact>(`/api/inventory/vendors/${id}/impact`);
+  },
+};
+
+/** The unified change-signals feed (advisories + vendor outages + security news), read-only. */
+export const signalApi = {
+  list(params: ListParams & { type?: string; severity?: string; source?: string } = {}) {
+    return bffFetch<Page<ChangeSignal>>(`/api/change-signals${qs(params)}`);
+  },
+  /** Distinct sources + severities present — powers the advisory filter selects. */
+  facets() {
+    return bffFetch<ChangeSignalFacets>("/api/change-signals/facets");
   },
 };
 

@@ -12,6 +12,7 @@ import com.aegis.core.inventory.domain.ThirdPartyVendor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -20,7 +21,8 @@ import org.springframework.data.repository.query.Param;
 // through PK lookups the service has already org-verified via an org-scoped find, and the tenant GUC
 // (set by the adapter) lets Postgres RLS backstop it all.
 
-interface BusinessServiceJpaRepository extends JpaRepository<BusinessService, UUID> {
+interface BusinessServiceJpaRepository
+        extends JpaRepository<BusinessService, UUID>, JpaSpecificationExecutor<BusinessService> {
     Optional<BusinessService> findByIdAndOrgId(UUID id, UUID orgId);
     Page<BusinessService> findByOrgId(UUID orgId, Pageable pageable);
     List<BusinessService> findByIdInAndOrgId(Collection<UUID> ids, UUID orgId);
@@ -29,9 +31,13 @@ interface BusinessServiceJpaRepository extends JpaRepository<BusinessService, UU
     boolean existsByNameIgnoreCaseAndOrgIdAndIdNot(String name, UUID orgId, UUID id);
 }
 
-interface SoftwareComponentJpaRepository extends JpaRepository<SoftwareComponent, UUID> {
+interface SoftwareComponentJpaRepository
+        extends JpaRepository<SoftwareComponent, UUID>, JpaSpecificationExecutor<SoftwareComponent> {
     Optional<SoftwareComponent> findByIdAndOrgId(UUID id, UUID orgId);
     Page<SoftwareComponent> findByOrgId(UUID orgId, Pageable pageable);
+
+    @Query("select distinct c.ecosystem from SoftwareComponent c where c.orgId = :orgId order by c.ecosystem")
+    List<String> findDistinctEcosystems(@Param("orgId") UUID orgId);
     List<SoftwareComponent> findByIdInAndOrgId(Collection<UUID> ids, UUID orgId);
     Optional<SoftwareComponent> findByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCaseAndOrgId(
             String ecosystem, String name, String version, UUID orgId);
@@ -53,7 +59,8 @@ interface SoftwareComponentJpaRepository extends JpaRepository<SoftwareComponent
             @Param("componentId") UUID componentId, @Param("orgId") UUID orgId, Pageable pageable);
 }
 
-interface ThirdPartyVendorJpaRepository extends JpaRepository<ThirdPartyVendor, UUID> {
+interface ThirdPartyVendorJpaRepository
+        extends JpaRepository<ThirdPartyVendor, UUID>, JpaSpecificationExecutor<ThirdPartyVendor> {
     Optional<ThirdPartyVendor> findByIdAndOrgId(UUID id, UUID orgId);
     Page<ThirdPartyVendor> findByOrgId(UUID orgId, Pageable pageable);
     Optional<ThirdPartyVendor> findByNameIgnoreCaseAndOrgId(String name, UUID orgId);
@@ -67,7 +74,8 @@ interface ThirdPartyVendorJpaRepository extends JpaRepository<ThirdPartyVendor, 
             @Param("serviceId") UUID serviceId, @Param("orgId") UUID orgId, Pageable pageable);
 }
 
-interface OwnerJpaRepository extends JpaRepository<Owner, UUID> {
+interface OwnerJpaRepository
+        extends JpaRepository<Owner, UUID>, JpaSpecificationExecutor<Owner> {
     Optional<Owner> findByIdAndOrgId(UUID id, UUID orgId);
     Page<Owner> findByOrgId(UUID orgId, Pageable pageable);
     List<Owner> findByIdInAndOrgId(Collection<UUID> ids, UUID orgId);

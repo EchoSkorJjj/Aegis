@@ -91,10 +91,14 @@ class InventoryPersistenceIntegrationTest extends AbstractInventoryIntegrationTe
                 String.class, service.getId())).isEqualTo("CRITICAL");
 
         // Other test classes share this database, so the new rows may not be on the first page.
-        assertThat(allPages(inventory::listBusinessServices)).contains(service);
-        assertThat(allPages(inventory::listSoftwareComponents)).contains(component);
-        assertThat(allPages(inventory::listThirdPartyVendors)).contains(vendor);
-        assertThat(allPages(inventory::listOwners)).contains(owner);
+        assertThat(allPages(p -> inventory.listBusinessServices(InventoryFilters.ServiceFilter.NONE, p)))
+                .contains(service);
+        assertThat(allPages(p -> inventory.listSoftwareComponents(InventoryFilters.ComponentFilter.NONE, p)))
+                .contains(component);
+        assertThat(allPages(p -> inventory.listThirdPartyVendors(InventoryFilters.NamedFilter.NONE, p)))
+                .contains(vendor);
+        assertThat(allPages(p -> inventory.listOwners(InventoryFilters.NamedFilter.NONE, p)))
+                .contains(owner);
 
         Instant previousUpdatedAt = service.getUpdatedAt();
         BusinessService updated = inventory.updateBusinessService(

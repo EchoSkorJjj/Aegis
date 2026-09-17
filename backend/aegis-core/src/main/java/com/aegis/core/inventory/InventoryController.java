@@ -1,6 +1,8 @@
 package com.aegis.core.inventory;
 
 import java.net.URI;
+import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import jakarta.validation.Valid;
@@ -14,12 +16,14 @@ import com.aegis.core.inventory.InventoryDtos.SoftwareComponentRequest;
 import com.aegis.core.inventory.InventoryDtos.SoftwareComponentResponse;
 import com.aegis.core.inventory.InventoryDtos.ThirdPartyVendorResponse;
 import com.aegis.core.inventory.InventoryDtos.VendorImpactResponse;
+import com.aegis.core.inventory.domain.BusinessCriticality;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -29,6 +33,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -54,10 +59,15 @@ public class InventoryController {
 
     @GetMapping("/services")
     @PreAuthorize(InventoryRoles.READ)
-    @Operation(summary = "List business services")
-    public Page<BusinessServiceResponse> listBusinessServices(@PageableDefault(
-            size = 20, sort = {"name", "id"}, direction = Sort.Direction.ASC) Pageable pageable) {
-        return inventory.listBusinessServices(pageable).map(BusinessServiceResponse::from);
+    @Operation(summary = "List business services, optionally filtered by name, criticality, and created date")
+    public Page<BusinessServiceResponse> listBusinessServices(
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) BusinessCriticality criticality,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            @PageableDefault(size = 20, sort = {"name", "id"}, direction = Sort.Direction.ASC) Pageable pageable) {
+        InventoryFilters.ServiceFilter filter = new InventoryFilters.ServiceFilter(search, criticality, from, to);
+        return inventory.listBusinessServices(filter, pageable).map(BusinessServiceResponse::from);
     }
 
     @GetMapping("/services/{id}")
@@ -96,10 +106,24 @@ public class InventoryController {
 
     @GetMapping("/components")
     @PreAuthorize(InventoryRoles.READ)
-    @Operation(summary = "List software components")
-    public Page<SoftwareComponentResponse> listSoftwareComponents(@PageableDefault(
-            size = 20, sort = {"name", "id"}, direction = Sort.Direction.ASC) Pageable pageable) {
-        return inventory.listSoftwareComponents(pageable).map(SoftwareComponentResponse::from);
+    @Operation(summary = "List software components, optionally filtered by name/version, ecosystem, and created date")
+    public Page<SoftwareComponentResponse> listSoftwareComponents(
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String ecosystem,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            @RequestParam(required = false) UUID excludeLinkedToService,
+            @PageableDefault(size = 20, sort = {"name", "id"}, direction = Sort.Direction.ASC) Pageable pageable) {
+        InventoryFilters.ComponentFilter filter =
+                new InventoryFilters.ComponentFilter(search, ecosystem, from, to, excludeLinkedToService);
+        return inventory.listSoftwareComponents(filter, pageable).map(SoftwareComponentResponse::from);
+    }
+
+    @GetMapping("/components/ecosystems")
+    @PreAuthorize(InventoryRoles.READ)
+    @Operation(summary = "List the distinct component ecosystems in the org — powers the ecosystem filter")
+    public List<String> listComponentEcosystems() {
+        return inventory.listComponentEcosystems();
     }
 
     @GetMapping("/components/{id}")
@@ -138,10 +162,15 @@ public class InventoryController {
 
     @GetMapping("/vendors")
     @PreAuthorize(InventoryRoles.READ)
-    @Operation(summary = "List third-party vendors")
-    public Page<ThirdPartyVendorResponse> listThirdPartyVendors(@PageableDefault(
-            size = 20, sort = {"name", "id"}, direction = Sort.Direction.ASC) Pageable pageable) {
-        return inventory.listThirdPartyVendors(pageable).map(ThirdPartyVendorResponse::from);
+    @Operation(summary = "List third-party vendors, optionally filtered by name and created date")
+    public Page<ThirdPartyVendorResponse> listThirdPartyVendors(
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            @RequestParam(required = false) UUID excludeLinkedToService,
+            @PageableDefault(size = 20, sort = {"name", "id"}, direction = Sort.Direction.ASC) Pageable pageable) {
+        InventoryFilters.NamedFilter filter = new InventoryFilters.NamedFilter(search, from, to, excludeLinkedToService);
+        return inventory.listThirdPartyVendors(filter, pageable).map(ThirdPartyVendorResponse::from);
     }
 
     @GetMapping("/vendors/{id}")
@@ -177,10 +206,15 @@ public class InventoryController {
 
     @GetMapping("/owners")
     @PreAuthorize(InventoryRoles.READ)
-    @Operation(summary = "List owners")
-    public Page<OwnerResponse> listOwners(@PageableDefault(
-            size = 20, sort = {"name", "id"}, direction = Sort.Direction.ASC) Pageable pageable) {
-        return inventory.listOwners(pageable).map(OwnerResponse::from);
+    @Operation(summary = "List owners, optionally filtered by name and created date")
+    public Page<OwnerResponse> listOwners(
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            @RequestParam(required = false) UUID excludeLinkedToService,
+            @PageableDefault(size = 20, sort = {"name", "id"}, direction = Sort.Direction.ASC) Pageable pageable) {
+        InventoryFilters.NamedFilter filter = new InventoryFilters.NamedFilter(search, from, to, excludeLinkedToService);
+        return inventory.listOwners(filter, pageable).map(OwnerResponse::from);
     }
 
     @GetMapping("/owners/{id}")

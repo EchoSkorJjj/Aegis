@@ -50,14 +50,19 @@ import {
   SidebarMenuSubItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { canReadInventory } from "@/lib/roles";
 import { useAuth } from "@/providers/auth-provider";
 
 type NavLink = { title: string; href: string; icon: LucideIcon };
 type NavGroup = { title: string; icon: LucideIcon; items: { title: string; href: string }[] };
 type NavItem = NavLink | NavGroup;
 
-const platformNav: NavItem[] = [
-  { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+// Always available — the landing page for every signed-in user.
+const baseNav: NavItem[] = [{ title: "Dashboard", href: "/dashboard", icon: LayoutDashboard }];
+
+// Aegis domain data. Shown only to users with a domain read role (SERVICE_OWNER / ANALYST /
+// COMPLIANCE_ADMIN), mirroring aegis-core's read gate — a pure ORG_ADMIN is 403 on these APIs.
+const domainNav: NavItem[] = [
   {
     title: "Inventory",
     icon: Boxes,
@@ -65,6 +70,7 @@ const platformNav: NavItem[] = [
       { title: "Services", href: "/inventory/services" },
       { title: "Components", href: "/inventory/components" },
       { title: "Vendors", href: "/inventory/vendors" },
+      { title: "Owners", href: "/inventory/owners" },
       { title: "Dependency map", href: "/inventory/map" },
     ],
   },
@@ -106,6 +112,10 @@ export function AppSidebar() {
   // Anyone with a role beyond the USER baseline can open the member directory (read-only for the
   // domain roles, full management for admins). The Users page itself gates what each can do.
   const canSeeMembers = !!user?.roles.some((r) => r !== "USER");
+  // Domain data (inventory, advisories, and the rest of the estate features) needs a domain read role.
+  const platformNav: NavItem[] = canReadInventory(user?.roles ?? [])
+    ? [...baseNav, ...domainNav]
+    : baseNav;
 
   const activeOrgName =
     organizations.find((org) => org.id === user?.orgId)?.name ?? "Workspace";
