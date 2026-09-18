@@ -13,8 +13,9 @@ See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../..
 > connectors — the **NVD CVE feed** (CPE, CVSS and affected versions → advisories), **vendor status
 > pages** (Statuspage/RSS → vendor incidents), and **security news** (RSS/Atom → articles with the CVE
 > identifiers they mention) — unified for reading through the **`change_signals`** view, with
-> per-feed health/counts/last-success exposed as Prometheus metrics. Matching, scoring, and action
-> workflows remain planned.
+> per-feed health/counts/last-success exposed as Prometheus metrics. **Deterministic matching is
+> built:** advisory CPE/package + SemVer range matching, dependency and vendor traversal, and explicit
+> evidence chains. Scoring and action workflows remain planned.
 
 ## Modules (a modular monolith, split by seams later)
 
@@ -22,7 +23,7 @@ See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../..
 |---|---|
 | `inventory` | Services, components, vendors, SBOM dependencies, ownership — the map |
 | `ingestion` | Scheduled feed polling (NVD, vendor status, security news) → advisories, incidents, news, unified into `change_signals` |
-| `matching`  | Advisory package + version range → components → impacted services/owners → findings |
+| `matching`  | Advisory package + version range → components → impacted services/owners + evidence chains |
 | `scoring`   | Deterministic impact score per service and owner, with a "why" breakdown |
 | `actions`   | Execute human-approved responses (PR / ticket / memo), audited |
 | `ai`        | **Port** to the Python ai-service: `AiAssessor` / `AiDrafter` + DTOs + `HttpAiClient` |
@@ -355,3 +356,29 @@ vendor-status: 238 incident(s) normalised
 ingestion source 'security-news': 5 new, 0 duplicate(s)
 security-news: 147 article(s) normalised
 ```
+
+## Matching and evidence (Epic 6 stories 1–3)
+
+`GET /api/matching/change-signals/{id}` contextualizes one vulnerability or vendor-outage signal
+against the caller's active organization's current inventory. It requires `SERVICE_OWNER`, `ANALYST`,
+or `COMPLIANCE_ADMIN`, like the inventory and feed APIs.
+
+- Vulnerabilities match application CPE product identities to package names, then apply concrete or
+  inclusive/exclusive SemVer bounds. Exact package matches are preferred; a shortened CPE product
+  alias is accepted only when its vendor also appears in the package namespace. Unparseable range
+  versions fail closed rather than creating a false positive.
+- The reverse dependency graph is traversed breadth-first from each affected component. The response
+  groups results by service and gives each reason the shortest component path from the vulnerable
+  component to the component that service uses directly, followed by that service's owners. Cycles
+  terminate and do not duplicate a service.
+- Vendor outages match the normalized incident vendor name/key to registered vendors, then traverse
+  direct vendor → service → owner relationships.
+- Every result includes a deterministic `explanation` plus structured `affectedProduct`,
+  `componentPath`, or `vendor` evidence. No advisory prose is interpreted, and no AI is called.
+
+Matching is deliberately read-only and derived from the current global signal plus current
+org-scoped inventory. Persisted findings and impact scores are later pipeline stages; this avoids
+storing contextualization that silently becomes stale after an SBOM or relationship changes.
+
+Security-news signals do not carry a package or vendor identity and are rejected by this endpoint;
+their extracted CVE references remain available for a later article → advisory correlation stage.

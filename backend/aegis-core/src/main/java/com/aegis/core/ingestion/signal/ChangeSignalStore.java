@@ -1,5 +1,6 @@
 package com.aegis.core.ingestion.signal;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -11,6 +12,12 @@ public interface ChangeSignalStore {
 
     Optional<ChangeSignal> findById(UUID id);
 
-    /** A page of signals across every source, most recently occurred first by default. */
-    Page<ChangeSignal> findPage(Pageable pageable);
+    /** A filtered page of signals across every source, most recently occurred first by default. */
+    Page<ChangeSignal> findPage(ChangeSignalFilter filter, Pageable pageable);
+
+    /** Distinct source ids present, sorted — powers the source filter select. */
+    List<String> findSources();
+
+    /** Distinct severities present (non-null), sorted — powers the severity filter select. */
+    List<String> findSeverities();
 }

@@ -1,10 +1,12 @@
 package com.aegis.core.inventory.persistence;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -14,16 +16,24 @@ import java.util.stream.Collectors;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 
+import com.aegis.core.inventory.InventoryFilters.ComponentFilter;
+import com.aegis.core.inventory.InventoryFilters.NamedFilter;
+import com.aegis.core.inventory.InventoryFilters.ServiceFilter;
 import com.aegis.core.inventory.InventoryStore;
+import com.aegis.core.inventory.InventoryStore.ComponentDependencyLink;
 import com.aegis.core.inventory.InventoryStore.ServiceComponentLink;
 import com.aegis.core.inventory.domain.BusinessService;
+import com.aegis.core.inventory.domain.InventoryEntity;
 import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
 import com.aegis.core.tenant.CurrentOrg;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Repository;
 
 /**
@@ -96,8 +106,17 @@ public class JpaInventoryStore implements InventoryStore {
     }
 
     @Override
-    public Page<BusinessService> findBusinessServices(Pageable pageable) {
-        return services.findByOrgId(scope(), pageable);
+    public Page<BusinessService> findBusinessServices(ServiceFilter filter, Pageable pageable) {
+        List<Specification<BusinessService>> specs =
+                orgAndCreated(scope(), filter.createdAfter(), filter.createdBefore());
+        if (hasText(filter.search())) {
+            String like = like(filter.search());
+            specs.add((root, query, cb) -> cb.like(cb.lower(root.get("name")), like));
+        }
+        if (filter.criticality() != null) {
+            specs.add((root, query, cb) -> cb.equal(root.get("criticality"), filter.criticality()));
+        }
+        return services.findAll(Specification.allOf(specs), pageable);
     }
 
     @Override
@@ -131,8 +150,35 @@ public class JpaInventoryStore implements InventoryStore {
     }
 
     @Override
-    public Page<SoftwareComponent> findSoftwareComponents(Pageable pageable) {
-        return components.findByOrgId(scope(), pageable);
+    public Page<SoftwareComponent> findSoftwareComponents(ComponentFilter filter, Pageable pageable) {
+        UUID org = scope();
+        List<Specification<SoftwareComponent>> specs =
+                orgAndCreated(org, filter.createdAfter(), filter.createdBefore());
+        if (hasText(filter.search())) {
+            String like = like(filter.search());
+            specs.add((root, query, cb) -> cb.or(
+                    cb.like(cb.lower(root.get("name")), like),
+                    cb.like(cb.lower(root.get("version")), like)));
+        }
+        if (hasText(filter.ecosystem())) {
+            String ecosystem = filter.ecosystem().trim().toLowerCase(Locale.ROOT);
+            specs.add((root, query, cb) -> cb.equal(cb.lower(root.get("ecosystem")), ecosystem));
+        }
+        if (filter.excludeServiceId() != null) {
+            specs.add(notLinkedToService(
+                    ServiceComponentEntity.class, "componentId", filter.excludeServiceId(), org));
+        }
+        return components.findAll(Specification.allOf(specs), pageable);
+    }
+
+    @Override
+    public List<String> findComponentEcosystems() {
+        return components.findDistinctEcosystems(scope());
+    }
+
+    @Override
+    public List<SoftwareComponent> findSoftwareComponentsForMatching() {
+        return components.findAllByOrgIdOrderByNameAscIdAsc(scope());
     }
 
     @Override
@@ -171,8 +217,13 @@ public class JpaInventoryStore implements InventoryStore {
     }
 
     @Override
-    public Page<ThirdPartyVendor> findThirdPartyVendors(Pageable pageable) {
-        return vendors.findByOrgId(scope(), pageable);
+    public Page<ThirdPartyVendor> findThirdPartyVendors(NamedFilter filter, Pageable pageable) {
+        UUID org = scope();
+        List<Specification<ThirdPartyVendor>> specs = namedSpecs(org, filter);
+        if (filter.excludeServiceId() != null) {
+            specs.add(notLinkedToService(ServiceVendorEntity.class, "vendorId", filter.excludeServiceId(), org));
+        }
+        return vendors.findAll(Specification.allOf(specs), pageable);
     }
 
     @Override
@@ -194,6 +245,11 @@ public class JpaInventoryStore implements InventoryStore {
     }
 
     @Override
+    public List<ThirdPartyVendor> findThirdPartyVendorsForMatching() {
+        return vendors.findAllByOrgIdOrderByNameAscIdAsc(scope());
+    }
+
+    @Override
     public Owner save(Owner value) {
         UUID org = scope();
         value.assignOrg(org);
@@ -206,8 +262,13 @@ public class JpaInventoryStore implements InventoryStore {
     }
 
     @Override
-    public Page<Owner> findOwners(Pageable pageable) {
-        return owners.findByOrgId(scope(), pageable);
+    public Page<Owner> findOwners(NamedFilter filter, Pageable pageable) {
+        UUID org = scope();
+        List<Specification<Owner>> specs = namedSpecs(org, filter);
+        if (filter.excludeServiceId() != null) {
+            specs.add(notLinkedToService(ServiceOwnerEntity.class, "ownerId", filter.excludeServiceId(), org));
+        }
+        return owners.findAll(Specification.allOf(specs), pageable);
     }
 
     @Override
@@ -344,6 +405,13 @@ public class JpaInventoryStore implements InventoryStore {
     }
 
     @Override
+    public List<ComponentDependencyLink> findComponentDependencyLinks(Collection<UUID> dependencyIds) {
+        return componentDependencies.findByDependencyIdInAndOrgId(dependencyIds, scope()).stream()
+                .map(link -> new ComponentDependencyLink(link.getComponentId(), link.getDependencyId()))
+                .toList();
+    }
+
+    @Override
     public List<ServiceComponentLink> findServiceComponentLinks(Collection<UUID> componentIds) {
         return serviceComponents.findByComponentIdInAndOrgId(componentIds, scope()).stream()
                 .map(link -> new ServiceComponentLink(link.getBusinessServiceId(), link.getComponentId()))
@@ -385,5 +453,55 @@ public class JpaInventoryStore implements InventoryStore {
         return serviceVendors.findByVendorIdAndOrgId(vendorId, scope()).stream()
                 .map(ServiceVendorEntity::getBusinessServiceId)
                 .toList();
+    }
+
+    // ---- Specification helpers -----------------------------------------------------------------
+
+    /** org = scope AND (optionally) createdAt within [after, before] — the base of every filtered list. */
+    private <T extends InventoryEntity> List<Specification<T>> orgAndCreated(
+            UUID org, Instant createdAfter, Instant createdBefore) {
+        List<Specification<T>> specs = new ArrayList<>();
+        specs.add((root, query, cb) -> cb.equal(root.get("orgId"), org));
+        if (createdAfter != null) {
+            specs.add((root, query, cb) -> cb.greaterThanOrEqualTo(root.get("createdAt"), createdAfter));
+        }
+        if (createdBefore != null) {
+            specs.add((root, query, cb) -> cb.lessThanOrEqualTo(root.get("createdAt"), createdBefore));
+        }
+        return specs;
+    }
+
+    /** org + createdAt window + a case-insensitive name substring — for the name-only entities. */
+    private <T extends InventoryEntity> List<Specification<T>> namedSpecs(UUID org, NamedFilter filter) {
+        List<Specification<T>> specs = orgAndCreated(org, filter.createdAfter(), filter.createdBefore());
+        if (hasText(filter.search())) {
+            String like = like(filter.search());
+            specs.add((root, query, cb) -> cb.like(cb.lower(root.get("name")), like));
+        }
+        return specs;
+    }
+
+    /**
+     * Excludes rows already linked to a service:
+     * {@code id NOT IN (select <targetIdField> from <joinEntity> where businessServiceId = sid and orgId = org)}.
+     * The org clause keeps the exclusion inside the tenant even though the join PK is already org-local.
+     */
+    private static <T> Specification<T> notLinkedToService(
+            Class<?> joinEntity, String targetIdField, UUID serviceId, UUID org) {
+        return (root, query, cb) -> {
+            Subquery<UUID> linked = query.subquery(UUID.class);
+            Root<?> link = linked.from(joinEntity);
+            linked.select(link.<UUID>get(targetIdField))
+                    .where(cb.equal(link.get("businessServiceId"), serviceId), cb.equal(link.get("orgId"), org));
+            return cb.not(root.get("id").in(linked));
+        };
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static String like(String value) {
+        return "%" + value.trim().toLowerCase(Locale.ROOT) + "%";
     }
 }

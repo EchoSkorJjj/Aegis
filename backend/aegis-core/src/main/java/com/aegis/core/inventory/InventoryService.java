@@ -53,8 +53,8 @@ public class InventoryService {
     }
 
     @Transactional(readOnly = true)
-    public Page<BusinessService> listBusinessServices(Pageable pageable) {
-        return store.findBusinessServices(pageable);
+    public Page<BusinessService> listBusinessServices(InventoryFilters.ServiceFilter filter, Pageable pageable) {
+        return store.findBusinessServices(filter, pageable);
     }
 
     @Transactional
@@ -85,8 +85,13 @@ public class InventoryService {
     }
 
     @Transactional(readOnly = true)
-    public Page<SoftwareComponent> listSoftwareComponents(Pageable pageable) {
-        return store.findSoftwareComponents(pageable);
+    public Page<SoftwareComponent> listSoftwareComponents(InventoryFilters.ComponentFilter filter, Pageable pageable) {
+        return store.findSoftwareComponents(filter, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public List<String> listComponentEcosystems() {
+        return store.findComponentEcosystems();
     }
 
     @Transactional
@@ -117,8 +122,8 @@ public class InventoryService {
     }
 
     @Transactional(readOnly = true)
-    public Page<ThirdPartyVendor> listThirdPartyVendors(Pageable pageable) {
-        return store.findThirdPartyVendors(pageable);
+    public Page<ThirdPartyVendor> listThirdPartyVendors(InventoryFilters.NamedFilter filter, Pageable pageable) {
+        return store.findThirdPartyVendors(filter, pageable);
     }
 
     @Transactional
@@ -149,8 +154,8 @@ public class InventoryService {
     }
 
     @Transactional(readOnly = true)
-    public Page<Owner> listOwners(Pageable pageable) {
-        return store.findOwners(pageable);
+    public Page<Owner> listOwners(InventoryFilters.NamedFilter filter, Pageable pageable) {
+        return store.findOwners(filter, pageable);
     }
 
     @Transactional

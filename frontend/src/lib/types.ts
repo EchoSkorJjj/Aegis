@@ -170,3 +170,120 @@ export interface Page<T> {
   first: boolean;
   last: boolean;
 }
+
+// ---- aegis-core inventory (the estate map; org-scoped — ADR §6) ------------------------------
+
+/** Business-service criticality tier. Mirrors aegis-core BusinessCriticality. */
+export type BusinessCriticality = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+export interface BusinessService {
+  id: string;
+  name: string;
+  criticality: BusinessCriticality;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BusinessServiceInput {
+  name: string;
+  criticality: BusinessCriticality;
+}
+
+/** A software component, keyed by (ecosystem, name, version). */
+export interface SoftwareComponent {
+  id: string;
+  ecosystem: string;
+  name: string;
+  version: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SoftwareComponentInput {
+  ecosystem: string;
+  name: string;
+  version: string;
+}
+
+/** A third-party vendor the estate depends on. */
+export interface ThirdPartyVendor {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** An owner (person/team) of a business service. */
+export interface Owner {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OwnerInput {
+  name: string;
+}
+
+/** A service impacted by a component — directly, or transitively through a dependency chain. */
+export interface ComponentImpactedService {
+  service: BusinessService;
+  owners: Owner[];
+  /** True only when the service uses the queried component itself, false when reached via a dependency. */
+  direct: boolean;
+  /** The component the service actually depends on directly (the queried one when `direct`). */
+  viaComponent: SoftwareComponent;
+}
+
+export interface ComponentImpact {
+  component: SoftwareComponent;
+  services: ComponentImpactedService[];
+}
+
+/** A service impacted directly (e.g. through a vendor it uses). */
+export interface ImpactedService {
+  service: BusinessService;
+  owners: Owner[];
+}
+
+export interface VendorImpact {
+  vendor: ThirdPartyVendor;
+  services: ImpactedService[];
+}
+
+/** What a CycloneDX SBOM import changed on a service. Mirrors aegis-core SbomImportResult. */
+export interface SbomImportResult {
+  serviceId: string;
+  componentsCreated: number;
+  componentsMatched: number;
+  /** Components dropped because they had no resolvable version. */
+  componentsSkipped: number;
+  dependenciesCreated: number;
+  serviceComponentsLinked: number;
+}
+
+// ---- aegis-core change signals (unified advisories / vendor outages / security news) ---------
+
+/** The kind of real-world change a signal represents. Mirrors aegis-core ChangeSignal.SignalType. */
+export type SignalType = "VULNERABILITY" | "VENDOR_OUTAGE" | "SECURITY_NEWS";
+
+/** Distinct values available for the advisory filter selects (GET /api/change-signals/facets). */
+export interface ChangeSignalFacets {
+  sources: string[];
+  severities: string[];
+}
+
+/** One row of the unified `change_signals` read model (global reference data — not org-scoped). */
+export interface ChangeSignal {
+  id: string;
+  signalType: SignalType;
+  sourceId: string;
+  externalId: string;
+  title: string | null;
+  summary: string | null;
+  severity: string | null;
+  url: string | null;
+  occurredAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}

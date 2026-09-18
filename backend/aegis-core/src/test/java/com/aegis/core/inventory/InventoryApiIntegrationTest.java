@@ -21,6 +21,7 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.test.web.servlet.MvcResult;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -291,6 +292,75 @@ class InventoryApiIntegrationTest extends AbstractInventoryIntegrationTest {
         }
         mvc.perform(delete(serviceComponent).with(role("ANALYST")))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void filtersListsByNameCriticalityEcosystemAndDateAndExposesEcosystems() throws Exception {
+        // A collision-proof token so `search=` isolates exactly this test's rows in the shared DB.
+        String tag = "flt" + UUID.randomUUID().toString().replace("-", "");
+        String ecosystem = "eco" + UUID.randomUUID().toString().replace("-", "");
+
+        create("/api/inventory/services", "{\"name\":\"" + tag + " one\",\"criticality\":\"CRITICAL\"}");
+        create("/api/inventory/services", "{\"name\":\"" + tag + " two\",\"criticality\":\"LOW\"}");
+
+        // Name search isolates our two rows regardless of what other suites seeded.
+        mvc.perform(get("/api/inventory/services?search=" + tag + "&size=50").with(role("ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2));
+        // Criticality narrows to one.
+        mvc.perform(get("/api/inventory/services?search=" + tag + "&criticality=CRITICAL&size=50")
+                        .with(role("ANALYST")))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].criticality").value("CRITICAL"));
+        // Rows are created "now"; a far-past upper bound excludes them, a far-past lower bound keeps them.
+        mvc.perform(get("/api/inventory/services?search=" + tag + "&to=2000-01-01T00:00:00Z&size=50")
+                        .with(role("ANALYST")))
+                .andExpect(jsonPath("$.totalElements").value(0));
+        mvc.perform(get("/api/inventory/services?search=" + tag + "&from=2000-01-01T00:00:00Z&size=50")
+                        .with(role("ANALYST")))
+                .andExpect(jsonPath("$.totalElements").value(2));
+
+        create("/api/inventory/components",
+                "{\"ecosystem\":\"" + ecosystem + "\",\"name\":\"" + tag + "\",\"version\":\"1.0\"}");
+        create("/api/inventory/components",
+                "{\"ecosystem\":\"npm\",\"name\":\"" + tag + "\",\"version\":\"2.0\"}");
+
+        mvc.perform(get("/api/inventory/components?search=" + tag + "&size=50").with(role("ANALYST")))
+                .andExpect(jsonPath("$.totalElements").value(2));
+        // Ecosystem is an exact (case-insensitive) match; our unique ecosystem selects one component.
+        mvc.perform(get("/api/inventory/components?ecosystem=" + ecosystem + "&size=50").with(role("ANALYST")))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].ecosystem").value(ecosystem));
+        // Search matches the version too.
+        mvc.perform(get("/api/inventory/components?search=2.0&ecosystem=npm&size=50").with(role("ANALYST")))
+                .andExpect(jsonPath("$.content[*].name", hasItem(tag)));
+        // The ecosystems endpoint lists our distinct ecosystem for the filter select.
+        mvc.perform(get("/api/inventory/components/ecosystems").with(role("SERVICE_OWNER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasItem(ecosystem)));
+    }
+
+    @Test
+    void componentSearchCanExcludeComponentsAlreadyLinkedToAService() throws Exception {
+        String tag = "lnk" + UUID.randomUUID().toString().replace("-", "");
+        BusinessService service = inventory.createBusinessService("Svc " + tag, BusinessCriticality.LOW);
+        UUID linkedId = create("/api/inventory/components",
+                "{\"ecosystem\":\"npm\",\"name\":\"" + tag + "-linked\",\"version\":\"1.0\"}");
+        create("/api/inventory/components",
+                "{\"ecosystem\":\"npm\",\"name\":\"" + tag + "-free\",\"version\":\"1.0\"}");
+
+        mvc.perform(post("/api/inventory/services/{sid}/components/{cid}", service.getId(), linkedId)
+                        .with(role("ANALYST")))
+                .andExpect(status().isCreated());
+
+        // Both match the tag with no exclusion…
+        mvc.perform(get("/api/inventory/components?search=" + tag + "&size=50").with(role("ANALYST")))
+                .andExpect(jsonPath("$.totalElements").value(2));
+        // …but the picker excludes the one already linked to this service.
+        mvc.perform(get("/api/inventory/components?search=" + tag + "&excludeLinkedToService=" + service.getId()
+                        + "&size=50").with(role("ANALYST")))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].name").value(tag + "-free"));
     }
 
     private UUID create(String path, String json) throws Exception {

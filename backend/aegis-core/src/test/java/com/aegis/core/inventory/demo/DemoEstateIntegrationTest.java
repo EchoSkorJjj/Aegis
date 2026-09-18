@@ -2,6 +2,7 @@ package com.aegis.core.inventory.demo;
 
 import java.util.UUID;
 
+import com.aegis.core.inventory.InventoryFilters;
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.domain.Owner;
@@ -45,17 +46,17 @@ class DemoEstateIntegrationTest extends AbstractInventoryIntegrationTest {
 
     @Test
     void seedingAgainChangesNothing() {
-        long services = inventory.listBusinessServices(FIRST).getTotalElements();
-        long components = inventory.listSoftwareComponents(FIRST).getTotalElements();
-        long vendors = inventory.listThirdPartyVendors(FIRST).getTotalElements();
-        long owners = inventory.listOwners(FIRST).getTotalElements();
+        long services = inventory.listBusinessServices(InventoryFilters.ServiceFilter.NONE, FIRST).getTotalElements();
+        long components = inventory.listSoftwareComponents(InventoryFilters.ComponentFilter.NONE, FIRST).getTotalElements();
+        long vendors = inventory.listThirdPartyVendors(InventoryFilters.NamedFilter.NONE, FIRST).getTotalElements();
+        long owners = inventory.listOwners(InventoryFilters.NamedFilter.NONE, FIRST).getTotalElements();
 
         seeder.seed();
 
-        assertThat(inventory.listBusinessServices(FIRST).getTotalElements()).isEqualTo(services);
-        assertThat(inventory.listSoftwareComponents(FIRST).getTotalElements()).isEqualTo(components);
-        assertThat(inventory.listThirdPartyVendors(FIRST).getTotalElements()).isEqualTo(vendors);
-        assertThat(inventory.listOwners(FIRST).getTotalElements()).isEqualTo(owners);
+        assertThat(inventory.listBusinessServices(InventoryFilters.ServiceFilter.NONE, FIRST).getTotalElements()).isEqualTo(services);
+        assertThat(inventory.listSoftwareComponents(InventoryFilters.ComponentFilter.NONE, FIRST).getTotalElements()).isEqualTo(components);
+        assertThat(inventory.listThirdPartyVendors(InventoryFilters.NamedFilter.NONE, FIRST).getTotalElements()).isEqualTo(vendors);
+        assertThat(inventory.listOwners(InventoryFilters.NamedFilter.NONE, FIRST).getTotalElements()).isEqualTo(owners);
 
         UUID payments = serviceId("Payments API");
         assertThat(inventory.listServiceComponents(payments, ALL).getContent())
