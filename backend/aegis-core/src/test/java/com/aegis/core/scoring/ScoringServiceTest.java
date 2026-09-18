@@ -53,7 +53,7 @@ class ScoringServiceTest {
     @BeforeEach
     void setUp() {
         scoring = new ScoringService(
-                matching, signals, advisories, new ImpactScorer(ScoringWeights.defaults()));
+                matching, signals, advisories, new ImpactScorer(ScoringProperties.defaults()));
     }
 
     @Test

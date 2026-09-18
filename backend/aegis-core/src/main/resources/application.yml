@@ -54,6 +54,46 @@ aegis:
   # Opt-in: load the fictional demo estate (classpath:demo/) at startup. Idempotent; dev/demo only.
   demo:
     seed-enabled: ${AEGIS_DEMO_SEED_ENABLED:false}
+  # Impact scoring (E7). Every number the model multiplies, overridable per deployment: the weighting
+  # is the part a security team argues with, not the arithmetic. Each factor is a multiplier in [0,1],
+  # so the score stays a 0-100 percentage of the worst case. Omit any entry to keep its default, and
+  # omit the whole block to get the shipped model.
+  scoring:
+    # How much of an advisory's severity a service's business tier retains.
+    criticality:
+      critical: ${AEGIS_SCORING_CRITICALITY_CRITICAL:1.0}
+      high: ${AEGIS_SCORING_CRITICALITY_HIGH:0.75}
+      medium: ${AEGIS_SCORING_CRITICALITY_MEDIUM:0.5}
+      low: ${AEGIS_SCORING_CRITICALITY_LOW:0.25}
+    # How much an attacker's reach is worth. The floor is well above zero: an isolated service is not
+    # invulnerable, an insider or a compromised neighbour still reaches it.
+    exposure:
+      internet-facing: ${AEGIS_SCORING_EXPOSURE_INTERNET_FACING:1.0}
+      internal: ${AEGIS_SCORING_EXPOSURE_INTERNAL:0.6}
+      isolated: ${AEGIS_SCORING_EXPOSURE_ISOLATED:0.4}
+    # Discount applied for a match's confidence. Both 1.0 by default — confidence answers whether the
+    # match applies, not how bad it is, and a POSSIBLE row is already flagged for review. Lower
+    # `possible` to rank unreviewed matches below proven ones.
+    confidence:
+      confirmed: ${AEGIS_SCORING_CONFIDENCE_CONFIRMED:1.0}
+      possible: ${AEGIS_SCORING_CONFIDENCE_POSSIBLE:1.0}
+    # Applied when a signal carries neither a CVSS score nor a severity label we recognise. Neutral,
+    # never zero: not knowing how bad something is must not rank it as harmless.
+    unknown-severity-factor: ${AEGIS_SCORING_UNKNOWN_SEVERITY_FACTOR:0.5}
+    # Lower bound of each impact tier on the 0-100 scale. Raise them for a stricter queue.
+    tiers:
+      critical: ${AEGIS_SCORING_TIER_CRITICAL:75.0}
+      high: ${AEGIS_SCORING_TIER_HIGH:50.0}
+      medium: ${AEGIS_SCORING_TIER_MEDIUM:25.0}
+      low: ${AEGIS_SCORING_TIER_LOW:10.0}
+    # Below this score a result is returned but marked immaterial — the noise control, not a filter.
+    materiality-threshold: ${AEGIS_SCORING_MATERIALITY_THRESHOLD:10.0}
+    rollup:
+      # Hard ceiling on how many signals one roll-up request may score: each costs a match and a graph
+      # traversal, so this bounds the work a single call can ask for. Past it the response says so.
+      max-signals: ${AEGIS_SCORING_ROLLUP_MAX_SIGNALS:200}
+      # How far back a roll-up reaches when the caller gives no `from`.
+      default-window: ${AEGIS_SCORING_ROLLUP_WINDOW:P30D}
   # Ingestion framework (E5). Connectors register as IngestionSource beans and the scheduler
   # discovers them. Disable with enabled=false; poll-interval is an ISO-8601 duration.
   ingestion:

@@ -6,6 +6,7 @@ import java.util.Locale;
 
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.ServiceExposure;
+import com.aegis.core.matching.MatchingDtos.MatchConfidence;
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 import com.aegis.core.scoring.ScoringDtos.ScoreBreakdown;
 import com.aegis.core.scoring.ScoringDtos.SeverityInput;
@@ -28,13 +29,13 @@ import org.springframework.stereotype.Component;
 @Component
 public class ImpactScorer {
 
-    private final ScoringWeights weights;
+    private final ScoringProperties weights;
 
-    public ImpactScorer(ScoringWeights weights) {
+    public ImpactScorer(ScoringProperties weights) {
         this.weights = weights;
     }
 
-    public ScoringWeights weights() {
+    public ScoringProperties weights() {
         return weights;
     }
 
@@ -80,25 +81,40 @@ public class ImpactScorer {
         };
     }
 
-    /** The per-service breakdown: the three factors and the inputs they were read from. */
+    /**
+     * The per-service breakdown: every factor and the input it was read from.
+     *
+     * <p>{@code confidenceFactor} is 1.0 under the shipped weighting, so confidence is reported
+     * without discounting the score — see {@link ScoringProperties}. A deployment that lowers
+     * {@code aegis.scoring.confidence.possible} gets the discount, and it shows up here as its own
+     * term rather than hiding inside one of the other three.
+     */
     public ScoreBreakdown breakdown(
-            double severityFactor, ServiceExposure exposure, BusinessCriticality criticality) {
+            double severityFactor,
+            ServiceExposure exposure,
+            BusinessCriticality criticality,
+            MatchConfidence confidence) {
         return new ScoreBreakdown(
                 clamp(severityFactor),
                 exposure,
                 weights.exposureFactor(exposure),
                 criticality,
-                weights.criticalityFactor(criticality));
+                weights.criticalityFactor(criticality),
+                confidence,
+                weights.confidenceFactor(confidence));
     }
 
     /** The 0-100 score for a breakdown, rounded to one decimal so it is stable to display and compare. */
     public double score(ScoreBreakdown breakdown) {
-        double product = breakdown.severityFactor() * breakdown.exposureFactor() * breakdown.criticalityFactor();
+        double product = breakdown.severityFactor()
+                * breakdown.exposureFactor()
+                * breakdown.criticalityFactor()
+                * breakdown.confidenceFactor();
         return round(clamp(product) * 100.0);
     }
 
     public ImpactTier tier(double score) {
-        ScoringWeights.Tiers tiers = weights.tiers();
+        ScoringProperties.Tiers tiers = weights.tiers();
         if (score >= tiers.critical()) {
             return ImpactTier.CRITICAL;
         }

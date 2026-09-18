@@ -1,6 +1,7 @@
 package com.aegis.core.scoring;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 
 import com.aegis.core.inventory.domain.BusinessCriticality;
@@ -66,15 +67,18 @@ public final class ScoringDtos {
     }
 
     /**
-     * Every term in {@code score = severity x exposure x criticality x 100}, with the inputs each
-     * factor was read from. Reproducing the score by hand from this record is the point.
+     * Every term in {@code score = severity x exposure x criticality x confidence x 100}, with the
+     * input each factor was read from. Reproducing the score by hand from this record is the point;
+     * {@code confidenceFactor} is 1.0 unless a deployment configured a discount.
      */
     public record ScoreBreakdown(
             double severityFactor,
             ServiceExposure exposure,
             double exposureFactor,
             BusinessCriticality criticality,
-            double criticalityFactor) {
+            double criticalityFactor,
+            MatchConfidence confidence,
+            double confidenceFactor) {
     }
 
     /**
@@ -91,9 +95,60 @@ public final class ScoringDtos {
             ServiceRef topService) {
     }
 
+
+    /**
+     * The estate-wide roll-up: many change signals scored and aggregated into one ranked view per
+     * service and per owner. Where {@link ChangeImpactResponse} answers "who does this CVE hurt",
+     * this answers "what is on our plate", which is the question an owner actually opens the app with.
+     *
+     * @param signalsConsidered how many signals were scored (bounded by {@code window.maxSignals})
+     * @param signalsImpacting  how many of those reached at least one service — the rest matched nothing
+     * @param truncated         true when the window held more signals than the bound allowed, so the
+     *                          roll-up covers only the newest of them and a narrower window would be
+     *                          more honest than a bigger number
+     */
+    public record EstateRollupResponse(
+            RollupWindow window,
+            int signalsConsidered,
+            int signalsImpacting,
+            boolean truncated,
+            List<ServiceRollup> services,
+            List<OwnerRollup> owners) {
+    }
+
+    /** The slice of time and work the roll-up actually covered, echoed back so the numbers are readable. */
+    public record RollupWindow(Instant from, Instant to, int maxSignals) {
+    }
+
+    /**
+     * One service's standing across the window. {@code topScore} is its worst single signal — the same
+     * "worst, not sum" rule as the per-owner roll-up, for the same reason — and the counts say how
+     * much else is queued behind it.
+     */
+    public record ServiceRollup(
+            ServiceRef service,
+            double topScore,
+            ImpactTier tier,
+            int signalCount,
+            int materialSignalCount,
+            ChangeRef topSignal) {
+    }
+
+    /** One owner's standing across the window, aggregated over every service they own. */
+    public record OwnerRollup(
+            OwnerRef owner,
+            double topScore,
+            ImpactTier tier,
+            int impactedServiceCount,
+            int signalCount,
+            int materialSignalCount,
+            ServiceRef topService,
+            ChangeRef topSignal) {
+    }
+
     /**
      * The banded form of a score, for routing and display. Bands come from
-     * {@link ScoringWeights.Tiers}; the raw score remains authoritative for ordering.
+     * {@link ScoringProperties.Tiers}; the raw score remains authoritative for ordering.
      */
     public enum ImpactTier {
         NEGLIGIBLE,

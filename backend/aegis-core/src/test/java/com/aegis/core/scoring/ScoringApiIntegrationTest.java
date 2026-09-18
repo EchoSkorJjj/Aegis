@@ -1,6 +1,7 @@
 package com.aegis.core.scoring;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -192,6 +193,100 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
         mvc.perform(get("/api/scoring/change-signals/{id}", article.id()).with(role("ANALYST")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.status").value(400));
+    }
+
+
+    @Test
+    void rollsUpEveryScoredSignalInAWindowPerServiceAndOwner() throws Exception {
+        // The integration suite shares one database, so the roll-up is narrowed with `search` to this
+        // test's own signals — a global count here would break the moment another suite seeds a row.
+        String tag = Long.toHexString(Math.abs(UUID.randomUUID().getMostSignificantBits()));
+        Owner owner = inventory.createOwner("Rollup team " + tag);
+        BusinessService exposed = inventory.createBusinessService(
+                "Rollup exposed " + tag, BusinessCriticality.CRITICAL, ServiceExposure.INTERNET_FACING);
+        BusinessService hidden = inventory.createBusinessService(
+                "Rollup hidden " + tag, BusinessCriticality.LOW, ServiceExposure.ISOLATED);
+        inventory.addServiceOwner(exposed.getId(), owner.getId());
+        inventory.addServiceOwner(hidden.getId(), owner.getId());
+
+        String packageName = "rollup-lib-" + tag;
+        SoftwareComponent vulnerable = inventory.createSoftwareComponent(
+                "maven", "com.acme:" + packageName, "1.0.0");
+        inventory.addServiceComponent(exposed.getId(), vulnerable.getId());
+        inventory.addServiceComponent(hidden.getId(), vulnerable.getId());
+
+        // Two advisories on the same component: one severe, one mild.
+        advisories.upsert(taggedAdvisory(tag, "1", packageName, new BigDecimal("10.0")));
+        advisories.upsert(taggedAdvisory(tag, "2", packageName, new BigDecimal("4.0")));
+
+        mvc.perform(get("/api/scoring/rollups")
+                        .param("search", tag)
+                        .param("from", Instant.now().minus(Duration.ofDays(1)).toString())
+                        .with(role("ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.signalsConsidered").value(2))
+                .andExpect(jsonPath("$.signalsImpacting").value(2))
+                .andExpect(jsonPath("$.truncated").value(false))
+                .andExpect(jsonPath("$.window.maxSignals").value(200))
+                .andExpect(jsonPath("$.services.length()").value(2))
+                // Highest-scoring service first, and each reports its worst signal, not a total.
+                .andExpect(jsonPath("$.services[0].service.id").value(exposed.getId().toString()))
+                .andExpect(jsonPath("$.services[0].topScore").value(100.0))
+                .andExpect(jsonPath("$.services[0].tier").value("CRITICAL"))
+                .andExpect(jsonPath("$.services[0].signalCount").value(2))
+                .andExpect(jsonPath("$.services[0].materialSignalCount").value(2))
+                .andExpect(jsonPath("$.services[0].topSignal.externalId").value("CVE-2099-" + tag + "1"))
+                .andExpect(jsonPath("$.services[1].service.id").value(hidden.getId().toString()))
+                .andExpect(jsonPath("$.services[1].topScore").value(10.0))
+                // 0.4 x 0.25 x 0.4 = 4.0, under the threshold, so only one of its two signals is material.
+                .andExpect(jsonPath("$.services[1].materialSignalCount").value(1))
+                .andExpect(jsonPath("$.owners[0].owner.id").value(owner.getId().toString()))
+                .andExpect(jsonPath("$.owners[0].topScore").value(100.0))
+                .andExpect(jsonPath("$.owners[0].impactedServiceCount").value(2))
+                .andExpect(jsonPath("$.owners[0].signalCount").value(4))
+                .andExpect(jsonPath("$.owners[0].topService.id").value(exposed.getId().toString()));
+    }
+
+    @Test
+    void boundsTheRollupAndReportsThatItWasTruncated() throws Exception {
+        String tag = Long.toHexString(Math.abs(UUID.randomUUID().getMostSignificantBits()));
+        BusinessService service = inventory.createBusinessService(
+                "Bounded " + tag, BusinessCriticality.HIGH, ServiceExposure.INTERNAL);
+        String packageName = "bounded-lib-" + tag;
+        SoftwareComponent vulnerable = inventory.createSoftwareComponent(
+                "maven", "com.acme:" + packageName, "1.0.0");
+        inventory.addServiceComponent(service.getId(), vulnerable.getId());
+        advisories.upsert(taggedAdvisory(tag, "1", packageName, new BigDecimal("10.0")));
+        advisories.upsert(taggedAdvisory(tag, "2", packageName, new BigDecimal("10.0")));
+
+        mvc.perform(get("/api/scoring/rollups")
+                        .param("search", tag)
+                        .param("limit", "1")
+                        .with(role("ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.signalsConsidered").value(1))
+                .andExpect(jsonPath("$.truncated").value(true))
+                .andExpect(jsonPath("$.services.length()").value(1));
+    }
+
+    @Test
+    void theRollupNeedsADomainReadRoleToo() throws Exception {
+        mvc.perform(get("/api/scoring/rollups"))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/scoring/rollups").with(role("USER")))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/scoring/rollups").param("limit", "1").with(role("SERVICE_OWNER")))
+                .andExpect(status().isOk());
+    }
+
+    private static Advisory taggedAdvisory(
+            String tag, String ordinal, String packageName, BigDecimal baseScore) {
+        return new Advisory(
+                null, "nvd", "CVE-2099-" + tag + ordinal, "rollup advisory", Instant.now(), Instant.now(),
+                new Advisory.Cvss("3.1", null, baseScore, "CRITICAL"),
+                List.of(new AffectedProduct(
+                        "cpe:2.3:a:acme:" + packageName + ":*:*:*:*:*:*:*:*",
+                        "a", "acme", packageName, null, null, null, null, null)));
     }
 
     private static Advisory advisory(String suffix, String packageName, BigDecimal baseScore) {

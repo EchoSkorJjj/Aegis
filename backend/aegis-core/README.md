@@ -16,8 +16,8 @@ See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../..
 > per-feed health/counts/last-success exposed as Prometheus metrics. **Deterministic matching is
 > built:** advisory CPE/package + SemVer range matching, dependency and vendor traversal, and explicit
 > evidence chains. **Impact scoring is built:** every impacted service is scored
-> `severity x exposure x criticality`, banded into a tier and rolled up per owner. Action workflows
-> remain planned.
+> `severity x exposure x criticality`, banded into a tier and rolled up per owner and per service,
+> with every weight in the model configurable. Action workflows remain planned.
 
 ## Modules (a modular monolith, split by seams later)
 
@@ -392,7 +392,7 @@ storing contextualization that silently becomes stale after an SBOM or relations
 Security-news signals do not carry a package or vendor identity and are rejected by this endpoint;
 their extracted CVE references remain available for a later article → advisory correlation stage.
 
-## Impact scoring (Epic 7 story 1)
+## Impact scoring (Epic 7 stories 1-2)
 
 `GET /api/scoring/change-signals/{id}` ranks one change signal across everything it reaches:
 
@@ -432,3 +432,51 @@ team with many trivial hits above one whose payment gateway is about to be explo
 Like matching, scoring is recomputed per request and persists nothing: a score derived from today's
 SBOM and today's CVSS data would be a lie tomorrow, and the findings table that freezes one is a
 later epic. Security-news signals are rejected by matching before scoring sees them.
+
+### Configurable weights
+
+Every number the model multiplies lives under `aegis.scoring.*` (see `application.yml`), because the
+arithmetic is not the part anyone argues with — the weighting is. One organization's LOW-tier internal
+tool is another's revenue path. Omit any entry to keep its default, or the whole block to get the
+shipped model; an override changes only what it names, so retuning one tier does not require
+restating the table.
+
+| Key | Default | What it moves |
+|---|---|---|
+| `aegis.scoring.criticality.*` | `1.0 / 0.75 / 0.5 / 0.25` | How much severity a business tier retains |
+| `aegis.scoring.exposure.*` | `1.0 / 0.6 / 0.4` | What an attacker's reach is worth |
+| `aegis.scoring.confidence.*` | `1.0 / 1.0` | Optional discount for an unreviewed (`POSSIBLE`) match |
+| `aegis.scoring.unknown-severity-factor` | `0.5` | Applied when neither a CVSS score nor a known label exists |
+| `aegis.scoring.tiers.*` | `75 / 50 / 25 / 10` | Lower bound of each `ImpactTier` |
+| `aegis.scoring.materiality-threshold` | `10.0` | Below this a result is returned but marked immaterial |
+| `aegis.scoring.rollup.max-signals` | `200` | Ceiling on signals one roll-up may score |
+| `aegis.scoring.rollup.default-window` | `P30D` | How far back a roll-up reaches with no `from` |
+
+Each has an env-var override (`AEGIS_SCORING_TIER_CRITICAL`, `AEGIS_SCORING_EXPOSURE_ISOLATED`, …).
+The confidence weights are the seam for the one judgement call story 1 deliberately left out: matching
+confidence is *reported* rather than folded into the score, and a deployment that would rather rank
+unreviewed matches below proven ones lowers `aegis.scoring.confidence.possible` instead of arguing
+with the arithmetic. When it is not 1.0 the discount appears as its own term in the `breakdown` and in
+the explanation, never hidden inside one of the other three.
+
+Every scalar binds as a boxed type on purpose: an unset property binds a primitive to `0`, which is
+indistinguishable from a deliberate `0` — and a silently-zero `materiality-threshold` would turn the
+noise control off without anyone having configured that.
+
+### Roll-ups (per service, per owner)
+
+`GET /api/scoring/rollups` scores every signal in a window and aggregates it into one ranked view.
+Where `/change-signals/{id}` answers "who does this CVE hurt", this answers "what is on our plate",
+which is the question an owner actually opens the app with.
+
+- Filters are the change-signal feed's own (`type`, `severity`, `source`, `search`, `ecosystem`,
+  `from`, `to`) plus `limit`, so a roll-up can be narrowed to one ecosystem or one source.
+- A service's or owner's `topScore` is their **worst** single signal, never a sum — twenty
+  low-severity hits are not worse than one imminent breach, and a total would rank them that way.
+  `signalCount` / `materialSignalCount` say how much else is queued behind it.
+- The work is bounded twice: by the window and by `rollup.max-signals` (a caller's `limit` is clamped
+  to it). Each signal costs a match and a graph traversal, so this is a ceiling on what one request
+  can ask for. When the window held more, the newest are scored and the response sets `truncated` —
+  a roll-up that quietly covered an arbitrary subset would be worse than one that admits it.
+- Security-news signals are skipped rather than rejected: they carry no package or vendor identity,
+  and one unmatchable article must not fail the whole roll-up.

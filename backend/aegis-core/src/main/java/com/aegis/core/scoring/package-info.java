@@ -7,7 +7,7 @@
  * only says <em>how much it matters</em>, banding the result into an {@code ImpactTier} and marking
  * anything under the materiality threshold as noise.
  *
- * <p>The arithmetic ({@code ImpactScorer}) is pure and its weighting ({@code ScoringWeights}) is data,
+ * <p>The arithmetic ({@code ImpactScorer}) is pure and its weighting ({@code ScoringProperties}) is configuration,
  * so a ranking can always be reproduced and argued with. Nothing here interprets advisory prose or
  * calls the ai-service: when the AI lands it will supply relevance and reachability opinions as
  * further inputs, and this module will still do the arithmetic itself.
