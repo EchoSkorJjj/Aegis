@@ -38,7 +38,7 @@ public final class MatchingDtos {
     }
 
     public record ImpactedServiceMatch(
-            ServiceRef service, List<OwnerRef> owners, List<EvidenceChain> evidence) {
+            ServiceRef service, MatchConfidence confidence, List<OwnerRef> owners, List<EvidenceChain> evidence) {
     }
 
     /**
@@ -48,6 +48,7 @@ public final class MatchingDtos {
      */
     public record EvidenceChain(
             EvidenceKind kind,
+            MatchConfidence confidence,
             String explanation,
             AffectedProductEvidence affectedProduct,
             List<ComponentRef> componentPath,
@@ -59,17 +60,38 @@ public final class MatchingDtos {
         VENDOR_DEPENDENCY
     }
 
+    /**
+     * How much to trust a match — the false-positive control. {@code CONFIRMED} is a fully-qualified
+     * identity match whose version is provably in range; {@code POSSIBLE} is anything weaker (a bare
+     * or vendor-aliased name that could collide across ecosystems, or a version that could not be
+     * range-checked) and should be treated as "needs review", never auto-actioned.
+     */
+    public enum MatchConfidence {
+        CONFIRMED,
+        POSSIBLE
+    }
+
+    /** Whether a component's version could be placed in the advisory's affected range. */
+    public enum VersionMatch {
+        IN_RANGE,
+        OUT_OF_RANGE,
+        /** The version or a range bound was not comparable (unknown / non-SemVer) — surfaced, not dropped. */
+        UNDETERMINED
+    }
+
     public record AffectedProductEvidence(
             String cpe,
             String vendor,
             String product,
             String versionRange,
-            IdentityMatch identityMatch) {
+            IdentityMatch identityMatch,
+            VersionMatch versionMatch) {
 
         static AffectedProductEvidence from(
-                AffectedProduct affected, IdentityMatch identityMatch) {
+                AffectedProduct affected, IdentityMatch identityMatch, VersionMatch versionMatch) {
             return new AffectedProductEvidence(
-                    affected.cpe(), affected.vendor(), affected.product(), describeRange(affected), identityMatch);
+                    affected.cpe(), affected.vendor(), affected.product(), describeRange(affected),
+                    identityMatch, versionMatch);
         }
 
         private static String describeRange(AffectedProduct affected) {
@@ -89,9 +111,22 @@ public final class MatchingDtos {
         }
     }
 
+    /**
+     * How a component's name was tied to the advisory's product.
+     * <ul>
+     *   <li>{@code EXACT_PACKAGE} — fully-qualified name, or a leaf name whose namespace confirms the
+     *       CPE vendor. Strong.</li>
+     *   <li>{@code CPE_VENDOR_PRODUCT_ALIAS} — a CPE product that is a prefix of the package leaf
+     *       (e.g. CPE {@code log4j} vs Maven {@code log4j-core}), accepted only with the vendor
+     *       present in the namespace. Weaker.</li>
+     *   <li>{@code AMBIGUOUS_NAME} — a bare leaf name with no namespace or no CPE vendor to
+     *       disambiguate; can collide across ecosystems/vendors. Weakest.</li>
+     * </ul>
+     */
     public enum IdentityMatch {
         EXACT_PACKAGE,
-        CPE_VENDOR_PRODUCT_ALIAS
+        CPE_VENDOR_PRODUCT_ALIAS,
+        AMBIGUOUS_NAME
     }
 
     public record ComponentRef(UUID id, String ecosystem, String name, String version) {

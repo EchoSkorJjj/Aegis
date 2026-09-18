@@ -69,7 +69,13 @@ class MatchingApiIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.impactedServices.length()").value(1))
                 .andExpect(jsonPath("$.impactedServices[0].service.id").value(service.getId().toString()))
                 .andExpect(jsonPath("$.impactedServices[0].owners[0].id").value(owner.getId().toString()))
+                .andExpect(jsonPath("$.impactedServices[0].confidence").value("CONFIRMED"))
                 .andExpect(jsonPath("$.impactedServices[0].evidence[0].kind").value("ADVISORY_COMPONENT"))
+                .andExpect(jsonPath("$.impactedServices[0].evidence[0].confidence").value("CONFIRMED"))
+                .andExpect(jsonPath("$.impactedServices[0].evidence[0].affectedProduct.identityMatch")
+                        .value("EXACT_PACKAGE"))
+                .andExpect(jsonPath("$.impactedServices[0].evidence[0].affectedProduct.versionMatch")
+                        .value("IN_RANGE"))
                 .andExpect(jsonPath("$.impactedServices[0].evidence[0].affectedProduct.versionRange")
                         .value("[2.0.0,2.15.0)"))
                 .andExpect(jsonPath("$.impactedServices[0].evidence[0].componentPath.length()").value(2))
@@ -115,6 +121,64 @@ class MatchingApiIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.impactedServices[0].evidence[0].vendor.id")
                         .value(vendor.getId().toString()))
                 .andExpect(jsonPath("$.impactedServices[0].evidence[0].componentPath.length()").value(0));
+    }
+
+    @Test
+    void surfacesAnAmbiguousBareNameMatchButFlagsItAsPossible() throws Exception {
+        String suffix = UUID.randomUUID().toString();
+        BusinessService service = inventory.createBusinessService("Reports " + suffix, BusinessCriticality.MEDIUM);
+        // A bare package name with no namespace — the CPE cannot prove the ecosystem/vendor.
+        SoftwareComponent bare = inventory.createSoftwareComponent("npm", "widget-" + suffix, "1.0.0");
+        inventory.addServiceComponent(service.getId(), bare.getId());
+
+        String cve = "CVE-2099-" + Math.abs(UUID.randomUUID().getMostSignificantBits());
+        Advisory advisory = advisories.upsert(new Advisory(
+                null, "nvd", cve, "ambiguous match", Instant.now(), Instant.now(), null,
+                List.of(new AffectedProduct(
+                        "cpe:2.3:a:acme:widget-" + suffix + ":*:*:*:*:*:*:*:*",
+                        "a", "acme", "widget-" + suffix, null, null, null, null, null))));
+
+        mvc.perform(get("/api/matching/change-signals/{id}", advisory.id()).with(role("ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.matchedComponentCount").value(1))
+                .andExpect(jsonPath("$.impactedServices.length()").value(1))
+                .andExpect(jsonPath("$.impactedServices[0].service.id").value(service.getId().toString()))
+                .andExpect(jsonPath("$.impactedServices[0].confidence").value("POSSIBLE"))
+                .andExpect(jsonPath("$.impactedServices[0].evidence[0].confidence").value("POSSIBLE"))
+                .andExpect(jsonPath("$.impactedServices[0].evidence[0].affectedProduct.identityMatch")
+                        .value("AMBIGUOUS_NAME"))
+                .andExpect(jsonPath("$.impactedServices[0].evidence[0].explanation")
+                        .value(org.hamcrest.Matchers.containsString("possible match")));
+    }
+
+    @Test
+    void matchesAnOsvPurlAdvisoryToAnEcosystemComponent() throws Exception {
+        String suffix = UUID.randomUUID().toString();
+        BusinessService service = inventory.createBusinessService("Web " + suffix, BusinessCriticality.HIGH);
+        Owner owner = inventory.createOwner("Web team " + suffix);
+        inventory.addServiceOwner(service.getId(), owner.getId());
+        // An npm component the OSV advisory covers, and a same-name PyPI component it must not touch.
+        SoftwareComponent axios = inventory.createSoftwareComponent("npm", "axios-" + suffix, "1.5.0");
+        inventory.createSoftwareComponent("pypi", "axios-" + suffix, "1.5.0");
+        inventory.addServiceComponent(service.getId(), axios.getId());
+
+        String cve = "CVE-2099-" + Math.abs(UUID.randomUUID().getMostSignificantBits());
+        // OSV reports it as a GHSA aliasing the CVE, with a purl-shaped affected range [.., 1.6.0).
+        Advisory advisory = advisories.upsert(new Advisory(
+                null, "osv", "GHSA-" + suffix, cve, "axios SSRF", Instant.now(), Instant.now(), null,
+                List.of(AffectedProduct.ofPackage("npm", "axios-" + suffix, null, null, null, null, "1.6.0"))));
+
+        mvc.perform(get("/api/matching/change-signals/{id}", advisory.id()).with(role("ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.change.title").value(cve)) // the canonical CVE, not the GHSA id
+                .andExpect(jsonPath("$.matchedComponentCount").value(1)) // the npm one only, not PyPI
+                .andExpect(jsonPath("$.impactedServices.length()").value(1))
+                .andExpect(jsonPath("$.impactedServices[0].service.id").value(service.getId().toString()))
+                .andExpect(jsonPath("$.impactedServices[0].confidence").value("CONFIRMED"))
+                .andExpect(jsonPath("$.impactedServices[0].evidence[0].affectedProduct.identityMatch")
+                        .value("EXACT_PACKAGE"))
+                .andExpect(jsonPath("$.impactedServices[0].evidence[0].affectedProduct.versionMatch")
+                        .value("IN_RANGE"));
     }
 
     @Test

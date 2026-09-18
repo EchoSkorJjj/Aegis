@@ -42,24 +42,26 @@ public class ChangeSignalController {
 
     @GetMapping
     @PreAuthorize(READ)
-    @Operation(summary = "List change signals, optionally filtered by type, severity, source, text, and date")
+    @Operation(summary = "List change signals, optionally filtered by type, severity, source, ecosystem, text, and date")
     public Page<ChangeSignalResponse> listSignals(
             @RequestParam(required = false) SignalType type,
             @RequestParam(required = false) String severity,
             @RequestParam(required = false) String source,
             @RequestParam(required = false) String search,
+            @RequestParam(required = false) String ecosystem,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
             @PageableDefault(size = 20, sort = "occurredAt", direction = Sort.Direction.DESC) Pageable pageable) {
-        ChangeSignalFilter filter = new ChangeSignalFilter(type, severity, source, search, from, to);
+        ChangeSignalFilter filter = new ChangeSignalFilter(type, severity, source, search, ecosystem, from, to);
         return signals.findPage(filter, pageable).map(ChangeSignalResponse::from);
     }
 
     @GetMapping("/facets")
     @PreAuthorize(READ)
-    @Operation(summary = "Distinct sources and severities present — powers the advisory filter selects")
+    @Operation(summary = "Distinct sources, severities, and ecosystems present — powers the advisory filter selects")
     public ChangeSignalFacets facets() {
-        return new ChangeSignalFacets(signals.findSources(), signals.findSeverities());
+        return new ChangeSignalFacets(
+                signals.findSources(), signals.findSeverities(), signals.findEcosystems());
     }
 
     @GetMapping("/{id}")

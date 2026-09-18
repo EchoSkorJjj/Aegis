@@ -7,6 +7,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -14,6 +15,7 @@ import java.util.stream.Collectors;
 import com.aegis.core.common.ApiExceptions;
 import com.aegis.core.ingestion.advisory.Advisory;
 import com.aegis.core.ingestion.advisory.AdvisoryStore;
+import com.aegis.core.ingestion.advisory.AffectedProduct;
 import com.aegis.core.ingestion.incident.VendorIncident;
 import com.aegis.core.ingestion.incident.VendorIncidentStore;
 import com.aegis.core.ingestion.signal.ChangeSignal;
@@ -32,14 +34,22 @@ import com.aegis.core.matching.MatchingDtos.ChangeRef;
 import com.aegis.core.matching.MatchingDtos.ComponentRef;
 import com.aegis.core.matching.MatchingDtos.EvidenceChain;
 import com.aegis.core.matching.MatchingDtos.EvidenceKind;
+import com.aegis.core.matching.MatchingDtos.IdentityMatch;
 import com.aegis.core.matching.MatchingDtos.ImpactedServiceMatch;
+import com.aegis.core.matching.MatchingDtos.MatchConfidence;
 import com.aegis.core.matching.MatchingDtos.OwnerRef;
 import com.aegis.core.matching.MatchingDtos.ServiceRef;
 import com.aegis.core.matching.MatchingDtos.VendorRef;
+import com.aegis.core.matching.MatchingDtos.VersionMatch;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** Application service for Epic 6's deterministic match, traversal, and evidence generation. */
+/**
+ * Application service for Epic 6's deterministic match, traversal, and evidence generation.
+ *
+ * <p>Matching is recomputed on demand for each request; there is no findings table yet (that is a
+ * later epic), so nothing here is persisted or cached.
+ */
 @Service
 public class MatchingService {
 
@@ -84,27 +94,45 @@ public class MatchingService {
                 .orElseThrow(() -> new ApiExceptions.NotFound("Vendor incident backing change signal was not found"));
     }
 
-    private ChangeMatchResponse matchAdvisory(ChangeSignal signal, Advisory advisory) {
+    private ChangeMatchResponse matchAdvisory(ChangeSignal signal, Advisory representative) {
+        // Expand to every advisory sharing this vulnerability's canonical id (NVD + OSV + …) and match
+        // against the union of their affected products, so a CVE is matched by both its CPE and its purl.
+        String canonicalId = representative.canonicalId();
+        List<AffectedProduct> affected = advisories.findByCanonicalId(canonicalId).stream()
+                .flatMap(entry -> entry.affected().stream())
+                .distinct()
+                .toList();
         List<ComponentMatch> componentMatches = componentMatcher.match(
-                advisory, inventory.findSoftwareComponentsForMatching());
-        Map<UUID, ServiceAccumulator> impacted = new LinkedHashMap<>();
+                affected, inventory.findSoftwareComponentsForMatching());
+
+        // Reverse-dependency closure from each matched (vulnerable) component. Computed once per root
+        // (a component matched by two affected products does not traverse twice).
+        Map<UUID, Map<UUID, List<UUID>>> pathsByRoot = new LinkedHashMap<>();
+        Set<UUID> reachable = new LinkedHashSet<>();
         Set<UUID> matchedComponentIds = new LinkedHashSet<>();
-
         for (ComponentMatch match : componentMatches) {
-            matchedComponentIds.add(match.component().getId());
-            Map<UUID, List<UUID>> paths = dependentPaths(match.component().getId());
-            List<ServiceComponentLink> serviceLinks = inventory.findServiceComponentLinks(paths.keySet());
-            if (serviceLinks.isEmpty()) {
-                continue;
-            }
-            Set<UUID> serviceIds = serviceLinks.stream()
-                    .map(ServiceComponentLink::serviceId)
-                    .collect(Collectors.toCollection(LinkedHashSet::new));
-            Map<UUID, BusinessService> services = inventory.findBusinessServicesByIds(serviceIds);
-            Map<UUID, List<Owner>> owners = inventory.findOwnersForServices(serviceIds);
-            Map<UUID, SoftwareComponent> components = inventory.findSoftwareComponentsByIds(paths.keySet());
+            UUID rootId = match.component().getId();
+            matchedComponentIds.add(rootId);
+            Map<UUID, List<UUID>> paths = pathsByRoot.computeIfAbsent(rootId, this::dependentPaths);
+            reachable.addAll(paths.keySet());
+        }
 
-            serviceLinks.stream()
+        // Every downstream lookup is batched once over the whole closure — not per matched component.
+        List<ServiceComponentLink> serviceLinks = inventory.findServiceComponentLinks(reachable);
+        Set<UUID> serviceIds = serviceLinks.stream()
+                .map(ServiceComponentLink::serviceId)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Map<UUID, BusinessService> services = inventory.findBusinessServicesByIds(serviceIds);
+        Map<UUID, List<Owner>> owners = inventory.findOwnersForServices(serviceIds);
+        Map<UUID, SoftwareComponent> components = inventory.findSoftwareComponentsByIds(reachable);
+        Map<UUID, List<ServiceComponentLink>> linksByComponent = serviceLinks.stream()
+                .collect(Collectors.groupingBy(ServiceComponentLink::componentId));
+
+        Map<UUID, ServiceAccumulator> impacted = new LinkedHashMap<>();
+        for (ComponentMatch match : componentMatches) {
+            Map<UUID, List<UUID>> paths = pathsByRoot.get(match.component().getId());
+            paths.keySet().stream()
+                    .flatMap(componentId -> linksByComponent.getOrDefault(componentId, List.of()).stream())
                     .sorted(Comparator.comparing(ServiceComponentLink::serviceId)
                             .thenComparing(ServiceComponentLink::componentId))
                     .forEach(link -> {
@@ -112,16 +140,21 @@ public class MatchingService {
                         if (service == null) {
                             return;
                         }
-                        List<OwnerRef> ownerRefs = ownerRefs(owners.get(link.serviceId()));
                         List<ComponentRef> componentPath = paths.get(link.componentId()).stream()
                                 .map(components::get)
-                                .filter(java.util.Objects::nonNull)
+                                .filter(Objects::nonNull)
                                 .map(ComponentRef::from)
                                 .toList();
+                        if (componentPath.isEmpty()) {
+                            return; // never emit evidence we cannot describe
+                        }
+                        List<OwnerRef> ownerRefs = ownerRefs(owners.get(link.serviceId()));
                         EvidenceChain evidence = new EvidenceChain(
                                 EvidenceKind.ADVISORY_COMPONENT,
-                                advisoryExplanation(advisory, componentPath, service, ownerRefs),
-                                AffectedProductEvidence.from(match.affectedProduct(), match.identityMatch()),
+                                match.confidence(),
+                                advisoryExplanation(canonicalId, match, componentPath, service, ownerRefs),
+                                AffectedProductEvidence.from(
+                                        match.affectedProduct(), match.identityMatch(), match.versionMatch()),
                                 componentPath,
                                 null);
                         impacted.computeIfAbsent(service.getId(), ignored ->
@@ -155,6 +188,8 @@ public class MatchingService {
                 List<OwnerRef> ownerRefs = ownerRefs(owners.get(serviceId));
                 EvidenceChain evidence = new EvidenceChain(
                         EvidenceKind.VENDOR_DEPENDENCY,
+                        // A vendor link is a direct, exact name/key equality — no inference.
+                        MatchConfidence.CONFIRMED,
                         vendorExplanation(incident, vendor, service, ownerRefs),
                         null,
                         List.of(),
@@ -202,8 +237,18 @@ public class MatchingService {
                                 (ServiceAccumulator value) -> value.service.getName(), String.CASE_INSENSITIVE_ORDER)
                         .thenComparing(value -> value.service.getId()))
                 .map(value -> new ImpactedServiceMatch(
-                        ServiceRef.from(value.service), value.owners, List.copyOf(value.evidence)))
+                        ServiceRef.from(value.service),
+                        aggregateConfidence(value.evidence),
+                        value.owners,
+                        List.copyOf(value.evidence)))
                 .toList();
+    }
+
+    /** A service is CONFIRMED impacted if any one reason is confirmed; otherwise it is a review item. */
+    private static MatchConfidence aggregateConfidence(List<EvidenceChain> evidence) {
+        return evidence.stream().anyMatch(chain -> chain.confidence() == MatchConfidence.CONFIRMED)
+                ? MatchConfidence.CONFIRMED
+                : MatchConfidence.POSSIBLE;
     }
 
     private static List<OwnerRef> ownerRefs(List<Owner> owners) {
@@ -218,30 +263,43 @@ public class MatchingService {
     }
 
     private static boolean vendorMatches(ThirdPartyVendor vendor, VendorIncident incident) {
-        String inventoryName = canonical(vendor.getName());
-        return inventoryName.equals(canonical(incident.vendorName()))
-                || inventoryName.equals(canonical(incident.vendorKey()));
+        String inventoryName = normalizeVendor(vendor.getName());
+        return inventoryName.equals(normalizeVendor(incident.vendorName()))
+                || inventoryName.equals(normalizeVendor(incident.vendorKey()));
     }
 
-    private static String canonical(String value) {
+    /** Vendor identity key: lower-cased, all non-alphanumerics removed (so "Acme Cloud" == "acme-cloud"). */
+    private static String normalizeVendor(String value) {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "");
     }
 
     private static String advisoryExplanation(
-            Advisory advisory,
+            String vulnerabilityId,
+            ComponentMatch match,
             List<ComponentRef> componentPath,
             BusinessService service,
             List<OwnerRef> owners) {
         ComponentRef affected = componentPath.getFirst();
         String route = componentPath.stream().map(ComponentRef::name).collect(Collectors.joining(" -> "));
-        return "%s affects %s %s; dependency path %s reaches service %s; owners: %s"
-                .formatted(
-                        advisory.externalId(),
-                        affected.name(),
-                        affected.version(),
-                        route,
-                        service.getName(),
-                        ownerNames(owners));
+        String base = "%s affects %s %s; dependency path %s reaches service %s; owners: %s".formatted(
+                vulnerabilityId,
+                affected.name(),
+                affected.version(),
+                route,
+                service.getName(),
+                ownerNames(owners));
+        return match.confidence() == MatchConfidence.POSSIBLE
+                ? base + " (possible match — " + possibleReason(match) + ", review before acting)"
+                : base;
+    }
+
+    private static String possibleReason(ComponentMatch match) {
+        if (match.versionMatch() == VersionMatch.UNDETERMINED) {
+            return "component version could not be range-checked";
+        }
+        return match.identityMatch() == IdentityMatch.CPE_VENDOR_PRODUCT_ALIAS
+                ? "matched via a CPE product alias"
+                : "matched on an ambiguous package name";
     }
 
     private static String vendorExplanation(

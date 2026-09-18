@@ -20,4 +20,7 @@ public interface ChangeSignalStore {
 
     /** Distinct severities present (non-null), sorted — powers the severity filter select. */
     List<String> findSeverities();
+
+    /** Distinct package ecosystems present across advisories, sorted — powers the ecosystem filter select. */
+    List<String> findEcosystems();
 }

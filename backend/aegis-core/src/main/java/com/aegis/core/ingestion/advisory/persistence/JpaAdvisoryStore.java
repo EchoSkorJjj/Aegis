@@ -41,6 +41,7 @@ class JpaAdvisoryStore implements AdvisoryStore {
 
         Advisory.Cvss cvss = advisory.cvss();
         entity.apply(
+                advisory.canonicalId(),
                 advisory.description(),
                 advisory.publishedAt(),
                 advisory.lastModifiedAt(),
@@ -64,6 +65,14 @@ class JpaAdvisoryStore implements AdvisoryStore {
     public Optional<Advisory> findByExternalId(String sourceId, String externalId) {
         return advisories.findBySourceIdAndExternalId(sourceId, externalId)
                 .map(entity -> toAdvisory(entity, affectedFor(List.of(entity.getId())).get(entity.getId())));
+    }
+
+    @Override
+    public List<Advisory> findByCanonicalId(String canonicalId) {
+        List<AdvisoryEntity> entities = advisories.findByCanonicalId(canonicalId);
+        Map<UUID, List<AffectedProduct>> affected = affectedFor(
+                entities.stream().map(AdvisoryEntity::getId).toList());
+        return entities.stream().map(entity -> toAdvisory(entity, affected.get(entity.getId()))).toList();
     }
 
     @Override
@@ -97,6 +106,7 @@ class JpaAdvisoryStore implements AdvisoryStore {
                 entity.getId(),
                 entity.getSourceId(),
                 entity.getExternalId(),
+                entity.getCanonicalId(),
                 entity.getDescription(),
                 entity.getPublishedAt(),
                 entity.getLastModifiedAt(),
@@ -110,6 +120,8 @@ class JpaAdvisoryStore implements AdvisoryStore {
                 entity.getPart(),
                 entity.getVendor(),
                 entity.getProduct(),
+                entity.getEcosystem(),
+                entity.getPackageName(),
                 entity.getVersion(),
                 entity.getVersionStartIncluding(),
                 entity.getVersionStartExcluding(),
@@ -125,6 +137,8 @@ class JpaAdvisoryStore implements AdvisoryStore {
                 affected.part(),
                 affected.vendor(),
                 affected.product(),
+                affected.ecosystem(),
+                affected.packageName(),
                 affected.version(),
                 affected.versionStartIncluding(),
                 affected.versionStartExcluding(),

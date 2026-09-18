@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { DataPagination } from "@/components/app/data-pagination";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -472,33 +473,14 @@ export function ResourceManager<T extends { id: string }>({
       </div>
 
       {data && data.totalElements > 0 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>
-            {data.number * data.size + 1}–{data.number * data.size + data.content.length} of{" "}
-            {data.totalElements}
-          </span>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={data.first}
-              onClick={() => setPageIndex((page) => Math.max(0, page - 1))}
-            >
-              Previous
-            </Button>
-            <span>
-              Page {data.number + 1} of {Math.max(1, data.totalPages)}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={data.last}
-              onClick={() => setPageIndex((page) => page + 1)}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
+        <DataPagination
+          page={data.number}
+          totalPages={data.totalPages}
+          totalElements={data.totalElements}
+          pageSize={data.size}
+          itemsOnPage={data.content.length}
+          onPageChange={setPageIndex}
+        />
       )}
     </div>
   );

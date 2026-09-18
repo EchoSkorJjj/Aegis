@@ -271,6 +271,7 @@ export type SignalType = "VULNERABILITY" | "VENDOR_OUTAGE" | "SECURITY_NEWS";
 export interface ChangeSignalFacets {
   sources: string[];
   severities: string[];
+  ecosystems: string[];
 }
 
 /** One row of the unified `change_signals` read model (global reference data — not org-scoped). */
@@ -286,4 +287,83 @@ export interface ChangeSignal {
   occurredAt: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+}
+
+// ---- aegis-core matching (Epic 6): a change signal contextualized against the estate -----------
+
+/** How much to trust a match. POSSIBLE = surfaced for review, never auto-actioned. */
+export type MatchConfidence = "CONFIRMED" | "POSSIBLE";
+
+/** Which relationship carried the change to a service. */
+export type EvidenceKind = "ADVISORY_COMPONENT" | "VENDOR_DEPENDENCY";
+
+/** How a component's name was tied to the advisory's product. */
+export type IdentityMatch = "EXACT_PACKAGE" | "CPE_VENDOR_PRODUCT_ALIAS" | "AMBIGUOUS_NAME";
+
+/** Whether the component's version could be placed in the advisory's affected range. */
+export type VersionMatchState = "IN_RANGE" | "OUT_OF_RANGE" | "UNDETERMINED";
+
+/** The change signal being matched, echoed back by the match API. */
+export interface MatchedChangeRef {
+  id: string;
+  signalType: SignalType;
+  sourceId: string;
+  externalId: string;
+  title: string | null;
+}
+
+export interface MatchedComponentRef {
+  id: string;
+  ecosystem: string;
+  name: string;
+  version: string;
+}
+
+export interface MatchedServiceRef {
+  id: string;
+  name: string;
+  criticality: BusinessCriticality;
+}
+
+export interface MatchedRef {
+  id: string;
+  name: string;
+}
+
+/** The affected-product record (from the advisory's CPE) an advisory match came from. */
+export interface AffectedProductEvidence {
+  cpe: string | null;
+  vendor: string | null;
+  product: string | null;
+  versionRange: string | null;
+  identityMatch: IdentityMatch | null;
+  versionMatch: VersionMatchState | null;
+}
+
+/** One complete reason a change reaches a service — the "why". */
+export interface EvidenceChain {
+  kind: EvidenceKind;
+  confidence: MatchConfidence;
+  explanation: string;
+  /** Present for advisory matches. */
+  affectedProduct: AffectedProductEvidence | null;
+  /** Vulnerable component → … → the component the service uses directly (advisory matches). */
+  componentPath: MatchedComponentRef[];
+  /** Present for vendor-outage matches. */
+  vendor: MatchedRef | null;
+}
+
+export interface ImpactedServiceMatch {
+  service: MatchedServiceRef;
+  confidence: MatchConfidence;
+  owners: MatchedRef[];
+  evidence: EvidenceChain[];
+}
+
+/** GET /api/matching/change-signals/{id} — a signal contextualized against the active org's estate. */
+export interface ChangeMatchResponse {
+  change: MatchedChangeRef;
+  matchedComponentCount: number;
+  matchedVendorCount: number;
+  impactedServices: ImpactedServiceMatch[];
 }

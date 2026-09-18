@@ -4,6 +4,14 @@ server:
 spring:
   application:
     name: aegis-core
+  # @Scheduled work (the ingestion poll loop + every feed's normaliser) shares ONE scheduler thread by
+  # default, so a single long task starves the rest — the OSV bulk sync streams a multi-hundred-MB
+  # snapshot for minutes, during which no normaliser runs and no advisories are written. Give the
+  # scheduler a small pool so a long sync runs alongside the normalisers and the other feeds' polls.
+  task:
+    scheduling:
+      pool:
+        size: ${AEGIS_SCHEDULING_POOL_SIZE:6}
   # Pagination: cap client-supplied page sizes so a large ?size= can't exhaust memory or the DB.
   data:
     web:
@@ -87,6 +95,39 @@ aegis:
       # Cadence of the raw-event -> advisory drain, and how many events one drain handles.
       normalize-interval: ${AEGIS_NVD_NORMALIZE_INTERVAL:PT1M}
       normalize-batch-size: 200
+    # OSV connector (osv.dev): ecosystem-native advisories (npm, PyPI, crates.io, RubyGems, Go, Maven)
+    # keyed by purl — osv.dev aggregates GHSA / PyPA / RustSec / RubySec / Go. Off by default. List only
+    # the ecosystems the estate uses: each is a full bulk-snapshot download, so keep the set small and
+    # poll infrequently.
+    osv:
+      enabled: ${AEGIS_INGESTION_OSV_ENABLED:false}
+      base-url: ${AEGIS_OSV_BASE_URL:https://osv-vulnerabilities.storage.googleapis.com}
+      # Exact OSV bucket names, comma-separated (e.g. npm,PyPI,crates.io,RubyGems,Go,Maven).
+      ecosystems: ${AEGIS_OSV_ECOSYSTEMS:npm,PyPI,crates.io,RubyGems,Go,Maven}
+      # OSV's malicious-package reports (MAL-*) are a supply-chain-malware database — often the large
+      # majority of an ecosystem's records — not vulnerability advisories, and they never match a curated
+      # inventory. Excluded by default so the feed is vulnerabilities (CVE/GHSA); set true for the
+      # separate use case of flagging a known-malicious package that slipped into the estate.
+      include-malicious: ${AEGIS_OSV_INCLUDE_MALICIOUS:false}
+      # OSV self-schedules its bulk sync on this cadence, independent of the 15-minute feed poll loop.
+      # Snapshots change slowly, and one sync downloads every listed ecosystem — keep it a day or more.
+      poll-interval: ${AEGIS_OSV_POLL_INTERVAL:P1D}
+      # Wait this long after startup before the first sync, so boot (and any restart) isn't slowed by it.
+      initial-delay: ${AEGIS_OSV_INITIAL_DELAY:PT30S}
+      connect-timeout: PT5S
+      read-timeout: PT60S
+      # Per-poll safety bound on records processed per ecosystem (well above a real export's size).
+      max-records-per-ecosystem: 200000
+      # Untrusted third-party document: cap one record's JSON.
+      max-payload-bytes: 4194304
+      normalize-batch-size: 200
+      # The SYNC is rare (poll-interval, daily), but a sync drops a large backlog of raw events, so the
+      # normaliser must drain briskly to clear it — a full snapshot is ~200k records. Keep this short
+      # (like NVD); fixed-delay means back-to-back runs never overlap, and it idles once caught up.
+      normalize-interval: ${AEGIS_OSV_NORMALIZE_INTERVAL:PT1M}
+      # Waive the SSRF public-address check — true only for an internal/mirrored OSV host (and tests).
+      allow-private-hosts: false
+
     # Vendor status/outage connector. Off by default, like the NVD feed, so nothing reaches out to
     # third-party status pages during tests or a plain local run.
     #

@@ -8,6 +8,7 @@ import java.util.UUID;
 
 import com.aegis.core.ingestion.advisory.Advisory;
 import com.aegis.core.ingestion.advisory.AdvisoryStore;
+import com.aegis.core.ingestion.advisory.AffectedProduct;
 import com.aegis.core.ingestion.incident.VendorIncident;
 import com.aegis.core.ingestion.incident.VendorIncidentStore;
 import com.aegis.core.ingestion.news.NewsItem;
@@ -213,6 +214,65 @@ class ChangeSignalApiIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.sources", hasItem("vendor-status")))
                 .andExpect(jsonPath("$.severities", hasItem("CRITICAL")))
                 .andExpect(jsonPath("$.severities", not(hasItem("critical"))));
+    }
+
+    @Test
+    void collapsesTheSameCveReportedByNvdAndOsvIntoOneCanonicalSignal() throws Exception {
+        // The same vulnerability arrives twice: NVD keys it by the CVE, OSV by a GHSA that *aliases*
+        // the CVE (so its canonicalId is the CVE). The feed must show it once, under the CVE — not two
+        // near-duplicate rows the analyst has to reconcile by eye.
+        String tag = UUID.randomUUID().toString();
+        String cveId = "CVE-2099-" + tag;
+        Instant when = Instant.parse("2099-07-01T00:00:00Z");
+
+        advisories.upsert(new Advisory(
+                null, "nvd", cveId, "NVD " + tag, when, when,
+                new Advisory.Cvss("3.1", "CVSS:3.1/AV:N", new BigDecimal("9.8"), "CRITICAL"), List.of()));
+        advisories.upsert(new Advisory(
+                null, "osv", "GHSA-" + tag, cveId, "OSV " + tag, when, when,
+                new Advisory.Cvss("3.1", "CVSS:3.1/AV:N", new BigDecimal("9.8"), "CRITICAL"), List.of()));
+
+        // One row, projected under the canonical CVE — the GHSA duplicate is folded away by the view.
+        mvc.perform(get("/api/change-signals?search=" + cveId + "&size=100").with(role("ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].signalType").value("VULNERABILITY"))
+                .andExpect(jsonPath("$.content[0].title").value(cveId));
+    }
+
+    @Test
+    void filtersByEcosystemFoldedAcrossTheCanonicalAliasGroupAndExposesItAsAFacet() throws Exception {
+        // Same CVE from two feeds: NVD is the fresher row (so it represents the deduped signal) but
+        // carries no package coordinates; OSV is the sibling that supplies the npm purl. The ecosystem
+        // filter must still match on "npm" — it folds the ecosystem across the canonical alias group,
+        // not just the representative row — which is the whole point of the advisory_ecosystems view.
+        String tag = UUID.randomUUID().toString();
+        String cveId = "CVE-2099-" + tag;
+        Instant older = Instant.parse("2099-08-01T00:00:00Z");
+        Instant newer = Instant.parse("2099-08-02T00:00:00Z");
+
+        advisories.upsert(new Advisory(
+                null, "nvd", cveId, "NVD " + tag, newer, newer,
+                new Advisory.Cvss("3.1", "CVSS:3.1/AV:N", new BigDecimal("9.8"), "CRITICAL"), List.of()));
+        advisories.upsert(new Advisory(
+                null, "osv", "GHSA-" + tag, cveId, "OSV " + tag, older, older,
+                new Advisory.Cvss("3.1", "CVSS:3.1/AV:N", new BigDecimal("9.8"), "CRITICAL"),
+                List.of(AffectedProduct.ofPackage("npm", "axios-" + tag, null, null, null, null, "1.6.0"))));
+
+        // The one deduped signal is kept for npm, even though its representative row (NVD) is CPE-only.
+        mvc.perform(get("/api/change-signals?search=" + cveId + "&ecosystem=npm&size=100").with(role("ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].title").value(cveId))
+                .andExpect(jsonPath("$.content[0].sourceId").value("nvd")); // folded across the alias group
+        // A different ecosystem excludes it (case-insensitive on the stored, lower-cased value).
+        mvc.perform(get("/api/change-signals?search=" + cveId + "&ecosystem=PyPI&size=100").with(role("ANALYST")))
+                .andExpect(jsonPath("$.totalElements").value(0));
+
+        // The facet endpoint offers npm as a selectable ecosystem.
+        mvc.perform(get("/api/change-signals/facets").with(role("SERVICE_OWNER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ecosystems", hasItem("npm")));
     }
 
     @Test

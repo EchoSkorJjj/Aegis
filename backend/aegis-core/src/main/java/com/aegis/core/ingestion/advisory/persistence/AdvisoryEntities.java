@@ -32,6 +32,9 @@ class AdvisoryEntity {
     @Column(name = "external_id", nullable = false, updatable = false, length = 64)
     private String externalId;
 
+    @Column(name = "canonical_id", nullable = false, length = 64)
+    private String canonicalId;
+
     @Column(name = "description", columnDefinition = "text")
     private String description;
 
@@ -83,6 +86,10 @@ class AdvisoryEntity {
         return externalId;
     }
 
+    String getCanonicalId() {
+        return canonicalId;
+    }
+
     String getDescription() {
         return description;
     }
@@ -112,6 +119,7 @@ class AdvisoryEntity {
     }
 
     void apply(
+            String canonicalId,
             String description,
             Instant publishedAt,
             Instant lastModifiedAt,
@@ -119,6 +127,7 @@ class AdvisoryEntity {
             String cvssVector,
             BigDecimal cvssBaseScore,
             String cvssSeverity) {
+        this.canonicalId = canonicalId;
         this.description = description;
         this.publishedAt = publishedAt;
         this.lastModifiedAt = lastModifiedAt;
@@ -145,17 +154,23 @@ class AffectedProductEntity implements Persistable<UUID> {
     @Column(name = "advisory_id", nullable = false, updatable = false)
     private UUID advisoryId;
 
-    @Column(name = "cpe", nullable = false, columnDefinition = "text")
+    @Column(name = "cpe", columnDefinition = "text")
     private String cpe;
 
     @Column(name = "part", length = 8)
     private String part;
 
-    @Column(name = "vendor", nullable = false, length = 255)
+    @Column(name = "vendor", length = 255)
     private String vendor;
 
-    @Column(name = "product", nullable = false, length = 255)
+    @Column(name = "product", length = 255)
     private String product;
+
+    @Column(name = "ecosystem", length = 64)
+    private String ecosystem;
+
+    @Column(name = "package_name", length = 255)
+    private String packageName;
 
     @Column(name = "version", length = 128)
     private String version;
@@ -183,6 +198,8 @@ class AffectedProductEntity implements Persistable<UUID> {
             String part,
             String vendor,
             String product,
+            String ecosystem,
+            String packageName,
             String version,
             String versionStartIncluding,
             String versionStartExcluding,
@@ -194,6 +211,8 @@ class AffectedProductEntity implements Persistable<UUID> {
         this.part = part;
         this.vendor = vendor;
         this.product = product;
+        this.ecosystem = ecosystem;
+        this.packageName = packageName;
         this.version = version;
         this.versionStartIncluding = versionStartIncluding;
         this.versionStartExcluding = versionStartExcluding;
@@ -233,6 +252,14 @@ class AffectedProductEntity implements Persistable<UUID> {
 
     String getProduct() {
         return product;
+    }
+
+    String getEcosystem() {
+        return ecosystem;
+    }
+
+    String getPackageName() {
+        return packageName;
     }
 
     String getVersion() {

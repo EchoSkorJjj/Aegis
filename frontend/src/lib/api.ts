@@ -4,6 +4,7 @@ import type {
   BusinessService,
   BusinessServiceInput,
   ChangePasswordInput,
+  ChangeMatchResponse,
   ChangeSignal,
   ChangeSignalFacets,
   ComponentImpact,
@@ -373,12 +374,24 @@ export const inventoryApi = {
 
 /** The unified change-signals feed (advisories + vendor outages + security news), read-only. */
 export const signalApi = {
-  list(params: ListParams & { type?: string; severity?: string; source?: string } = {}) {
+  list(
+    params: ListParams & { type?: string; severity?: string; source?: string; ecosystem?: string } = {},
+  ) {
     return bffFetch<Page<ChangeSignal>>(`/api/change-signals${qs(params)}`);
   },
-  /** Distinct sources + severities present — powers the advisory filter selects. */
+  /** Distinct sources + severities + ecosystems present — powers the advisory filter selects. */
   facets() {
     return bffFetch<ChangeSignalFacets>("/api/change-signals/facets");
+  },
+};
+
+/**
+ * Epic 6 matching: contextualize one change signal against the caller's active-org estate — the
+ * impacted services, their owners, and the evidence chain for each. Read-only; org-scoped server-side.
+ */
+export const matchApi = {
+  matchChange(signalId: string) {
+    return bffFetch<ChangeMatchResponse>(`/api/matching/change-signals/${signalId}`);
   },
 };
 

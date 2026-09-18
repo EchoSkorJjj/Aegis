@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
+import { DataPagination } from "@/components/app/data-pagination";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -46,11 +48,13 @@ export default function AdvisoriesPage() {
   const [search, setSearch] = useState("");
   const [type, setType] = useState("");
   const [severity, setSeverity] = useState("");
+  const [ecosystem, setEcosystem] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [pageIndex, setPageIndex] = useState(0);
 
   const [severityOptions, setSeverityOptions] = useState<string[]>([]);
+  const [ecosystemOptions, setEcosystemOptions] = useState<string[]>([]);
   const [data, setData] = useState<Page<ChangeSignal> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<"forbidden" | "error" | null>(null);
@@ -71,10 +75,14 @@ export default function AdvisoriesPage() {
     signalApi
       .facets()
       .then((result) => {
-        if (!cancelled) setSeverityOptions(result.severities);
+        if (cancelled) return;
+        setSeverityOptions(result.severities);
+        setEcosystemOptions(result.ecosystems);
       })
       .catch(() => {
-        if (!cancelled) setSeverityOptions([]);
+        if (cancelled) return;
+        setSeverityOptions([]);
+        setEcosystemOptions([]);
       });
     return () => {
       cancelled = true;
@@ -94,6 +102,7 @@ export default function AdvisoriesPage() {
         search: search || undefined,
         type: type || undefined,
         severity: severity || undefined,
+        ecosystem: ecosystem || undefined,
         from: from ? `${from}T00:00:00Z` : undefined,
         to: to ? `${to}T23:59:59Z` : undefined,
       })
@@ -109,19 +118,21 @@ export default function AdvisoriesPage() {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [authLoading, canRead, user?.orgId, pageIndex, search, type, severity, from, to]);
+  }, [authLoading, canRead, user?.orgId, pageIndex, search, type, severity, ecosystem, from, to]);
 
   function clearFilters() {
     setSearchInput("");
     setSearch("");
     setType("");
     setSeverity("");
+    setEcosystem("");
     setFrom("");
     setTo("");
     setPageIndex(0);
   }
 
-  const hasFilters = search !== "" || type !== "" || severity !== "" || from !== "" || to !== "";
+  const hasFilters =
+    search !== "" || type !== "" || severity !== "" || ecosystem !== "" || from !== "" || to !== "";
 
   if (!authLoading && !canRead) {
     return (
@@ -162,8 +173,17 @@ export default function AdvisoriesPage() {
             </option>
           ))}
         </FilterSelect>
+        {ecosystemOptions.length > 0 && (
+          <FilterSelect label="Ecosystem" value={ecosystem} onChange={setEcosystem} allLabel="All ecosystems">
+            {ecosystemOptions.map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </FilterSelect>
+        )}
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Occurred from</label>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">Published from</label>
           <Input type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPageIndex(0); }} />
         </div>
         <div>
@@ -214,33 +234,14 @@ export default function AdvisoriesPage() {
       </div>
 
       {data && data.totalElements > 0 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>
-            {data.number * data.size + 1}–{data.number * data.size + data.content.length} of{" "}
-            {data.totalElements}
-          </span>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={data.first}
-              onClick={() => setPageIndex((page) => Math.max(0, page - 1))}
-            >
-              Previous
-            </Button>
-            <span>
-              Page {data.number + 1} of {Math.max(1, data.totalPages)}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={data.last}
-              onClick={() => setPageIndex((page) => page + 1)}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
+        <DataPagination
+          page={data.number}
+          totalPages={data.totalPages}
+          totalElements={data.totalElements}
+          pageSize={data.size}
+          itemsOnPage={data.content.length}
+          onPageChange={setPageIndex}
+        />
       )}
     </div>
   );
@@ -308,6 +309,14 @@ function SignalRow({ signal }: { signal: ChangeSignal }) {
         <span className="mt-0.5 block font-mono text-xs text-muted-foreground">{signal.externalId}</span>
         {signal.summary && (
           <span className="mt-1 block text-xs text-muted-foreground line-clamp-2">{signal.summary}</span>
+        )}
+        {signal.signalType !== "SECURITY_NEWS" && (
+          <Link
+            href={`/advisories/${signal.id}`}
+            className="mt-1.5 inline-block text-xs font-medium text-primary underline-offset-4 hover:underline"
+          >
+            View impact →
+          </Link>
         )}
       </TableCell>
       <TableCell className="align-top">

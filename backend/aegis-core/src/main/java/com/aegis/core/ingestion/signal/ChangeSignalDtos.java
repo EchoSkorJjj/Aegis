@@ -11,8 +11,9 @@ public final class ChangeSignalDtos {
     private ChangeSignalDtos() {
     }
 
-    /** The distinct values available for the source/severity filter selects. */
-    public record ChangeSignalFacets(List<String> sources, List<String> severities) {
+    /** The distinct values available for the source/severity/ecosystem filter selects. */
+    public record ChangeSignalFacets(
+            List<String> sources, List<String> severities, List<String> ecosystems) {
     }
 
     public record ChangeSignalResponse(
