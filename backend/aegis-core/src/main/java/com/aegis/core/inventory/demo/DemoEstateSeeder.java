@@ -11,6 +11,7 @@ import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.Owner;
+import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
 import com.aegis.core.inventory.sbom.CycloneDxBom;
 import com.aegis.core.inventory.sbom.SbomImportService;
@@ -56,7 +57,7 @@ public class DemoEstateSeeder {
         Estate estate = read(ESTATE_RESOURCE, Estate.class);
         for (ServiceSpec spec : estate.services()) {
             BusinessService service = store.findBusinessServiceByName(spec.name())
-                    .orElseGet(() -> inventory.createBusinessService(spec.name(), spec.criticality()));
+                    .orElseGet(() -> inventory.createBusinessService(spec.name(), spec.criticality(), spec.exposure()));
             for (String ownerName : spec.owners()) {
                 Owner owner = store.findOwnerByName(ownerName).orElseGet(() -> inventory.createOwner(ownerName));
                 if (!store.serviceOwnerExists(service.getId(), owner.getId())) {
@@ -91,7 +92,8 @@ public class DemoEstateSeeder {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record ServiceSpec(
-            String name, BusinessCriticality criticality, List<String> owners, List<String> vendors, String sbom) {
+            String name, BusinessCriticality criticality, ServiceExposure exposure,
+            List<String> owners, List<String> vendors, String sbom) {
         public ServiceSpec {
             owners = owners == null ? List.of() : owners;
             vendors = vendors == null ? List.of() : vendors;

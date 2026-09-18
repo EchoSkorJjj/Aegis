@@ -20,6 +20,38 @@ class BusinessServiceTest {
     }
 
     @Test
+    void definesStableExposureValuesLeastToMostExposed() {
+        assertThat(ServiceExposure.values())
+                .containsExactly(
+                        ServiceExposure.ISOLATED,
+                        ServiceExposure.INTERNAL,
+                        ServiceExposure.INTERNET_FACING);
+    }
+
+    @Test
+    void defaultsExposureToInternalWhenTheOwnerDeclaredNone() {
+        BusinessService service = new BusinessService(UUID.randomUUID(), "Payments", BusinessCriticality.CRITICAL);
+
+        assertThat(service.getExposure()).isEqualTo(ServiceExposure.INTERNAL);
+        assertThat(BusinessService.DEFAULT_EXPOSURE).isEqualTo(ServiceExposure.INTERNAL);
+    }
+
+    @Test
+    void keepsTheCurrentExposureWhenAnUpdateDoesNotStateOne() {
+        BusinessService service = new BusinessService(
+                UUID.randomUUID(), "Portal", BusinessCriticality.HIGH, ServiceExposure.INTERNET_FACING);
+
+        service.update("Portal", BusinessCriticality.MEDIUM);
+
+        // A PUT that omits exposure must not quietly downgrade a service the owner declared public.
+        assertThat(service.getExposure()).isEqualTo(ServiceExposure.INTERNET_FACING);
+        assertThat(service.getCriticality()).isEqualTo(BusinessCriticality.MEDIUM);
+
+        service.update("Portal", BusinessCriticality.MEDIUM, ServiceExposure.ISOLATED);
+        assertThat(service.getExposure()).isEqualTo(ServiceExposure.ISOLATED);
+    }
+
+    @Test
     void requiresIdentityNameAndCriticality() {
         UUID id = UUID.randomUUID();
 
@@ -35,6 +67,9 @@ class BusinessServiceTest {
         assertThatIllegalArgumentException()
                 .isThrownBy(() -> new BusinessService(id, "Payments", null))
                 .withMessage("criticality must not be null");
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> new BusinessService(id, "Payments", BusinessCriticality.CRITICAL, null))
+                .withMessage("exposure must not be null");
     }
 
     @Test

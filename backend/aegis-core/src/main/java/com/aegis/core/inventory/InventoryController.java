@@ -53,7 +53,7 @@ public class InventoryController {
     public ResponseEntity<BusinessServiceResponse> createBusinessService(
             @Valid @RequestBody BusinessServiceRequest request) {
         BusinessServiceResponse response = BusinessServiceResponse.from(
-                inventory.createBusinessService(request.name(), request.criticality()));
+                inventory.createBusinessService(request.name(), request.criticality(), request.exposure()));
         return ResponseEntity.created(uri("/api/inventory/services/" + response.id())).body(response);
     }
 
@@ -83,7 +83,7 @@ public class InventoryController {
     public BusinessServiceResponse updateBusinessService(
             @PathVariable UUID id, @Valid @RequestBody BusinessServiceRequest request) {
         return BusinessServiceResponse.from(
-                inventory.updateBusinessService(id, request.name(), request.criticality()));
+                inventory.updateBusinessService(id, request.name(), request.criticality(), request.exposure()));
     }
 
     @DeleteMapping("/services/{id}")

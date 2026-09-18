@@ -15,7 +15,9 @@ See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../..
 > identifiers they mention) — unified for reading through the **`change_signals`** view, with
 > per-feed health/counts/last-success exposed as Prometheus metrics. **Deterministic matching is
 > built:** advisory CPE/package + SemVer range matching, dependency and vendor traversal, and explicit
-> evidence chains. Scoring and action workflows remain planned.
+> evidence chains. **Impact scoring is built:** every impacted service is scored
+> `severity x exposure x criticality`, banded into a tier and rolled up per owner. Action workflows
+> remain planned.
 
 ## Modules (a modular monolith, split by seams later)
 
@@ -93,6 +95,13 @@ Inventory endpoints are rooted at `/api/inventory`. Paginated entity collections
 relationship collections default to name/ID ascending order. `SERVICE_OWNER`, `ANALYST`, and
 `COMPLIANCE_ADMIN` may read inventory; `ANALYST` and `COMPLIANCE_ADMIN` may create, update, delete,
 link, and unlink it. `PLATFORM_ADMIN` and `ORG_ADMIN` are user-management roles, not Aegis domain roles.
+
+A business service carries the two attributes its owner declares and scoring consumes: its
+`criticality` (`LOW`/`MEDIUM`/`HIGH`/`CRITICAL`) and its **`exposure`** — `INTERNET_FACING`,
+`INTERNAL`, or `ISOLATED`, i.e. whether the service talks to anything outside its own application.
+Neither is derivable from the estate graph, so both are the owner's call. `exposure` is optional on
+create (it defaults to `INTERNAL`) and omitting it on update leaves the current value alone, so a PUT
+that predates the attribute cannot silently downgrade a service declared internet-facing.
 
 The map supports multiple owners per business service. Deleting an inventory entity cascades only
 its relationship rows; the related services, components, vendors, and owners remain intact. The
@@ -382,3 +391,44 @@ storing contextualization that silently becomes stale after an SBOM or relations
 
 Security-news signals do not carry a package or vendor identity and are rejected by this endpoint;
 their extracted CVE references remain available for a later article → advisory correlation stage.
+
+## Impact scoring (Epic 7 story 1)
+
+`GET /api/scoring/change-signals/{id}` ranks one change signal across everything it reaches:
+
+```
+score = severity x exposure x criticality x 100
+```
+
+Three multipliers in `[0,1]`, so the score is a 0-100 percentage of the worst case and a service that
+is weak on any one axis cannot be pushed to the top by the other two. Same read roles as matching
+(`SERVICE_OWNER`, `ANALYST`, `COMPLIANCE_ADMIN`).
+
+- **severity** — the advisory's published CVSS base score rescaled to `[0,1]`, taken as the highest
+  across every feed reporting the same canonical vulnerability (NVD may score a CVE that OSV does
+  not, and the reverse). With no CVSS, the signal's severity label is read instead — both NVD's
+  `CRITICAL/HIGH/MEDIUM/LOW` and Statuspage's `critical/major/minor/none`, which is how a vendor
+  outage is scored. An absent or unrecognised label falls back to a neutral `0.5`, never to zero:
+  not knowing how bad something is must not rank it below something known to be mild. The response's
+  `severity.source` says which of the three applied.
+- **exposure** — the `ServiceExposure` its owner declared (`INTERNET_FACING` 1.0, `INTERNAL` 0.6,
+  `ISOLATED` 0.4). The floor is well above zero because an isolated service is not invulnerable.
+- **criticality** — the service's business tier (`CRITICAL` 1.0 → `LOW` 0.25).
+
+Each scored service carries the full `breakdown` (every factor and the input it came from) and a
+deterministic `explanation`, so a ranking can be reproduced by hand and argued with. A score is
+banded into an `ImpactTier` (`CRITICAL` ≥ 75, `HIGH` ≥ 50, `MEDIUM` ≥ 25, `LOW` ≥ 10, else
+`NEGLIGIBLE`) and marked `material` once it clears the materiality threshold (10.0). Immaterial rows
+are still returned with their evidence — this ranks noise down, it does not hide it.
+
+Matching's `confidence` is passed through rather than multiplied in: it answers whether the match
+applies at all, which is a different question from how bad it is if it does, so a `POSSIBLE` row
+keeps its real score and is flagged for review.
+
+Owners are rolled up from the scored services, and an owner's score is their **worst** service's, not
+the sum — owning two affected services does not make either more dangerous, and summing would rank a
+team with many trivial hits above one whose payment gateway is about to be exploited.
+
+Like matching, scoring is recomputed per request and persists nothing: a score derived from today's
+SBOM and today's CVSS data would be a lie tomorrow, and the findings table that freezes one is a
+later epic. Security-news signals are rejected by matching before scoring sees them.

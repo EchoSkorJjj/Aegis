@@ -23,13 +23,16 @@ class DemoEstateFixturesTest {
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     @Test
-    void estateDescribesUniqueServicesWithOwnersAndCriticality() {
+    void estateDescribesUniqueServicesWithOwnersCriticalityAndExposure() {
         Estate estate = read(DemoEstateSeeder.ESTATE_RESOURCE, Estate.class);
 
         assertThat(estate.services()).extracting(ServiceSpec::name).doesNotHaveDuplicates()
                 .contains("Payments API", "Order Service", "Customer Portal", "Internal Reporting", "Marketing Site");
         assertThat(estate.services()).allSatisfy(service -> {
             assertThat(service.criticality()).isNotNull();
+            // Scoring multiplies exposure in, so a demo service without one would silently take the
+            // default and make the seeded estate a worse illustration than it should be.
+            assertThat(service.exposure()).as("%s exposure", service.name()).isNotNull();
             assertThat(service.owners()).isNotEmpty();
         });
     }

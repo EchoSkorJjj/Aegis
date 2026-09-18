@@ -8,6 +8,7 @@ import com.aegis.core.ingestion.signal.ChangeSignal;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.Owner;
+import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
 
@@ -137,10 +138,13 @@ public final class MatchingDtos {
         }
     }
 
-    public record ServiceRef(UUID id, String name, BusinessCriticality criticality) {
+    /** Carries both scoring inputs the service itself owns — its business tier and its exposure. */
+    public record ServiceRef(
+            UUID id, String name, BusinessCriticality criticality, ServiceExposure exposure) {
 
         static ServiceRef from(BusinessService service) {
-            return new ServiceRef(service.getId(), service.getName(), service.getCriticality());
+            return new ServiceRef(
+                    service.getId(), service.getName(), service.getCriticality(), service.getExposure());
         }
     }
 
