@@ -6,6 +6,8 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 
+import jakarta.persistence.criteria.Subquery;
+
 import com.aegis.core.ingestion.signal.ChangeSignal;
 import com.aegis.core.ingestion.signal.ChangeSignalFilter;
 import com.aegis.core.ingestion.signal.ChangeSignalStore;
@@ -19,9 +21,11 @@ import org.springframework.stereotype.Repository;
 class JpaChangeSignalStore implements ChangeSignalStore {
 
     private final ChangeSignalJpaRepository signals;
+    private final AdvisoryEcosystemJpaRepository ecosystems;
 
-    JpaChangeSignalStore(ChangeSignalJpaRepository signals) {
+    JpaChangeSignalStore(ChangeSignalJpaRepository signals, AdvisoryEcosystemJpaRepository ecosystems) {
         this.signals = signals;
+        this.ecosystems = ecosystems;
     }
 
     @Override
@@ -49,6 +53,22 @@ class JpaChangeSignalStore implements ChangeSignalStore {
                     cb.like(cb.lower(root.get("title")), like),
                     cb.like(cb.lower(root.get("externalId")), like)));
         }
+        if (hasText(filter.ecosystem())) {
+            // Keep only signals whose canonical id touches this ecosystem (npm, PyPI, …). Correlates on
+            // the signal's title (= canonical id for advisories), so vendor/news signals — whose titles
+            // are headlines, not canonical ids — never match, i.e. an ecosystem filter implies advisories.
+            // EXISTS (not IN) so a popular ecosystem's thousands of advisories stay a semi-join, not a list.
+            String ecosystem = filter.ecosystem().trim().toLowerCase(Locale.ROOT);
+            specs.add((root, query, cb) -> {
+                Subquery<Integer> present = query.subquery(Integer.class);
+                var affected = present.from(AdvisoryEcosystemEntity.class);
+                present.select(cb.literal(1));
+                present.where(
+                        cb.equal(affected.get("canonicalId"), root.get("title")),
+                        cb.equal(affected.get("ecosystem"), ecosystem));
+                return cb.exists(present);
+            });
+        }
         if (filter.from() != null) {
             specs.add((root, query, cb) -> cb.greaterThanOrEqualTo(root.get("occurredAt"), filter.from()));
         }
@@ -69,6 +89,11 @@ class JpaChangeSignalStore implements ChangeSignalStore {
     @Override
     public List<String> findSeverities() {
         return signals.findDistinctSeverities();
+    }
+
+    @Override
+    public List<String> findEcosystems() {
+        return ecosystems.findDistinctEcosystems();
     }
 
     private static boolean hasText(String value) {

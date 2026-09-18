@@ -56,6 +56,96 @@ class AdvisoryComponentMatcherTest {
         assertThat(matcher.match(advisory, List.of(component))).isEmpty();
     }
 
+    @Test
+    void confirmsAFullyQualifiedInRangeMatch() {
+        SoftwareComponent apache = component("maven", "org.apache.logging.log4j:log4j-core", "2.14.1");
+        Advisory advisory = advisory(new AffectedProduct(
+                "cpe:2.3:a:apache:log4j-core:*:*:*:*:*:*:*:*",
+                "a", "apache", "log4j-core", null, null, null, null, "2.15.0"));
+
+        assertThat(matcher.match(advisory, List.of(apache))).singleElement().satisfies(match -> {
+            assertThat(match.identityMatch()).isEqualTo(MatchingDtos.IdentityMatch.EXACT_PACKAGE);
+            assertThat(match.versionMatch()).isEqualTo(MatchingDtos.VersionMatch.IN_RANGE);
+            assertThat(match.confidence()).isEqualTo(MatchingDtos.MatchConfidence.CONFIRMED);
+        });
+    }
+
+    @Test
+    void flagsABareNameMatchAsPossibleBecauseItCanCollideAcrossEcosystems() {
+        // The same short product name exists in two ecosystems and the CPE cannot say which. Both are
+        // surfaced, but only as POSSIBLE (a review item) — a false positive is never asserted as fact.
+        SoftwareComponent npm = component("npm", "requests", "2.0.0");
+        SoftwareComponent pypi = component("pypi", "requests", "2.0.0");
+        Advisory advisory = advisory(new AffectedProduct(
+                "cpe:2.3:a:python:requests:*:*:*:*:*:*:*:*",
+                "a", "python", "requests", null, null, null, null, "3.0.0"));
+
+        assertThat(matcher.match(advisory, List.of(npm, pypi)))
+                .hasSize(2)
+                .allSatisfy(match -> {
+                    assertThat(match.identityMatch()).isEqualTo(MatchingDtos.IdentityMatch.AMBIGUOUS_NAME);
+                    assertThat(match.confidence()).isEqualTo(MatchingDtos.MatchConfidence.POSSIBLE);
+                });
+    }
+
+    @Test
+    void keepsAnUnknownVersionMatchAsPossibleRatherThanDroppingIt() {
+        // A non-SemVer version against a range cannot be placed → UNDETERMINED → still surfaced,
+        // as POSSIBLE. For a security tool a version we cannot compare is a review item, not a miss.
+        SoftwareComponent maven = component("maven", "org.apache.logging.log4j:log4j-core", "2.14.1.RELEASE");
+        Advisory advisory = advisory(new AffectedProduct(
+                "cpe:2.3:a:apache:log4j-core:*:*:*:*:*:*:*:*",
+                "a", "apache", "log4j-core", null, null, null, null, "2.15.0"));
+
+        assertThat(matcher.match(advisory, List.of(maven))).singleElement().satisfies(match -> {
+            assertThat(match.versionMatch()).isEqualTo(MatchingDtos.VersionMatch.UNDETERMINED);
+            assertThat(match.confidence()).isEqualTo(MatchingDtos.MatchConfidence.POSSIBLE);
+        });
+    }
+
+    @Test
+    void excludesAComponentProvablyOutsideTheAffectedRange() {
+        SoftwareComponent fixed = component("maven", "org.apache.logging.log4j:log4j-core", "2.17.1");
+        Advisory advisory = advisory(new AffectedProduct(
+                "cpe:2.3:a:apache:log4j-core:*:*:*:*:*:*:*:*",
+                "a", "apache", "log4j-core", null, null, null, null, "2.15.0"));
+
+        assertThat(matcher.match(advisory, List.of(fixed))).isEmpty();
+    }
+
+    @Test
+    void confirmsAPurlMatchInTheSameEcosystem() {
+        SoftwareComponent axios = component("npm", "axios", "1.5.0");
+        AffectedProduct affected = AffectedProduct.ofPackage("npm", "axios", null, null, null, null, "1.6.0");
+
+        assertThat(matcher.match(List.of(affected), List.of(axios))).singleElement().satisfies(match -> {
+            assertThat(match.identityMatch()).isEqualTo(MatchingDtos.IdentityMatch.EXACT_PACKAGE);
+            assertThat(match.versionMatch()).isEqualTo(MatchingDtos.VersionMatch.IN_RANGE);
+            assertThat(match.confidence()).isEqualTo(MatchingDtos.MatchConfidence.CONFIRMED);
+        });
+    }
+
+    @Test
+    void rejectsAPurlMatchInADifferentEcosystem() {
+        // Same short name, different registry: an npm advisory must not touch the PyPI component.
+        SoftwareComponent pypi = component("pypi", "requests", "2.0.0");
+        AffectedProduct npmAffected = AffectedProduct.ofPackage("npm", "requests", null, null, null, null, "3.0.0");
+
+        assertThat(matcher.match(List.of(npmAffected), List.of(pypi))).isEmpty();
+    }
+
+    @Test
+    void appliesPep440OrderingForPypiPackages() {
+        // 2.0.0rc1 is a pre-release, so it is below (and inside [.., 2.0.0)); 2.0.0 itself is excluded.
+        SoftwareComponent rc = component("PyPI", "flask", "2.0.0rc1");
+        SoftwareComponent released = component("PyPI", "flask", "2.0.0");
+        AffectedProduct affected = AffectedProduct.ofPackage("PyPI", "flask", null, null, null, null, "2.0.0");
+
+        assertThat(matcher.match(List.of(affected), List.of(rc, released)))
+                .extracting(match -> match.component().getId())
+                .containsExactly(rc.getId());
+    }
+
     private static SoftwareComponent component(String ecosystem, String name, String version) {
         return new SoftwareComponent(UUID.randomUUID(), ecosystem, name, version);
     }

@@ -1,5 +1,6 @@
 package com.aegis.core.ingestion.advisory;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.domain.Page;
@@ -16,6 +17,13 @@ public interface AdvisoryStore {
     Advisory upsert(Advisory advisory);
 
     Optional<Advisory> findByExternalId(String sourceId, String externalId);
+
+    /**
+     * Every advisory sharing a canonical (cross-source) id — the same real-world vulnerability as
+     * reported by NVD, OSV, and any other feed. Matching unions their affected products so a CVE is
+     * matched with both its CPE (NVD) and its purl (OSV) coordinates.
+     */
+    List<Advisory> findByCanonicalId(String canonicalId);
 
     /** A page of advisories, newest revision first, each with its affected products. */
     Page<Advisory> findPage(Pageable pageable);

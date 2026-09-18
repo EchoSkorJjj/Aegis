@@ -12,6 +12,8 @@ import org.springframework.data.repository.query.Param;
 
 interface AdvisoryJpaRepository extends JpaRepository<AdvisoryEntity, UUID> {
     Optional<AdvisoryEntity> findBySourceIdAndExternalId(String sourceId, String externalId);
+
+    List<AdvisoryEntity> findByCanonicalId(String canonicalId);
 }
 
 interface AffectedProductJpaRepository extends JpaRepository<AffectedProductEntity, UUID> {

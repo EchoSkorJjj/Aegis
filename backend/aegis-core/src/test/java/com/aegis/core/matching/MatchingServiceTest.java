@@ -74,6 +74,7 @@ class MatchingServiceTest {
 
         when(signals.findById(signalId)).thenReturn(Optional.of(signal));
         when(advisories.findByExternalId("nvd", signal.externalId())).thenReturn(Optional.of(advisory));
+        when(advisories.findByCanonicalId(signal.externalId())).thenReturn(List.of(advisory));
         when(inventory.findSoftwareComponentsForMatching()).thenReturn(List.of(vulnerable, direct));
         when(inventory.findComponentDependencyLinks(Set.of(vulnerable.getId())))
                 .thenReturn(List.of(new ComponentDependencyLink(direct.getId(), vulnerable.getId())));
@@ -143,6 +144,125 @@ class MatchingServiceTest {
         assertThatThrownBy(() -> matching.matchChange(signalId))
                 .isInstanceOf(ApiExceptions.BadRequest.class)
                 .hasMessageContaining("no package or vendor identity");
+    }
+
+    @Test
+    void terminatesOnADependencyCycleAndStillReachesTheService() {
+        UUID signalId = UUID.randomUUID();
+        ChangeSignal signal = signal(signalId, SignalType.VULNERABILITY, "nvd", "CVE-2099-2000");
+        Advisory advisory = new Advisory(
+                signalId, "nvd", signal.externalId(), "test", Instant.EPOCH, Instant.EPOCH, null,
+                List.of(new AffectedProduct(
+                        "cpe:2.3:a:acme:alib:*:*:*:*:*:*:*:*", "a", "acme", "alib",
+                        null, null, null, null, null))); // affects all versions
+        SoftwareComponent a = component("com.acme:alib", "1.0.0");
+        SoftwareComponent b = component("com.acme:blib", "1.0.0");
+        BusinessService service = new BusinessService(UUID.randomUUID(), "Svc", BusinessCriticality.LOW);
+
+        when(signals.findById(signalId)).thenReturn(Optional.of(signal));
+        when(advisories.findByExternalId("nvd", signal.externalId())).thenReturn(Optional.of(advisory));
+        when(advisories.findByCanonicalId(signal.externalId())).thenReturn(List.of(advisory));
+        when(inventory.findSoftwareComponentsForMatching()).thenReturn(List.of(a, b));
+        // Cycle: b depends on a, and a depends on b.
+        when(inventory.findComponentDependencyLinks(Set.of(a.getId())))
+                .thenReturn(List.of(new ComponentDependencyLink(b.getId(), a.getId())));
+        when(inventory.findComponentDependencyLinks(Set.of(b.getId())))
+                .thenReturn(List.of(new ComponentDependencyLink(a.getId(), b.getId())));
+        when(inventory.findServiceComponentLinks(Set.of(a.getId(), b.getId())))
+                .thenReturn(List.of(new ServiceComponentLink(service.getId(), b.getId())));
+        when(inventory.findBusinessServicesByIds(Set.of(service.getId())))
+                .thenReturn(Map.of(service.getId(), service));
+        when(inventory.findOwnersForServices(Set.of(service.getId()))).thenReturn(Map.of());
+        when(inventory.findSoftwareComponentsByIds(Set.of(a.getId(), b.getId())))
+                .thenReturn(Map.of(a.getId(), a, b.getId(), b));
+
+        var response = matching.matchChange(signalId);
+
+        assertThat(response.matchedComponentCount()).isEqualTo(1);
+        assertThat(response.impactedServices()).singleElement().satisfies(impact ->
+                assertThat(impact.evidence()).singleElement().satisfies(evidence ->
+                        assertThat(evidence.componentPath()).extracting(MatchingDtos.ComponentRef::id)
+                                .containsExactly(a.getId(), b.getId())));
+    }
+
+    @Test
+    void choosesTheShortestReverseDependencyPathThroughADiamond() {
+        UUID signalId = UUID.randomUUID();
+        ChangeSignal signal = signal(signalId, SignalType.VULNERABILITY, "nvd", "CVE-2099-3000");
+        Advisory advisory = new Advisory(
+                signalId, "nvd", signal.externalId(), "test", Instant.EPOCH, Instant.EPOCH, null,
+                List.of(new AffectedProduct(
+                        "cpe:2.3:a:acme:alib:*:*:*:*:*:*:*:*", "a", "acme", "alib",
+                        null, null, null, null, null)));
+        SoftwareComponent a = component("com.acme:alib", "1.0.0"); // vulnerable root
+        SoftwareComponent b = component("com.acme:blib", "1.0.0");
+        SoftwareComponent c = component("com.acme:clib", "1.0.0");
+        SoftwareComponent d = component("com.acme:dlib", "1.0.0"); // reachable via A->D (short) or A->B->C->D
+        BusinessService service = new BusinessService(UUID.randomUUID(), "Svc", BusinessCriticality.LOW);
+
+        when(signals.findById(signalId)).thenReturn(Optional.of(signal));
+        when(advisories.findByExternalId("nvd", signal.externalId())).thenReturn(Optional.of(advisory));
+        when(advisories.findByCanonicalId(signal.externalId())).thenReturn(List.of(advisory));
+        when(inventory.findSoftwareComponentsForMatching()).thenReturn(List.of(a, b, c, d));
+        when(inventory.findComponentDependencyLinks(Set.of(a.getId()))).thenReturn(List.of(
+                new ComponentDependencyLink(b.getId(), a.getId()),
+                new ComponentDependencyLink(d.getId(), a.getId())));
+        when(inventory.findComponentDependencyLinks(Set.of(b.getId(), d.getId())))
+                .thenReturn(List.of(new ComponentDependencyLink(c.getId(), b.getId())));
+        when(inventory.findComponentDependencyLinks(Set.of(c.getId())))
+                .thenReturn(List.of(new ComponentDependencyLink(d.getId(), c.getId())));
+        when(inventory.findServiceComponentLinks(Set.of(a.getId(), b.getId(), c.getId(), d.getId())))
+                .thenReturn(List.of(new ServiceComponentLink(service.getId(), d.getId())));
+        when(inventory.findBusinessServicesByIds(Set.of(service.getId())))
+                .thenReturn(Map.of(service.getId(), service));
+        when(inventory.findOwnersForServices(Set.of(service.getId()))).thenReturn(Map.of());
+        when(inventory.findSoftwareComponentsByIds(Set.of(a.getId(), b.getId(), c.getId(), d.getId())))
+                .thenReturn(Map.of(a.getId(), a, b.getId(), b, c.getId(), c, d.getId(), d));
+
+        var response = matching.matchChange(signalId);
+
+        assertThat(response.impactedServices()).singleElement().satisfies(impact ->
+                assertThat(impact.evidence()).singleElement().satisfies(evidence ->
+                        assertThat(evidence.componentPath()).extracting(MatchingDtos.ComponentRef::id)
+                                .containsExactly(a.getId(), d.getId()))); // shortest, not A->B->C->D
+    }
+
+    @Test
+    void surfacesAnUnknownVersionMatchAsAPossibleServiceImpact() {
+        UUID signalId = UUID.randomUUID();
+        ChangeSignal signal = signal(signalId, SignalType.VULNERABILITY, "nvd", "CVE-2099-4000");
+        Advisory advisory = new Advisory(
+                signalId, "nvd", signal.externalId(), "test", Instant.EPOCH, Instant.EPOCH, null,
+                List.of(new AffectedProduct(
+                        "cpe:2.3:a:acme:alib:*:*:*:*:*:*:*:*", "a", "acme", "alib",
+                        null, null, null, null, "2.15.0")));
+        SoftwareComponent vulnerable = component("com.acme:alib", "2.14.1.RELEASE"); // non-SemVer
+        BusinessService service = new BusinessService(UUID.randomUUID(), "Svc", BusinessCriticality.LOW);
+
+        when(signals.findById(signalId)).thenReturn(Optional.of(signal));
+        when(advisories.findByExternalId("nvd", signal.externalId())).thenReturn(Optional.of(advisory));
+        when(advisories.findByCanonicalId(signal.externalId())).thenReturn(List.of(advisory));
+        when(inventory.findSoftwareComponentsForMatching()).thenReturn(List.of(vulnerable));
+        when(inventory.findComponentDependencyLinks(Set.of(vulnerable.getId()))).thenReturn(List.of());
+        when(inventory.findServiceComponentLinks(Set.of(vulnerable.getId())))
+                .thenReturn(List.of(new ServiceComponentLink(service.getId(), vulnerable.getId())));
+        when(inventory.findBusinessServicesByIds(Set.of(service.getId())))
+                .thenReturn(Map.of(service.getId(), service));
+        when(inventory.findOwnersForServices(Set.of(service.getId()))).thenReturn(Map.of());
+        when(inventory.findSoftwareComponentsByIds(Set.of(vulnerable.getId())))
+                .thenReturn(Map.of(vulnerable.getId(), vulnerable));
+
+        var response = matching.matchChange(signalId);
+
+        assertThat(response.matchedComponentCount()).isEqualTo(1);
+        assertThat(response.impactedServices()).singleElement().satisfies(impact -> {
+            assertThat(impact.confidence()).isEqualTo(MatchingDtos.MatchConfidence.POSSIBLE);
+            assertThat(impact.evidence()).singleElement().satisfies(evidence -> {
+                assertThat(evidence.confidence()).isEqualTo(MatchingDtos.MatchConfidence.POSSIBLE);
+                assertThat(evidence.affectedProduct().versionMatch())
+                        .isEqualTo(MatchingDtos.VersionMatch.UNDETERMINED);
+            });
+        });
     }
 
     private static ChangeSignal signal(
