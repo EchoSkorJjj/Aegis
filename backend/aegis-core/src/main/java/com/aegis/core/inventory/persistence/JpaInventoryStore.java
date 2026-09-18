@@ -23,6 +23,7 @@ import com.aegis.core.inventory.InventoryFilters.ComponentFilter;
 import com.aegis.core.inventory.InventoryFilters.NamedFilter;
 import com.aegis.core.inventory.InventoryFilters.ServiceFilter;
 import com.aegis.core.inventory.InventoryStore;
+import com.aegis.core.inventory.InventoryStore.ComponentDependencyLink;
 import com.aegis.core.inventory.InventoryStore.ServiceComponentLink;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.InventoryEntity;
@@ -176,6 +177,11 @@ public class JpaInventoryStore implements InventoryStore {
     }
 
     @Override
+    public List<SoftwareComponent> findSoftwareComponentsForMatching() {
+        return components.findAllByOrgIdOrderByNameAscIdAsc(scope());
+    }
+
+    @Override
     public Optional<SoftwareComponent> findSoftwareComponentByCoordinates(String ecosystem, String name, String version) {
         return components.findByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCaseAndOrgId(
                 ecosystem, name, version, scope());
@@ -236,6 +242,11 @@ public class JpaInventoryStore implements InventoryStore {
     public void deleteThirdPartyVendor(UUID id) {
         scope();
         vendors.deleteById(id);
+    }
+
+    @Override
+    public List<ThirdPartyVendor> findThirdPartyVendorsForMatching() {
+        return vendors.findAllByOrgIdOrderByNameAscIdAsc(scope());
     }
 
     @Override
@@ -391,6 +402,13 @@ public class JpaInventoryStore implements InventoryStore {
         return componentDependencies.findByDependencyIdInAndOrgId(dependencyIds, scope()).stream()
                 .map(ComponentDependencyEntity::getComponentId)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    @Override
+    public List<ComponentDependencyLink> findComponentDependencyLinks(Collection<UUID> dependencyIds) {
+        return componentDependencies.findByDependencyIdInAndOrgId(dependencyIds, scope()).stream()
+                .map(link -> new ComponentDependencyLink(link.getComponentId(), link.getDependencyId()))
+                .toList();
     }
 
     @Override

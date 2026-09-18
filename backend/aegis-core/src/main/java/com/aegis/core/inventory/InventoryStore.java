@@ -36,12 +36,18 @@ public interface InventoryStore {
     /** Distinct ecosystems present in the caller's org, sorted — powers the ecosystem filter select. */
     List<String> findComponentEcosystems();
 
+    /** Every component in the caller's org, for deterministic advisory matching. */
+    List<SoftwareComponent> findSoftwareComponentsForMatching();
+
     ThirdPartyVendor save(ThirdPartyVendor value);
     Optional<ThirdPartyVendor> findThirdPartyVendor(UUID id);
     Page<ThirdPartyVendor> findThirdPartyVendors(NamedFilter filter, Pageable pageable);
     Optional<ThirdPartyVendor> findThirdPartyVendorByName(String name);
     boolean thirdPartyVendorNameExists(String name, UUID excludingId);
     void deleteThirdPartyVendor(UUID id);
+
+    /** Every vendor in the caller's org, for deterministic status-incident matching. */
+    List<ThirdPartyVendor> findThirdPartyVendorsForMatching();
 
     Owner save(Owner value);
     Optional<Owner> findOwner(UUID id);
@@ -74,8 +80,15 @@ public interface InventoryStore {
     record ServiceComponentLink(UUID serviceId, UUID componentId) {
     }
 
+    /** A direct dependency edge: {@code componentId} depends on {@code dependencyId}. */
+    record ComponentDependencyLink(UUID componentId, UUID dependencyId) {
+    }
+
     /** Components with a direct dependency edge onto any of {@code dependencyIds} (one BFS level). */
     Set<UUID> findComponentIdsDependingOn(Collection<UUID> dependencyIds);
+
+    /** Direct reverse-graph edges whose dependency is in {@code dependencyIds}. */
+    List<ComponentDependencyLink> findComponentDependencyLinks(Collection<UUID> dependencyIds);
 
     /** Every service→component edge for services that use any of {@code componentIds} directly. */
     List<ServiceComponentLink> findServiceComponentLinks(Collection<UUID> componentIds);

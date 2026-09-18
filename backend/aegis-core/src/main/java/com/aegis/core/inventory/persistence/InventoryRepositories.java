@@ -35,6 +35,7 @@ interface SoftwareComponentJpaRepository
         extends JpaRepository<SoftwareComponent, UUID>, JpaSpecificationExecutor<SoftwareComponent> {
     Optional<SoftwareComponent> findByIdAndOrgId(UUID id, UUID orgId);
     Page<SoftwareComponent> findByOrgId(UUID orgId, Pageable pageable);
+    List<SoftwareComponent> findAllByOrgIdOrderByNameAscIdAsc(UUID orgId);
 
     @Query("select distinct c.ecosystem from SoftwareComponent c where c.orgId = :orgId order by c.ecosystem")
     List<String> findDistinctEcosystems(@Param("orgId") UUID orgId);
@@ -63,6 +64,7 @@ interface ThirdPartyVendorJpaRepository
         extends JpaRepository<ThirdPartyVendor, UUID>, JpaSpecificationExecutor<ThirdPartyVendor> {
     Optional<ThirdPartyVendor> findByIdAndOrgId(UUID id, UUID orgId);
     Page<ThirdPartyVendor> findByOrgId(UUID orgId, Pageable pageable);
+    List<ThirdPartyVendor> findAllByOrgIdOrderByNameAscIdAsc(UUID orgId);
     Optional<ThirdPartyVendor> findByNameIgnoreCaseAndOrgId(String name, UUID orgId);
     boolean existsByNameIgnoreCaseAndOrgId(String name, UUID orgId);
     boolean existsByNameIgnoreCaseAndOrgIdAndIdNot(String name, UUID orgId, UUID id);
