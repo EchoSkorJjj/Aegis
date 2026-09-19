@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 import com.aegis.core.inventory.domain.BusinessCriticality;
+import com.aegis.core.inventory.domain.ServiceExposure;
 
 /**
  * Optional list filters for the inventory read endpoints. Every field is nullable/blank-tolerant:
@@ -15,10 +16,14 @@ public final class InventoryFilters {
     private InventoryFilters() {
     }
 
-    /** Business-service list filters: name substring, exact criticality, and a created-at window. */
+    /**
+     * Business-service list filters: name substring, exact criticality, exact exposure, and a
+     * created-at window.
+     */
     public record ServiceFilter(
-            String search, BusinessCriticality criticality, Instant createdAfter, Instant createdBefore) {
-        public static final ServiceFilter NONE = new ServiceFilter(null, null, null, null);
+            String search, BusinessCriticality criticality, ServiceExposure exposure,
+            Instant createdAfter, Instant createdBefore) {
+        public static final ServiceFilter NONE = new ServiceFilter(null, null, null, null, null);
     }
 
     /**

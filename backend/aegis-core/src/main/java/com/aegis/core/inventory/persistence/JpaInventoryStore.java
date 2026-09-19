@@ -116,6 +116,9 @@ public class JpaInventoryStore implements InventoryStore {
         if (filter.criticality() != null) {
             specs.add((root, query, cb) -> cb.equal(root.get("criticality"), filter.criticality()));
         }
+        if (filter.exposure() != null) {
+            specs.add((root, query, cb) -> cb.equal(root.get("exposure"), filter.exposure()));
+        }
         return services.findAll(Specification.allOf(specs), pageable);
     }
 

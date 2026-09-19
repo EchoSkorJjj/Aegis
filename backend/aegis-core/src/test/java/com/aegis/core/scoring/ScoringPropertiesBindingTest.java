@@ -30,6 +30,8 @@ class ScoringPropertiesBindingTest {
                         "aegis.scoring.exposure.internet-facing=0.8",
                         "aegis.scoring.exposure.isolated=0.1",
                         "aegis.scoring.confidence.possible=0.5",
+                        "aegis.scoring.severity-label.critical=0.99",
+                        "aegis.scoring.severity-label.sev1=0.9",
                         "aegis.scoring.unknown-severity-factor=0.3",
                         "aegis.scoring.materiality-threshold=25",
                         "aegis.scoring.tiers.critical=90",
@@ -45,6 +47,10 @@ class ScoringPropertiesBindingTest {
                     assertThat(properties.exposureFactor(ServiceExposure.INTERNET_FACING)).isEqualTo(0.8);
                     assertThat(properties.exposureFactor(ServiceExposure.ISOLATED)).isEqualTo(0.1);
                     assertThat(properties.confidenceFactor(POSSIBLE)).isEqualTo(0.5);
+                    // A shipped word can be re-weighted and a feed's own word added, both from config.
+                    assertThat(properties.severityLabelFactor("critical")).isEqualTo(0.99);
+                    assertThat(properties.severityLabelFactor("sev1")).isEqualTo(0.9);
+                    assertThat(properties.severityLabelFactor("high")).isEqualTo(0.75); // unnamed keeps its default
                     assertThat(properties.unknownSeverityFactor()).isEqualTo(0.3);
                     assertThat(properties.materialityThreshold()).isEqualTo(25.0);
                     assertThat(properties.tiers().critical()).isEqualTo(90.0);

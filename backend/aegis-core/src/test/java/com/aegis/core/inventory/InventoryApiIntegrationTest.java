@@ -343,8 +343,10 @@ class InventoryApiIntegrationTest extends AbstractInventoryIntegrationTest {
         String tag = "flt" + UUID.randomUUID().toString().replace("-", "");
         String ecosystem = "eco" + UUID.randomUUID().toString().replace("-", "");
 
-        create("/api/inventory/services", "{\"name\":\"" + tag + " one\",\"criticality\":\"CRITICAL\"}");
-        create("/api/inventory/services", "{\"name\":\"" + tag + " two\",\"criticality\":\"LOW\"}");
+        create("/api/inventory/services",
+                "{\"name\":\"" + tag + " one\",\"criticality\":\"CRITICAL\",\"exposure\":\"INTERNET_FACING\"}");
+        create("/api/inventory/services",
+                "{\"name\":\"" + tag + " two\",\"criticality\":\"LOW\",\"exposure\":\"ISOLATED\"}");
 
         // Name search isolates our two rows regardless of what other suites seeded.
         mvc.perform(get("/api/inventory/services?search=" + tag + "&size=50").with(role("ANALYST")))
@@ -355,6 +357,11 @@ class InventoryApiIntegrationTest extends AbstractInventoryIntegrationTest {
                         .with(role("ANALYST")))
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andExpect(jsonPath("$.content[0].criticality").value("CRITICAL"));
+        // Exposure narrows to the internet-facing one.
+        mvc.perform(get("/api/inventory/services?search=" + tag + "&exposure=INTERNET_FACING&size=50")
+                        .with(role("ANALYST")))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].exposure").value("INTERNET_FACING"));
         // Rows are created "now"; a far-past upper bound excludes them, a far-past lower bound keeps them.
         mvc.perform(get("/api/inventory/services?search=" + tag + "&to=2000-01-01T00:00:00Z&size=50")
                         .with(role("ANALYST")))

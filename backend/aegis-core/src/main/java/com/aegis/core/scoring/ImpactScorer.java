@@ -18,10 +18,12 @@ import org.springframework.stereotype.Component;
  * the same inputs always produce the same score and the whole model can be unit-tested without a
  * database or a feed.
  *
- * <p>{@code score = severity x exposure x criticality x 100}: how bad the vulnerability is, how
- * reachable this particular service is, and how much this organization cares if it falls over. Each
- * term is a multiplier in {@code [0,1]}, so the result is a 0-100 percentage of the worst case, and a
- * service that is weak on any one axis cannot be pushed to the top by the other two.
+ * <p>{@code score = severity x exposure x criticality x confidence x 100}: how bad the vulnerability
+ * is, how reachable this particular service is, how much this organization cares if it falls over, and
+ * how sure we are the match applies. Each term is a multiplier in {@code [0,1]}, so the result is a
+ * 0-100 percentage of the worst case, and a service that is weak on any one axis cannot be pushed to
+ * the top by the others. The confidence term defaults to 1.0, so the model reads as three factors
+ * until a deployment configures a discount (see {@link ScoringProperties}).
  *
  * <p>Nothing here interprets advisory prose or calls a model. Severity is the number the feed already
  * published; everything else is an attribute the owner declared on the service.
@@ -55,30 +57,21 @@ public class ImpactScorer {
     /**
      * The severity term for a signal with no CVSS — a vendor outage, or a CVE still awaiting analysis.
      * Feeds spell severity differently (NVD's {@code CRITICAL/HIGH/MEDIUM/LOW}, Statuspage's
-     * {@code critical/major/minor/none}), so both vocabularies are recognised. An unrecognised or
-     * absent label falls back to the neutral {@code unknownSeverityFactor} rather than to zero: not
-     * knowing how bad something is must not rank it as harmless.
+     * {@code critical/major/minor/none}), so the mapping is a configurable table
+     * ({@link ScoringProperties#severityLabelFactor}) a deployment can extend for a feed that speaks a
+     * third vocabulary. An unrecognised or absent label falls back to the neutral
+     * {@code unknownSeverityFactor} rather than to zero: not knowing how bad something is must not rank
+     * it as harmless.
      */
     public SeverityInput severityFromLabel(String label) {
         if (label == null || label.isBlank()) {
             return new SeverityInput(
                     SeveritySource.NONE, null, null, null, clamp(weights.unknownSeverityFactor()));
         }
-        Double factor = labelFactor(label.trim().toLowerCase(Locale.ROOT));
+        Double factor = weights.severityLabelFactor(label.trim().toLowerCase(Locale.ROOT));
         return factor == null
                 ? new SeverityInput(SeveritySource.NONE, null, null, label, clamp(weights.unknownSeverityFactor()))
                 : new SeverityInput(SeveritySource.SEVERITY_LABEL, null, null, label, factor);
-    }
-
-    private static Double labelFactor(String label) {
-        return switch (label) {
-            case "critical" -> 0.95;
-            case "high", "major", "important" -> 0.75;
-            case "medium", "moderate", "minor" -> 0.5;
-            case "low" -> 0.25;
-            case "none", "maintenance", "informational" -> 0.1;
-            default -> null;
-        };
     }
 
     /**

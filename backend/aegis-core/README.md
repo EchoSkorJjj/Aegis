@@ -446,6 +446,7 @@ restating the table.
 | `aegis.scoring.criticality.*` | `1.0 / 0.75 / 0.5 / 0.25` | How much severity a business tier retains |
 | `aegis.scoring.exposure.*` | `1.0 / 0.6 / 0.4` | What an attacker's reach is worth |
 | `aegis.scoring.confidence.*` | `1.0 / 1.0` | Optional discount for an unreviewed (`POSSIBLE`) match |
+| `aegis.scoring.severity-label.*` | `critical 0.95 … none 0.1` | Severity per feed word when there is no CVSS; add a word for a new feed vocabulary |
 | `aegis.scoring.unknown-severity-factor` | `0.5` | Applied when neither a CVSS score nor a known label exists |
 | `aegis.scoring.tiers.*` | `75 / 50 / 25 / 10` | Lower bound of each `ImpactTier` |
 | `aegis.scoring.materiality-threshold` | `10.0` | Below this a result is returned but marked immaterial |
@@ -453,6 +454,9 @@ restating the table.
 | `aegis.scoring.rollup.default-window` | `P30D` | How far back a roll-up reaches with no `from` |
 
 Each has an env-var override (`AEGIS_SCORING_TIER_CRITICAL`, `AEGIS_SCORING_EXPOSURE_ISOLATED`, …).
+A present weight outside `[0,1]` is clamped into range and logged rather than trusted; the tier bounds
+are the one exception — a non-descending or out-of-`[0,100]` ladder has no safe reading (every score in
+the inversion would mis-tier), so it fails fast at startup rather than triaging wrongly in silence.
 The confidence weights are the seam for the one judgement call story 1 deliberately left out: matching
 confidence is *reported* rather than folded into the score, and a deployment that would rather rank
 unreviewed matches below proven ones lowers `aegis.scoring.confidence.possible` instead of arguing

@@ -101,8 +101,13 @@ public final class ScoringDtos {
      * service and per owner. Where {@link ChangeImpactResponse} answers "who does this CVE hurt",
      * this answers "what is on our plate", which is the question an owner actually opens the app with.
      *
-     * @param signalsConsidered how many signals were scored (bounded by {@code window.maxSignals})
+     * @param signalsConsidered how many signals were attempted (bounded by {@code window.maxSignals});
+     *                          security-news signals carry no identity to match and are not counted here
      * @param signalsImpacting  how many of those reached at least one service — the rest matched nothing
+     * @param signalsSkipped    how many of the attempted signals could not be scored because their
+     *                          advisory or match failed to resolve; they are logged and stepped over so
+     *                          one bad row never fails the whole roll-up, and counted here so the total
+     *                          is honest rather than silently short
      * @param truncated         true when the window held more signals than the bound allowed, so the
      *                          roll-up covers only the newest of them and a narrower window would be
      *                          more honest than a bigger number
@@ -111,6 +116,7 @@ public final class ScoringDtos {
             RollupWindow window,
             int signalsConsidered,
             int signalsImpacting,
+            int signalsSkipped,
             boolean truncated,
             List<ServiceRollup> services,
             List<OwnerRollup> owners) {

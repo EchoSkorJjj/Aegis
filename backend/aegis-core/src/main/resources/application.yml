@@ -77,10 +77,19 @@ aegis:
     confidence:
       confirmed: ${AEGIS_SCORING_CONFIDENCE_CONFIRMED:1.0}
       possible: ${AEGIS_SCORING_CONFIDENCE_POSSIBLE:1.0}
+    # Severity words for a signal with no CVSS (a vendor outage, an un-scored CVE), by the feed's own
+    # vocabulary. NVD's critical/high/medium/low and Statuspage's critical/major/minor/none ship with
+    # defaults (see ScoringProperties); add a key here only for a feed that speaks a different word,
+    # e.g. `severity-label.sev1: 0.9`. Each value is a [0,1] multiplier; an unrecognised word falls
+    # back to unknown-severity-factor.
+    # severity-label:
+    #   sev1: 0.9
     # Applied when a signal carries neither a CVSS score nor a severity label we recognise. Neutral,
     # never zero: not knowing how bad something is must not rank it as harmless.
     unknown-severity-factor: ${AEGIS_SCORING_UNKNOWN_SEVERITY_FACTOR:0.5}
-    # Lower bound of each impact tier on the 0-100 scale. Raise them for a stricter queue.
+    # Lower bound of each impact tier on the 0-100 scale. Raise them for a stricter queue. Must be a
+    # descending ladder within 0-100 (critical >= high >= medium >= low); a non-descending or
+    # out-of-range ladder fails fast at startup rather than mis-tiering every score in silence.
     tiers:
       critical: ${AEGIS_SCORING_TIER_CRITICAL:75.0}
       high: ${AEGIS_SCORING_TIER_HIGH:50.0}

@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import com.aegis.core.common.ApiExceptions;
 import com.aegis.core.ingestion.advisory.Advisory;
 import com.aegis.core.ingestion.advisory.AdvisoryStore;
 import com.aegis.core.ingestion.signal.ChangeSignal;
@@ -137,6 +138,24 @@ class ScoringRollupTest {
     }
 
     @Test
+    void skipsASignalThatCannotBeResolvedInsteadOfFailingTheWholeRollup() {
+        ChangeSignal good = vulnerability("CVE-2099-1", "10.0");
+        ChangeSignal broken = vulnerability("CVE-2099-2", "10.0");
+        stubPage(good, broken);
+        stubMatch(good, impacted(PORTAL, WEB));
+        // The second signal's match blows up — e.g. its advisory vanished mid-window.
+        when(matching.matchChange(broken.id())).thenThrow(new ApiExceptions.NotFound("advisory gone"));
+
+        EstateRollupResponse rollup = scoring.rollUpEstate(ChangeSignalFilter.NONE, null);
+
+        // The good signal still scores; the broken one is stepped over, counted, and not fatal.
+        assertThat(rollup.signalsConsidered()).isEqualTo(2);
+        assertThat(rollup.signalsImpacting()).isEqualTo(1);
+        assertThat(rollup.signalsSkipped()).isEqualTo(1);
+        assertThat(rollup.services()).hasSize(1);
+    }
+
+    @Test
     void boundsTheWorkAndSaysSoWhenTheWindowHeldMore() {
         ChangeSignal first = vulnerability("CVE-2099-1", "10.0");
         ChangeSignal second = vulnerability("CVE-2099-2", "10.0");
@@ -154,7 +173,7 @@ class ScoringRollupTest {
     @Test
     void clampsACallersLimitToTheConfiguredCeiling() {
         ImpactScorer bounded = new ImpactScorer(new ScoringProperties(
-                null, null, null, null, null, null, new ScoringProperties.Rollup(5, null)));
+                null, null, null, null, null, null, null, new ScoringProperties.Rollup(5, null)));
         ScoringService small = new ScoringService(matching, signals, advisories, bounded);
         when(signals.findPage(any(), any())).thenReturn(new PageImpl<>(List.of()));
 

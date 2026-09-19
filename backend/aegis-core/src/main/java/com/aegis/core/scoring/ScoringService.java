@@ -2,7 +2,6 @@ package com.aegis.core.scoring;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -35,6 +34,8 @@ import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.scoring.ScoringDtos.ServiceRollup;
 import com.aegis.core.scoring.ScoringDtos.SeverityInput;
 import com.aegis.core.scoring.ScoringDtos.SeveritySource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,6 +51,8 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class ScoringService {
+
+    private static final Logger log = LoggerFactory.getLogger(ScoringService.class);
 
     private final MatchingService matching;
     private final ChangeSignalStore signals;
@@ -86,7 +89,7 @@ public class ScoringService {
                         .thenComparing(scored -> scored.service().id()))
                 .toList();
 
-        return new ChangeImpactResponse(match.change(), severity, services, rollUpByOwner(services));
+        return new ChangeImpactResponse(match.change(), severity, services, rollUpByOwner(services, match.change()));
     }
 
 
@@ -94,13 +97,16 @@ public class ScoringService {
      * Score every signal in a window and aggregate the results per service and per owner — the
      * "what is on our plate" view, as opposed to {@link #scoreChange} 's "who does this CVE hurt".
      *
-     * <p>Each signal costs a match and a graph traversal, so the work is bounded twice: by the
-     * caller's window and by {@code aegis.scoring.rollup.max-signals}. When the window holds more
-     * signals than the bound allows, the newest are scored and the response says {@code truncated} —
-     * a roll-up that quietly covered an arbitrary subset would be worse than one that admits it.
+     * <p>Cost is {@code O(signals x match)}: every signal drives its own match and graph traversal and
+     * severity lookup, with no cross-signal batching, so the work is deliberately bounded twice — by
+     * the caller's window and by {@code aegis.scoring.rollup.max-signals}. When the window holds more
+     * signals than the bound allows, the newest are scored and the response says {@code truncated} — a
+     * roll-up that quietly covered an arbitrary subset would be worse than one that admits it. (Batching
+     * the per-signal work is a deliberate later optimisation; the bound keeps it safe until then.)
      *
-     * <p>Security-news signals are skipped rather than rejected: they carry no package or vendor
-     * identity to match, and one unmatchable article in a window must not fail the whole roll-up.
+     * <p>No single signal fails the whole roll-up. A security-news signal carries no package or vendor
+     * identity to match and is skipped before it is counted; any other signal whose advisory or match
+     * cannot be resolved is logged, counted as {@code signalsSkipped}, and stepped over.
      */
     @Transactional(readOnly = true)
     public EstateRollupResponse rollUpEstate(ChangeSignalFilter filter, Integer requestedLimit) {
@@ -122,12 +128,24 @@ public class ScoringService {
         Map<UUID, OwnerAggregate> owners = new LinkedHashMap<>();
         int considered = 0;
         int impacting = 0;
+        int skipped = 0;
         for (ChangeSignal signal : scored) {
             if (signal.signalType() == ChangeSignal.SignalType.SECURITY_NEWS) {
                 continue;
             }
             considered++;
-            ChangeImpactResponse impact = score(signal, matching.matchChange(signal.id()));
+            ChangeImpactResponse impact;
+            try {
+                impact = score(signal, matching.matchChange(signal.id()));
+            } catch (RuntimeException ex) {
+                // One signal whose advisory or match cannot be resolved must not sink the whole
+                // roll-up — step over it, count it, and let the rest score. Same resilience the
+                // security-news skip gives, extended to any single-signal failure.
+                skipped++;
+                log.warn("scoring roll-up: skipping signal {} ({}): {}",
+                        signal.id(), signal.externalId(), ex.toString());
+                continue;
+            }
             if (impact.services().isEmpty()) {
                 continue;
             }
@@ -146,6 +164,7 @@ public class ScoringService {
                 new RollupWindow(from, filter.to(), maxSignals),
                 considered,
                 impacting,
+                skipped,
                 truncated,
                 services.values().stream()
                         .map(ServiceAggregate::toRollup)
@@ -209,18 +228,19 @@ public class ScoringService {
     }
 
     /**
-     * Per-owner roll-up of the scored services. An owner's score is their worst service's, and the
-     * counts say how much else is on their plate — see {@link ScoredOwner}.
+     * Per-owner roll-up of one change's scored services. An owner's score is their worst service's,
+     * and the counts say how much else is on their plate — see {@link ScoredOwner}. Shares the
+     * {@link OwnerAggregate} "worst service" machinery with the estate roll-up so the rule lives once.
      */
-    private List<ScoredOwner> rollUpByOwner(List<ScoredService> services) {
-        Map<UUID, OwnerAccumulator> byOwner = new LinkedHashMap<>();
+    private List<ScoredOwner> rollUpByOwner(List<ScoredService> services, ChangeRef change) {
+        Map<UUID, OwnerAggregate> byOwner = new LinkedHashMap<>();
         for (ScoredService scored : services) {
             for (OwnerRef owner : scored.owners()) {
-                byOwner.computeIfAbsent(owner.id(), ignored -> new OwnerAccumulator(owner)).add(scored);
+                byOwner.computeIfAbsent(owner.id(), ignored -> new OwnerAggregate(owner)).add(scored, change);
             }
         }
         return byOwner.values().stream()
-                .map(OwnerAccumulator::toScoredOwner)
+                .map(OwnerAggregate::toScoredOwner)
                 .sorted(Comparator.comparingDouble(ScoredOwner::score).reversed()
                         .thenComparing(owner -> owner.owner().name(), String.CASE_INSENSITIVE_ORDER)
                         .thenComparing(owner -> owner.owner().id()))
@@ -337,27 +357,16 @@ public class ScoringService {
                     super.signalCount, super.materialSignalCount,
                     super.worst.service(), super.worstSignal);
         }
-    }
 
-    private final class OwnerAccumulator {
-        private final OwnerRef owner;
-        private final List<ScoredService> scored = new ArrayList<>();
-
-        private OwnerAccumulator(OwnerRef owner) {
-            this.owner = owner;
-        }
-
-        private void add(ScoredService value) {
-            scored.add(value);
-        }
-
+        /**
+         * The single-change form of the same aggregate: within one change every {@code add} is a
+         * distinct service, so {@code serviceIds}/{@code materialSignalCount} are the owner's affected
+         * and material <em>service</em> counts, and there is no signal dimension to report.
+         */
         private ScoredOwner toScoredOwner() {
-            ScoredService worst = scored.stream()
-                    .max(Comparator.comparingDouble(ScoredService::score))
-                    .orElseThrow();
-            int material = (int) scored.stream().filter(ScoredService::material).count();
             return new ScoredOwner(
-                    owner, worst.score(), scorer.tier(worst.score()), scored.size(), material, worst.service());
+                    owner, super.worst.score(), super.worst.tier(), serviceIds.size(),
+                    super.materialSignalCount, super.worst.service());
         }
     }
 }

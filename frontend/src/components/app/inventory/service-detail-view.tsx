@@ -17,6 +17,7 @@ import type {
   BusinessCriticality,
   BusinessService,
   Owner,
+  ServiceExposure,
   SoftwareComponent,
   ThirdPartyVendor,
 } from "@/lib/types";
@@ -27,6 +28,18 @@ const CRITICALITY_CLASS: Record<BusinessCriticality, string> = {
   MEDIUM: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
   HIGH: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   CRITICAL: "bg-red-500/10 text-red-600 dark:text-red-400",
+};
+
+const EXPOSURE_CLASS: Record<ServiceExposure, string> = {
+  ISOLATED: "bg-muted text-muted-foreground",
+  INTERNAL: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+  INTERNET_FACING: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+};
+
+const EXPOSURE_LABEL: Record<ServiceExposure, string> = {
+  ISOLATED: "Isolated",
+  INTERNAL: "Internal",
+  INTERNET_FACING: "Internet-facing",
 };
 
 // Module-level configs → stable identities, safe as effect deps in RelationshipSection. Each pairs
@@ -206,6 +219,11 @@ export function ServiceDetailView({ serviceId }: { serviceId: string }) {
             className={`rounded-full px-2 py-0.5 text-xs font-medium ${CRITICALITY_CLASS[service.criticality]}`}
           >
             {service.criticality}
+          </span>
+          <span
+            className={`rounded-full px-2 py-0.5 text-xs font-medium ${EXPOSURE_CLASS[service.exposure]}`}
+          >
+            {EXPOSURE_LABEL[service.exposure]}
           </span>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">

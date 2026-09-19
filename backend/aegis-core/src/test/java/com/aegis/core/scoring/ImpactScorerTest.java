@@ -136,7 +136,7 @@ class ImpactScorerTest {
     @Test
     void honoursSuppliedWeightsRatherThanTheDefaults() {
         ScoringProperties strict = new ScoringProperties(
-                null, null, null, 0.5, new ScoringProperties.Tiers(90.0, 70.0, 40.0, 20.0), 20.0, null);
+                null, null, null, null, 0.5, new ScoringProperties.Tiers(90.0, 70.0, 40.0, 20.0), 20.0, null);
         ImpactScorer strictScorer = new ImpactScorer(strict);
 
         assertThat(strictScorer.tier(75.0)).isEqualTo(ImpactTier.HIGH);
