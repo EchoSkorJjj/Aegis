@@ -14,6 +14,14 @@ import org.hibernate.annotations.NaturalId;
 @Table(name = "business_services")
 public class BusinessService extends InventoryEntity {
 
+    /**
+     * The posture assumed for a service whose owner has not declared one. Matches the backfill in
+     * migration V15 and the column default, so a row created before the attribute existed, a request
+     * that omits it, and a direct construction all agree. Deliberately the middle level: assuming
+     * {@code ISOLATED} would understate risk, assuming {@code INTERNET_FACING} would cry wolf.
+     */
+    public static final ServiceExposure DEFAULT_EXPOSURE = ServiceExposure.INTERNAL;
+
     @NaturalId(mutable = true)
     @Column(name = "name", nullable = false, length = 255)
     private String name;
@@ -22,19 +30,35 @@ public class BusinessService extends InventoryEntity {
     @Column(name = "criticality", nullable = false, length = 16)
     private BusinessCriticality criticality;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "exposure", nullable = false, length = 32)
+    private ServiceExposure exposure;
+
     protected BusinessService() {
         // Required by JPA.
     }
 
-    public BusinessService(UUID id, String name, BusinessCriticality criticality) {
+    public BusinessService(UUID id, String name, BusinessCriticality criticality, ServiceExposure exposure) {
         super(id);
         this.name = requireText(name, "name");
         this.criticality = requireNonNull(criticality, "criticality");
+        this.exposure = requireNonNull(exposure, "exposure");
     }
 
-    public void update(String name, BusinessCriticality criticality) {
+    /** Convenience for callers that do not state an exposure; applies {@link #DEFAULT_EXPOSURE}. */
+    public BusinessService(UUID id, String name, BusinessCriticality criticality) {
+        this(id, name, criticality, DEFAULT_EXPOSURE);
+    }
+
+    public void update(String name, BusinessCriticality criticality, ServiceExposure exposure) {
         this.name = requireText(name, "name");
         this.criticality = requireNonNull(criticality, "criticality");
+        this.exposure = requireNonNull(exposure, "exposure");
+    }
+
+    /** Convenience for callers that do not state an exposure; leaves the current one unchanged. */
+    public void update(String name, BusinessCriticality criticality) {
+        update(name, criticality, this.exposure == null ? DEFAULT_EXPOSURE : this.exposure);
     }
 
     public String getName() {
@@ -43,5 +67,9 @@ public class BusinessService extends InventoryEntity {
 
     public BusinessCriticality getCriticality() {
         return criticality;
+    }
+
+    public ServiceExposure getExposure() {
+        return exposure;
     }
 }

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { DataPagination } from "@/components/app/data-pagination";
+import { DateRangePicker } from "@/components/app/date-range-picker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -182,14 +183,16 @@ export default function AdvisoriesPage() {
             ))}
           </FilterSelect>
         )}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Published from</label>
-          <Input type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPageIndex(0); }} />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">to</label>
-          <Input type="date" value={to} onChange={(event) => { setTo(event.target.value); setPageIndex(0); }} />
-        </div>
+        <DateRangePicker
+          label="Published"
+          from={from}
+          to={to}
+          onChange={(range) => {
+            setFrom(range.from ?? "");
+            setTo(range.to ?? "");
+            setPageIndex(0);
+          }}
+        />
         {hasFilters && (
           <Button variant="ghost" onClick={clearFilters}>
             Clear

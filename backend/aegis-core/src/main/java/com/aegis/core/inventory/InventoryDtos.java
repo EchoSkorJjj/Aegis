@@ -11,6 +11,7 @@ import jakarta.validation.constraints.Size;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.Owner;
+import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
 
@@ -19,16 +20,24 @@ public final class InventoryDtos {
     private InventoryDtos() {
     }
 
+    /**
+     * {@code exposure} is optional so a client written before the attribute existed keeps working; it
+     * then falls back to {@link BusinessService#DEFAULT_EXPOSURE}. On an update, omitting it keeps the
+     * service's current exposure rather than resetting it — a PUT that does not mention the attribute
+     * must not silently downgrade a service the owner declared internet-facing.
+     */
     public record BusinessServiceRequest(
             @NotBlank @Size(max = 255) String name,
-            @NotNull BusinessCriticality criticality) {
+            @NotNull BusinessCriticality criticality,
+            ServiceExposure exposure) {
     }
 
     public record BusinessServiceResponse(
-            UUID id, String name, BusinessCriticality criticality, Instant createdAt, Instant updatedAt) {
+            UUID id, String name, BusinessCriticality criticality, ServiceExposure exposure,
+            Instant createdAt, Instant updatedAt) {
         static BusinessServiceResponse from(BusinessService value) {
             return new BusinessServiceResponse(
-                    value.getId(), value.getName(), value.getCriticality(),
+                    value.getId(), value.getName(), value.getCriticality(), value.getExposure(),
                     value.getCreatedAt(), value.getUpdatedAt());
         }
     }

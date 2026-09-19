@@ -23,6 +23,7 @@ import com.aegis.core.inventory.InventoryStore.ServiceComponentLink;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.Owner;
+import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
 import org.springframework.data.domain.Page;
@@ -39,11 +40,20 @@ public class InventoryService {
         this.store = store;
     }
 
+    /** {@code exposure} may be null — the service then takes {@link BusinessService#DEFAULT_EXPOSURE}. */
     @Transactional
-    public BusinessService createBusinessService(String name, BusinessCriticality criticality) {
-        BusinessService value = new BusinessService(UUID.randomUUID(), name, criticality);
+    public BusinessService createBusinessService(
+            String name, BusinessCriticality criticality, ServiceExposure exposure) {
+        BusinessService value = new BusinessService(
+                UUID.randomUUID(), name, criticality,
+                exposure == null ? BusinessService.DEFAULT_EXPOSURE : exposure);
         rejectDuplicateBusinessServiceName(value.getName(), null);
         return store.save(value);
+    }
+
+    @Transactional
+    public BusinessService createBusinessService(String name, BusinessCriticality criticality) {
+        return createBusinessService(name, criticality, null);
     }
 
     @Transactional(readOnly = true)
@@ -57,12 +67,23 @@ public class InventoryService {
         return store.findBusinessServices(filter, pageable);
     }
 
+    /** {@code exposure} may be null — the service then keeps the exposure it already had. */
     @Transactional
-    public BusinessService updateBusinessService(UUID id, String name, BusinessCriticality criticality) {
+    public BusinessService updateBusinessService(
+            UUID id, String name, BusinessCriticality criticality, ServiceExposure exposure) {
         BusinessService value = getBusinessService(id);
-        value.update(name, criticality);
+        if (exposure == null) {
+            value.update(name, criticality);
+        } else {
+            value.update(name, criticality, exposure);
+        }
         rejectDuplicateBusinessServiceName(value.getName(), id);
         return store.save(value);
+    }
+
+    @Transactional
+    public BusinessService updateBusinessService(UUID id, String name, BusinessCriticality criticality) {
+        return updateBusinessService(id, name, criticality, null);
     }
 
     @Transactional

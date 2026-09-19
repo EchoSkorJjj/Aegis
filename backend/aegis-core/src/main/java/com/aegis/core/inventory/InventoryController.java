@@ -17,6 +17,7 @@ import com.aegis.core.inventory.InventoryDtos.SoftwareComponentResponse;
 import com.aegis.core.inventory.InventoryDtos.ThirdPartyVendorResponse;
 import com.aegis.core.inventory.InventoryDtos.VendorImpactResponse;
 import com.aegis.core.inventory.domain.BusinessCriticality;
+import com.aegis.core.inventory.domain.ServiceExposure;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import org.springframework.data.domain.Page;
@@ -53,20 +54,22 @@ public class InventoryController {
     public ResponseEntity<BusinessServiceResponse> createBusinessService(
             @Valid @RequestBody BusinessServiceRequest request) {
         BusinessServiceResponse response = BusinessServiceResponse.from(
-                inventory.createBusinessService(request.name(), request.criticality()));
+                inventory.createBusinessService(request.name(), request.criticality(), request.exposure()));
         return ResponseEntity.created(uri("/api/inventory/services/" + response.id())).body(response);
     }
 
     @GetMapping("/services")
     @PreAuthorize(InventoryRoles.READ)
-    @Operation(summary = "List business services, optionally filtered by name, criticality, and created date")
+    @Operation(summary = "List business services, optionally filtered by name, criticality, exposure, and created date")
     public Page<BusinessServiceResponse> listBusinessServices(
             @RequestParam(required = false) String search,
             @RequestParam(required = false) BusinessCriticality criticality,
+            @RequestParam(required = false) ServiceExposure exposure,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
             @PageableDefault(size = 20, sort = {"name", "id"}, direction = Sort.Direction.ASC) Pageable pageable) {
-        InventoryFilters.ServiceFilter filter = new InventoryFilters.ServiceFilter(search, criticality, from, to);
+        InventoryFilters.ServiceFilter filter =
+                new InventoryFilters.ServiceFilter(search, criticality, exposure, from, to);
         return inventory.listBusinessServices(filter, pageable).map(BusinessServiceResponse::from);
     }
 
@@ -83,7 +86,7 @@ public class InventoryController {
     public BusinessServiceResponse updateBusinessService(
             @PathVariable UUID id, @Valid @RequestBody BusinessServiceRequest request) {
         return BusinessServiceResponse.from(
-                inventory.updateBusinessService(id, request.name(), request.criticality()));
+                inventory.updateBusinessService(id, request.name(), request.criticality(), request.exposure()));
     }
 
     @DeleteMapping("/services/{id}")

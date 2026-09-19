@@ -244,7 +244,7 @@ export const adminApi = {
  * organization server-side; the backend enforces the domain read/write roles (403 passed through).
  */
 export const inventoryApi = {
-  listServices(params: ListParams & { criticality?: string } = {}) {
+  listServices(params: ListParams & { criticality?: string; exposure?: string } = {}) {
     return bffFetch<Page<BusinessService>>(`/api/inventory/services${qs(params)}`);
   },
   getService(id: string) {

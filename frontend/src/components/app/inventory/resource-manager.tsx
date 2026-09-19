@@ -5,6 +5,7 @@ import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { DataPagination } from "@/components/app/data-pagination";
+import { DateRangePicker } from "@/components/app/date-range-picker";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -36,6 +37,8 @@ export type FieldSpec = {
   kind: "text" | "select";
   options?: { value: string; label: string }[];
   placeholder?: string;
+  /** Pre-filled value for a new (create) record; falls back to the first select option, else empty. */
+  defaultValue?: string;
 };
 
 /** A displayed column. `sortField` (a backend entity property) makes the header a sort toggle. */
@@ -123,7 +126,10 @@ export function ResourceManager<T extends { id: string }>({
   const emptyDraft = useMemo(
     () =>
       Object.fromEntries(
-        fields.map((field) => [field.name, field.kind === "select" ? field.options?.[0]?.value ?? "" : ""]),
+        fields.map((field) => [
+          field.name,
+          field.defaultValue ?? (field.kind === "select" ? field.options?.[0]?.value ?? "" : ""),
+        ]),
       ),
     [fields],
   );
@@ -324,14 +330,16 @@ export function ResourceManager<T extends { id: string }>({
             </div>
           );
         })}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Created from</label>
-          <Input type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPageIndex(0); }} />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">to</label>
-          <Input type="date" value={to} onChange={(event) => { setTo(event.target.value); setPageIndex(0); }} />
-        </div>
+        <DateRangePicker
+          label="Created"
+          from={from}
+          to={to}
+          onChange={(range) => {
+            setFrom(range.from ?? "");
+            setTo(range.to ?? "");
+            setPageIndex(0);
+          }}
+        />
         {hasFilters && (
           <Button variant="ghost" onClick={clearFilters}>
             Clear

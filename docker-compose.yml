@@ -91,6 +91,8 @@ services:
       AEGIS_NVD_API_KEY: ${NVD_API_KEY:-}
       AEGIS_INGESTION_POLL_INTERVAL: PT1M
       AEGIS_NVD_INITIAL_WINDOW: P1D
+      AEGIS_INGESTION_OSV_ENABLED: "true"
+      AEGIS_OSV_ECOSYSTEMS: "npm,PyPI,crates.io,RubyGems,Go,Maven"
       # Poll the status pages of the five vendors the demo estate depends on (AWS via RSS, the rest
       # via Statuspage JSON). No credentials — these are public pages.
       AEGIS_INGESTION_VENDOR_STATUS_ENABLED: "true"

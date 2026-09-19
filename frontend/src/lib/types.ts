@@ -176,10 +176,14 @@ export interface Page<T> {
 /** Business-service criticality tier. Mirrors aegis-core BusinessCriticality. */
 export type BusinessCriticality = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
+/** How reachable a service is from outside its own application. Mirrors aegis-core ServiceExposure. */
+export type ServiceExposure = "ISOLATED" | "INTERNAL" | "INTERNET_FACING";
+
 export interface BusinessService {
   id: string;
   name: string;
   criticality: BusinessCriticality;
+  exposure: ServiceExposure;
   createdAt: string;
   updatedAt: string;
 }
@@ -187,6 +191,9 @@ export interface BusinessService {
 export interface BusinessServiceInput {
   name: string;
   criticality: BusinessCriticality;
+  // Optional: a new service defaults to INTERNAL server-side, and on update an omitted exposure keeps
+  // the current value — so a client that never sets it still works and never downgrades it.
+  exposure?: ServiceExposure;
 }
 
 /** A software component, keyed by (ecosystem, name, version). */

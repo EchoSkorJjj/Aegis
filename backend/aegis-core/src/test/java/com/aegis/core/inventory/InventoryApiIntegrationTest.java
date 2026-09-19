@@ -117,6 +117,49 @@ class InventoryApiIntegrationTest extends AbstractInventoryIntegrationTest {
     }
 
     @Test
+    void roundTripsServiceExposureAndDefaultsItWhenTheRequestOmitsIt() throws Exception {
+        String suffix = UUID.randomUUID().toString();
+        UUID declared = create("/api/inventory/services",
+                "{\"name\":\"Public " + suffix + "\",\"criticality\":\"HIGH\","
+                        + "\"exposure\":\"INTERNET_FACING\"}");
+        UUID omitted = create("/api/inventory/services",
+                "{\"name\":\"Unstated " + suffix + "\",\"criticality\":\"HIGH\"}");
+
+        mvc.perform(get("/api/inventory/services/{id}", declared).with(role("SERVICE_OWNER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.exposure").value("INTERNET_FACING"));
+        // A client written before the attribute existed still works, and lands on the safe middle.
+        mvc.perform(get("/api/inventory/services/{id}", omitted).with(role("SERVICE_OWNER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.exposure").value("INTERNAL"));
+
+        // A PUT that does not mention exposure must not downgrade a service the owner declared public.
+        mvc.perform(put("/api/inventory/services/{id}", declared)
+                        .with(role("ANALYST"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Public " + suffix + "\",\"criticality\":\"LOW\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.criticality").value("LOW"))
+                .andExpect(jsonPath("$.exposure").value("INTERNET_FACING"));
+
+        mvc.perform(put("/api/inventory/services/{id}", declared)
+                        .with(role("ANALYST"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Public " + suffix + "\",\"criticality\":\"LOW\","
+                                + "\"exposure\":\"ISOLATED\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.exposure").value("ISOLATED"));
+
+        mvc.perform(post("/api/inventory/services")
+                        .with(role("ANALYST"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Bad " + suffix + "\",\"criticality\":\"LOW\","
+                                + "\"exposure\":\"DMZ\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+    }
+
+    @Test
     void businessServiceCrudReturnsRestfulStatusesAndLocations() throws Exception {
         String suffix = UUID.randomUUID().toString();
         UUID id = create("/api/inventory/services",
@@ -300,8 +343,10 @@ class InventoryApiIntegrationTest extends AbstractInventoryIntegrationTest {
         String tag = "flt" + UUID.randomUUID().toString().replace("-", "");
         String ecosystem = "eco" + UUID.randomUUID().toString().replace("-", "");
 
-        create("/api/inventory/services", "{\"name\":\"" + tag + " one\",\"criticality\":\"CRITICAL\"}");
-        create("/api/inventory/services", "{\"name\":\"" + tag + " two\",\"criticality\":\"LOW\"}");
+        create("/api/inventory/services",
+                "{\"name\":\"" + tag + " one\",\"criticality\":\"CRITICAL\",\"exposure\":\"INTERNET_FACING\"}");
+        create("/api/inventory/services",
+                "{\"name\":\"" + tag + " two\",\"criticality\":\"LOW\",\"exposure\":\"ISOLATED\"}");
 
         // Name search isolates our two rows regardless of what other suites seeded.
         mvc.perform(get("/api/inventory/services?search=" + tag + "&size=50").with(role("ANALYST")))
@@ -312,6 +357,11 @@ class InventoryApiIntegrationTest extends AbstractInventoryIntegrationTest {
                         .with(role("ANALYST")))
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andExpect(jsonPath("$.content[0].criticality").value("CRITICAL"));
+        // Exposure narrows to the internet-facing one.
+        mvc.perform(get("/api/inventory/services?search=" + tag + "&exposure=INTERNET_FACING&size=50")
+                        .with(role("ANALYST")))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].exposure").value("INTERNET_FACING"));
         // Rows are created "now"; a far-past upper bound excludes them, a far-past lower bound keeps them.
         mvc.perform(get("/api/inventory/services?search=" + tag + "&to=2000-01-01T00:00:00Z&size=50")
                         .with(role("ANALYST")))
