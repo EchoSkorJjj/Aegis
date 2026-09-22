@@ -1,6 +1,6 @@
 package com.aegis.core.inventory.sbom;
 
-import com.aegis.core.common.ApiExceptions;
+import com.aegis.core.platform.common.ApiExceptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;

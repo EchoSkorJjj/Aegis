@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
-import com.aegis.core.common.ApiExceptions;
+import com.aegis.core.platform.common.ApiExceptions;
 
 /**
  * A parsed package URL ({@code pkg:type/namespace/name@version?qualifiers#subpath}). Qualifiers and

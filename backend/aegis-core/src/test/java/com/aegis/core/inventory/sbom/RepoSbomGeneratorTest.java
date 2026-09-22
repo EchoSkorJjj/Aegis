@@ -8,8 +8,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import com.aegis.core.common.ApiExceptions;
 import com.aegis.core.inventory.sbom.CommandRunner.CommandResult;
+import com.aegis.core.platform.common.ApiExceptions;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

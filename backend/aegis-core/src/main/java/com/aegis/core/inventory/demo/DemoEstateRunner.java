@@ -1,6 +1,6 @@
 package com.aegis.core.inventory.demo;
 
-import com.aegis.core.tenant.CurrentOrg;
+import com.aegis.core.platform.tenant.CurrentOrg;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;

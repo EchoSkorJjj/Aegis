@@ -4,11 +4,11 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-import com.aegis.core.ingestion.advisory.Advisory;
-import com.aegis.core.ingestion.advisory.AdvisoryStore;
-import com.aegis.core.ingestion.advisory.AffectedProduct;
-import com.aegis.core.ingestion.incident.VendorIncident;
-import com.aegis.core.ingestion.incident.VendorIncidentStore;
+import com.aegis.core.advisories.Advisory;
+import com.aegis.core.advisories.AdvisoryStore;
+import com.aegis.core.advisories.AffectedProduct;
+import com.aegis.core.incidents.VendorIncident;
+import com.aegis.core.incidents.VendorIncidentStore;
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
