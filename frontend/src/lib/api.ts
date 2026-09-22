@@ -362,6 +362,22 @@ export const inventoryApi = {
     });
   },
 
+  /**
+   * Generate a CycloneDX SBOM from a Git repository (the backend shallow-clones it and runs syft) and
+   * import it into the service. `ref` is an optional branch/tag; `token` is an optional access token for
+   * a private repository (used transiently for the clone, never stored).
+   */
+  generateSbomFromRepo(serviceId: string, repoUrl: string, ref?: string, token?: string) {
+    return bffFetch<SbomImportResult>(`/api/inventory/services/${serviceId}/sbom/from-repo`, {
+      method: "POST",
+      body: JSON.stringify({
+        repoUrl,
+        ref: ref?.trim() || undefined,
+        token: token?.trim() || undefined,
+      }),
+    });
+  },
+
   /** Services + owners impacted by a component, including those reached transitively. */
   componentImpact(id: string) {
     return bffFetch<ComponentImpact>(`/api/inventory/components/${id}/impact`);

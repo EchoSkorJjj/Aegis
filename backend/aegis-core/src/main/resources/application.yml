@@ -54,6 +54,24 @@ aegis:
   # Opt-in: load the fictional demo estate (classpath:demo/) at startup. Idempotent; dev/demo only.
   demo:
     seed-enabled: ${AEGIS_DEMO_SEED_ENABLED:false}
+  inventory:
+    # Generate a service's CycloneDX SBOM straight from a Git repo: shallow-clone it and run syft (a
+    # STATIC cataloguer — it never runs a package manager or the repo's own code). Needs git + syft on
+    # the image (the Dockerfile installs both). Every axis is bounded; disable to hide the endpoint and
+    # keep only the manual CycloneDX upload.
+    sbom-generation:
+      enabled: ${AEGIS_SBOM_GENERATION_ENABLED:true}
+      # Hosts that may be cloned (public or, with a per-request access token, private). Never an
+      # internal or arbitrary host — this is the SSRF boundary. Add a self-hosted GitLab/Gitea host here.
+      allowed-hosts: ${AEGIS_SBOM_ALLOWED_HOSTS:github.com,gitlab.com,bitbucket.org}
+      git-path: ${AEGIS_SBOM_GIT_PATH:git}
+      syft-path: ${AEGIS_SBOM_SYFT_PATH:syft}
+      clone-timeout: ${AEGIS_SBOM_CLONE_TIMEOUT:PT90S}
+      scan-timeout: ${AEGIS_SBOM_SCAN_TIMEOUT:PT180S}
+      # Reject a checkout larger than this before syft walks it (default 512 MiB).
+      max-repo-bytes: ${AEGIS_SBOM_MAX_REPO_BYTES:536870912}
+      # Cap the SBOM syft emits before it is parsed into memory (default 64 MiB).
+      max-sbom-bytes: ${AEGIS_SBOM_MAX_SBOM_BYTES:67108864}
   # Impact scoring (E7). Every number the model multiplies, overridable per deployment: the weighting
   # is the part a security team argues with, not the arithmetic. Each factor is a multiplier in [0,1],
   # so the score stays a 0-100 percentage of the worst case. Omit any entry to keep its default, and
