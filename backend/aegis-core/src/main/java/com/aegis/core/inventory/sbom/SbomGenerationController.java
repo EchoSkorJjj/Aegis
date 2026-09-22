@@ -2,10 +2,11 @@ package com.aegis.core.inventory.sbom;
 
 import java.util.UUID;
 
+import jakarta.validation.Valid;
+
 import com.aegis.core.inventory.InventoryRoles;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
-import jakarta.validation.Valid;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PathVariable;
