@@ -9,7 +9,9 @@ import org.springframework.http.MediaType;
 
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.everyItem;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasItems;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -98,6 +100,44 @@ class OrgUserAdminIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.id").value(a.userId()))
                 .andExpect(jsonPath("$.displayName").value("Renamed Owner"))
                 .andExpect(jsonPath("$.roles", hasItems("ORG_ADMIN")));
+    }
+
+    @Test
+    void roleFilterListsOnlyMembersHoldingThatRoleInTheCallersOrg() throws Exception {
+        Owner a = signUpOrg("Org " + UUID.randomUUID());
+        Owner b = signUpOrg("Org " + UUID.randomUUID());
+        String serviceOwner = "so-" + UUID.randomUUID() + "@example.com";
+        String analyst = "analyst-" + UUID.randomUUID() + "@example.com";
+        String ownerElsewhere = "elsewhere-" + UUID.randomUUID() + "@example.com";
+
+        invite(a, serviceOwner, "SERVICE_OWNER");
+        invite(a, analyst, "ANALYST");
+        // The same person is only an ANALYST in A, but a SERVICE_OWNER in B.
+        invite(a, ownerElsewhere, "ANALYST");
+        invite(b, ownerElsewhere, "SERVICE_OWNER");
+
+        mvc.perform(get("/users").param("role", "SERVICE_OWNER").param("size", "100")
+                        .header("Authorization", "Bearer " + a.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[*].email", hasItem(serviceOwner)))
+                .andExpect(jsonPath("$.content[*].email", not(hasItem(analyst))))
+                // Roles are per-membership: a service owner in B is not one in A.
+                .andExpect(jsonPath("$.content[*].email", not(hasItem(ownerElsewhere))))
+                .andExpect(jsonPath("$.content[*].roles", everyItem(hasItem("SERVICE_OWNER"))));
+
+        mvc.perform(get("/users").param("role", "SERVICE_OWNER").param("size", "100")
+                        .header("Authorization", "Bearer " + b.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[*].email", hasItem(ownerElsewhere)))
+                .andExpect(jsonPath("$.content[*].email", not(hasItem(serviceOwner))));
+    }
+
+    private void invite(Owner admin, String email, String role) throws Exception {
+        mvc.perform(post("/users")
+                        .header("Authorization", "Bearer " + admin.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + email + "\",\"displayName\":\"Member\",\"roles\":[\"" + role + "\"]}"))
+                .andExpect(status().isCreated());
     }
 
     private Owner signUpOrg(String orgName) throws Exception {
