@@ -2,7 +2,7 @@ package com.aegis.core.matching;
 
 import java.util.OptionalInt;
 
-import com.aegis.core.ingestion.advisory.AffectedProduct;
+import com.aegis.core.advisories.AffectedProduct;
 import com.aegis.core.matching.MatchingDtos.VersionMatch;
 
 /**

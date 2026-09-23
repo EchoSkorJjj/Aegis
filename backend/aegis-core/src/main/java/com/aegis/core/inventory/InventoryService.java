@@ -10,7 +10,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import com.aegis.core.common.ApiExceptions;
 import com.aegis.core.inventory.InventoryDtos.BusinessServiceResponse;
 import com.aegis.core.inventory.InventoryDtos.ComponentImpactResponse;
 import com.aegis.core.inventory.InventoryDtos.ComponentImpactedServiceResponse;
@@ -26,6 +25,7 @@ import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
+import com.aegis.core.platform.common.ApiExceptions;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;

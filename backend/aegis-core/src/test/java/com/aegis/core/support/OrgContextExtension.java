@@ -4,7 +4,7 @@ import java.lang.reflect.Method;
 import java.util.UUID;
 
 import com.aegis.core.inventory.demo.DemoEstateSeeder;
-import com.aegis.core.tenant.CurrentOrg;
+import com.aegis.core.platform.tenant.CurrentOrg;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.InvocationInterceptor;
 import org.junit.jupiter.api.extension.ReflectiveInvocationContext;

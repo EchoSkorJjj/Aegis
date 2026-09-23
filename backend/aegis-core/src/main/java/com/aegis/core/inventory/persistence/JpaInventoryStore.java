@@ -30,7 +30,7 @@ import com.aegis.core.inventory.domain.InventoryEntity;
 import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
-import com.aegis.core.tenant.CurrentOrg;
+import com.aegis.core.platform.tenant.CurrentOrg;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;

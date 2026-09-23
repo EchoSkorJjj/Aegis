@@ -4,8 +4,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-import com.aegis.core.ingestion.advisory.Advisory;
-import com.aegis.core.ingestion.advisory.AffectedProduct;
+import com.aegis.core.advisories.Advisory;
+import com.aegis.core.advisories.AffectedProduct;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import org.junit.jupiter.api.Test;
 

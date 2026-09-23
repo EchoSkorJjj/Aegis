@@ -2,7 +2,7 @@ package com.aegis.core.matching;
 
 import java.util.Locale;
 
-import com.aegis.core.ingestion.advisory.AffectedProduct;
+import com.aegis.core.advisories.AffectedProduct;
 
 /**
  * Reconciles the ecosystem names OSV, purl, and inventory components use (OSV "PyPI" vs purl "pypi",

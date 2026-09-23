@@ -11,12 +11,12 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 import jakarta.persistence.Table;
 
-import com.aegis.core.common.ApiExceptions;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
+import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.support.AbstractInventoryIntegrationTest;
 import org.hibernate.Hibernate;
 import org.junit.jupiter.api.Test;

@@ -3,11 +3,11 @@ package com.aegis.core.scoring;
 import java.time.Instant;
 import java.util.UUID;
 
-import com.aegis.core.ingestion.signal.ChangeSignal.SignalType;
-import com.aegis.core.ingestion.signal.ChangeSignalFilter;
 import com.aegis.core.inventory.InventoryRoles;
 import com.aegis.core.scoring.ScoringDtos.ChangeImpactResponse;
 import com.aegis.core.scoring.ScoringDtos.EstateRollupResponse;
+import com.aegis.core.signals.ChangeSignal.SignalType;
+import com.aegis.core.signals.ChangeSignalFilter;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import org.springframework.format.annotation.DateTimeFormat;

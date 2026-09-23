@@ -14,12 +14,12 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
-import com.aegis.core.common.ApiExceptions;
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.sbom.CycloneDxBom.Component;
 import com.aegis.core.inventory.sbom.CycloneDxBom.Dependency;
+import com.aegis.core.platform.common.ApiExceptions;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 

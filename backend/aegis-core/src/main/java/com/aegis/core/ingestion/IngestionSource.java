@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * A pollable external feed (advisories, vendor status, threat intel). Each connector implements this
  * as a Spring {@code @Component}; the {@link IngestionScheduler} discovers every such bean and polls
- * it on a schedule. {@code com.aegis.core.ingestion.nvd.NvdSource} is the worked example; OSV, vendor
+ * it on a schedule. {@code com.aegis.core.ingestion.connectors.nvd.NvdSource} is the worked example; OSV, vendor
  * status, and news connectors plug in the same way.
  *
  * <p>Give a connector its own HTTP client with explicit connect and read timeouts. Do not inject the

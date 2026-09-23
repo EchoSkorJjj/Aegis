@@ -14,21 +14,29 @@ import { REFRESH_COOKIE } from "@/lib/auth-cookies";
  * forged/stale cookie earns is a brief render before `/api/auth/me` returns 401
  * and the app redirects back to /login.
  */
+// Authenticated app-shell route prefixes. Keep in sync with `config.matcher` below: the matcher
+// decides which requests run this proxy at all; this list decides which of those need a session.
+// Admin/domain-role enforcement stays on the backend (403) and the page itself — this only checks
+// that a session exists.
+const PROTECTED_PREFIXES = [
+  "/dashboard",
+  "/inventory",
+  "/advisories",
+  "/findings",
+  "/responses",
+  "/reports",
+  "/admin",
+  "/organizations",
+  "/settings",
+];
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hasSession = request.cookies.has(REFRESH_COOKIE);
 
-  // Protect the authenticated app shell. Admin-role enforcement stays on the backend
-  // (403) and the page itself; this only checks that a session exists.
-  const isProtected =
-    pathname === "/dashboard" ||
-    pathname.startsWith("/dashboard/") ||
-    pathname === "/admin" ||
-    pathname.startsWith("/admin/") ||
-    pathname === "/organizations" ||
-    pathname.startsWith("/organizations/") ||
-    pathname === "/settings" ||
-    pathname.startsWith("/settings/");
+  const isProtected = PROTECTED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
   if (isProtected) {
     if (!hasSession) {
       const loginUrl = new URL("/login", request.url);
@@ -50,6 +58,16 @@ export const config = {
   matcher: [
     "/dashboard",
     "/dashboard/:path*",
+    "/inventory",
+    "/inventory/:path*",
+    "/advisories",
+    "/advisories/:path*",
+    "/findings",
+    "/findings/:path*",
+    "/responses",
+    "/responses/:path*",
+    "/reports",
+    "/reports/:path*",
     "/admin",
     "/admin/:path*",
     "/organizations",

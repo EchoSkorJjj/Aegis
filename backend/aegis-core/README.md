@@ -21,14 +21,24 @@ See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../..
 
 ## Modules (a modular monolith, split by seams later)
 
+Top-level packages are the seams; ArchUnit (`PackageStructureArchTest`) enforces the boundaries below —
+persistence stays behind each module's `Store` port, the ingestion framework stays independent of its
+connectors and the domains, `platform` depends on no feature, no controller lives under `ingestion`,
+and the modules are cycle-free.
+
 | Package | Responsibility |
 |---|---|
-| `inventory` | Services, components, vendors, SBOM dependencies, ownership — the map |
-| `ingestion` | Scheduled feed polling (NVD, vendor status, security news) → advisories, incidents, news, unified into `change_signals` |
-| `matching`  | Advisory package + version range → components → impacted services/owners + evidence chains |
-| `scoring`   | Deterministic impact score per service and owner, with a "why" breakdown |
-| `actions`   | Execute human-approved responses (PR / ticket / memo), audited |
-| `ai`        | **Port** to the Python ai-service: `AiAssessor` / `AiDrafter` + DTOs + `HttpAiClient` |
+| `platform`   | Cross-cutting foundation: the `ApiError` contract, security/OpenAPI config, tenancy (`CurrentOrg`), ping |
+| `ingestion`  | The pipeline framework (scheduled poll → dedup → raw-event store → drain); source connectors under `ingestion.connectors` (NVD, OSV, vendor status, security news) |
+| `advisories` | Normalised advisories (NVD/OSV) + read API |
+| `incidents`  | Normalised vendor incidents (status pages) + read API |
+| `news`       | Security-news articles with extracted CVE references + read API |
+| `signals`    | The unified read-only `change_signals` view over advisories, incidents, and news |
+| `inventory`  | Services, components, vendors, SBOM dependencies, ownership — the map |
+| `matching`   | Advisory package + version range → components → impacted services/owners + evidence chains |
+| `scoring`    | Deterministic impact score per service and owner, with a "why" breakdown |
+| `actions`    | Execute human-approved responses (PR / ticket / memo), audited |
+| `ai`         | **Port** to the Python ai-service: `AiAssessor` / `AiDrafter` + DTOs + `HttpAiClient` |
 
 ## The AI boundary
 

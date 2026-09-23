@@ -3,14 +3,14 @@ package com.aegis.core.matching;
 import java.util.List;
 import java.util.UUID;
 
-import com.aegis.core.ingestion.advisory.AffectedProduct;
-import com.aegis.core.ingestion.signal.ChangeSignal;
+import com.aegis.core.advisories.AffectedProduct;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
+import com.aegis.core.signals.ChangeSignal;
 
 /** Wire records for deterministic change-to-estate matching and its evidence chains. */
 public final class MatchingDtos {

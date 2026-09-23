@@ -4,8 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-import com.aegis.core.ingestion.advisory.Advisory;
-import com.aegis.core.ingestion.advisory.AffectedProduct;
+import com.aegis.core.advisories.Advisory;
+import com.aegis.core.advisories.AffectedProduct;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.matching.MatchingDtos.IdentityMatch;
 import com.aegis.core.matching.MatchingDtos.MatchConfidence;

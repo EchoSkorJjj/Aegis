@@ -11,7 +11,6 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import com.aegis.core.common.ApiExceptions;
 import com.aegis.core.inventory.InventoryDtos.ComponentImpactResponse;
 import com.aegis.core.inventory.InventoryDtos.ComponentImpactedServiceResponse;
 import com.aegis.core.inventory.InventoryDtos.VendorImpactResponse;
@@ -21,6 +20,7 @@ import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
+import com.aegis.core.platform.common.ApiExceptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

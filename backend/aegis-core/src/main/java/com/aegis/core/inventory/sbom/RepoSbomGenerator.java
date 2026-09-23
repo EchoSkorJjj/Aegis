@@ -18,8 +18,8 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
-import com.aegis.core.common.ApiExceptions;
 import com.aegis.core.inventory.sbom.CommandRunner.CommandResult;
+import com.aegis.core.platform.common.ApiExceptions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;

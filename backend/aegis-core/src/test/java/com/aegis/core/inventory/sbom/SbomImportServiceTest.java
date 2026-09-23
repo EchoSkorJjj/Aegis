@@ -12,7 +12,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
-import com.aegis.core.common.ApiExceptions;
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.domain.BusinessCriticality;
@@ -20,6 +19,7 @@ import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.sbom.CycloneDxBom.Component;
 import com.aegis.core.inventory.sbom.CycloneDxBom.Dependency;
+import com.aegis.core.platform.common.ApiExceptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
