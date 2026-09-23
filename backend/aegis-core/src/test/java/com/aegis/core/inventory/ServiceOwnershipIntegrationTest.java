@@ -1,8 +1,5 @@
 package com.aegis.core.inventory;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.Set;
 import java.util.UUID;
 
@@ -41,8 +38,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * or re-staff a service.
  */
 class ServiceOwnershipIntegrationTest extends AbstractInventoryIntegrationTest {
-
-    private static final String SBOM_FIXTURE = "fixtures/sbom/storefront.cdx.json";
 
     @Autowired
     private InventoryService inventory;
@@ -173,15 +168,16 @@ class ServiceOwnershipIntegrationTest extends AbstractInventoryIntegrationTest {
                         .with(serviceOwner(me.getUserId())))
                 .andExpect(status().isNoContent());
         mvc.perform(post("/api/inventory/services/{sid}/sbom", mine.getId()).with(serviceOwner(me.getUserId()))
-                        .contentType(MediaType.APPLICATION_JSON).content(sbom()))
-                .andExpect(status().isOk());
+                        .contentType(MediaType.APPLICATION_JSON).content(uniqueSbom()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.componentsCreated").value(1));
 
         // Someone else's service: refused.
         mvc.perform(post("/api/inventory/services/{sid}/vendors/{vid}", theirs.getId(), vendor.getId())
                         .with(serviceOwner(me.getUserId())))
                 .andExpect(status().isForbidden());
         mvc.perform(post("/api/inventory/services/{sid}/sbom", theirs.getId()).with(serviceOwner(me.getUserId()))
-                        .contentType(MediaType.APPLICATION_JSON).content(sbom()))
+                        .contentType(MediaType.APPLICATION_JSON).content(uniqueSbom()))
                 .andExpect(status().isForbidden());
 
         // Governance may compose any service.
@@ -264,9 +260,16 @@ class ServiceOwnershipIntegrationTest extends AbstractInventoryIntegrationTest {
                 .authorities(new SimpleGrantedAuthority("ROLE_SERVICE_OWNER"));
     }
 
-    private static String sbom() throws IOException {
-        try (InputStream in = ServiceOwnershipIntegrationTest.class.getClassLoader().getResourceAsStream(SBOM_FIXTURE)) {
-            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
-        }
+    /**
+     * A one-component SBOM whose package exists nowhere else. The suite shares one database and one org,
+     * so importing a shared fixture here would pre-create its components and break any test that counts
+     * what its own import created (this exact collision once failed SbomImportApiIntegrationTest in CI).
+     */
+    private static String uniqueSbom() {
+        String name = "owner-composed-" + UUID.randomUUID();
+        return """
+                {"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+                  {"type":"library","name":"%s","version":"1.0.0","purl":"pkg:npm/%s@1.0.0"}]}
+                """.formatted(name, name);
     }
 }
