@@ -7,6 +7,7 @@ import java.util.UUID;
 
 import jakarta.validation.Valid;
 
+import com.aegis.core.inventory.InventoryDtos.AssignOwnerRequest;
 import com.aegis.core.inventory.InventoryDtos.BusinessServiceRequest;
 import com.aegis.core.inventory.InventoryDtos.BusinessServiceResponse;
 import com.aegis.core.inventory.InventoryDtos.ComponentImpactResponse;
@@ -199,17 +200,10 @@ public class InventoryController {
         return ResponseEntity.noContent().build();
     }
 
-    @PostMapping("/owners")
-    @PreAuthorize(InventoryRoles.WRITE)
-    @Operation(summary = "Create an owner")
-    public ResponseEntity<OwnerResponse> createOwner(@Valid @RequestBody NamedInventoryRequest request) {
-        OwnerResponse response = OwnerResponse.from(inventory.createOwner(request.name()));
-        return ResponseEntity.created(uri("/api/inventory/owners/" + response.id())).body(response);
-    }
-
     @GetMapping("/owners")
     @PreAuthorize(InventoryRoles.READ)
-    @Operation(summary = "List owners, optionally filtered by name and created date")
+    @Operation(summary = "List the people assigned as owners of at least one service, optionally filtered "
+            + "by name/email and created date")
     public Page<OwnerResponse> listOwners(
             @RequestParam(required = false) String search,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
@@ -227,21 +221,6 @@ public class InventoryController {
         return OwnerResponse.from(inventory.getOwner(id));
     }
 
-    @PutMapping("/owners/{id}")
-    @PreAuthorize(InventoryRoles.WRITE)
-    @Operation(summary = "Replace an owner")
-    public OwnerResponse updateOwner(@PathVariable UUID id, @Valid @RequestBody NamedInventoryRequest request) {
-        return OwnerResponse.from(inventory.updateOwner(id, request.name()));
-    }
-
-    @DeleteMapping("/owners/{id}")
-    @PreAuthorize(InventoryRoles.WRITE)
-    @Operation(summary = "Delete an owner and its relationship edges")
-    public ResponseEntity<Void> deleteOwner(@PathVariable UUID id) {
-        inventory.deleteOwner(id);
-        return ResponseEntity.noContent().build();
-    }
-
     @GetMapping("/services/{serviceId}/components")
     @PreAuthorize(InventoryRoles.READ)
     @Operation(summary = "List a business service's components")
@@ -252,8 +231,8 @@ public class InventoryController {
     }
 
     @PostMapping("/services/{serviceId}/components/{componentId}")
-    @PreAuthorize(InventoryRoles.WRITE)
-    @Operation(summary = "Link a component to a business service")
+    @PreAuthorize(InventoryRoles.COMPOSE)
+    @Operation(summary = "Link a component to a business service (governance roles, or the service's owners)")
     public ResponseEntity<Void> addServiceComponent(
             @PathVariable UUID serviceId, @PathVariable UUID componentId) {
         inventory.addServiceComponent(serviceId, componentId);
@@ -261,8 +240,8 @@ public class InventoryController {
     }
 
     @DeleteMapping("/services/{serviceId}/components/{componentId}")
-    @PreAuthorize(InventoryRoles.WRITE)
-    @Operation(summary = "Unlink a component from a business service")
+    @PreAuthorize(InventoryRoles.COMPOSE)
+    @Operation(summary = "Unlink a component from a business service (governance roles, or the service's owners)")
     public ResponseEntity<Void> removeServiceComponent(
             @PathVariable UUID serviceId, @PathVariable UUID componentId) {
         inventory.removeServiceComponent(serviceId, componentId);
@@ -279,16 +258,16 @@ public class InventoryController {
     }
 
     @PostMapping("/services/{serviceId}/vendors/{vendorId}")
-    @PreAuthorize(InventoryRoles.WRITE)
-    @Operation(summary = "Link a vendor to a business service")
+    @PreAuthorize(InventoryRoles.COMPOSE)
+    @Operation(summary = "Link a vendor to a business service (governance roles, or the service's owners)")
     public ResponseEntity<Void> addServiceVendor(@PathVariable UUID serviceId, @PathVariable UUID vendorId) {
         inventory.addServiceVendor(serviceId, vendorId);
         return relationshipCreated("/api/inventory/services/" + serviceId + "/vendors/" + vendorId);
     }
 
     @DeleteMapping("/services/{serviceId}/vendors/{vendorId}")
-    @PreAuthorize(InventoryRoles.WRITE)
-    @Operation(summary = "Unlink a vendor from a business service")
+    @PreAuthorize(InventoryRoles.COMPOSE)
+    @Operation(summary = "Unlink a vendor from a business service (governance roles, or the service's owners)")
     public ResponseEntity<Void> removeServiceVendor(@PathVariable UUID serviceId, @PathVariable UUID vendorId) {
         inventory.removeServiceVendor(serviceId, vendorId);
         return ResponseEntity.noContent().build();
@@ -303,12 +282,15 @@ public class InventoryController {
         return inventory.listServiceOwners(serviceId, pageable).map(OwnerResponse::from);
     }
 
-    @PostMapping("/services/{serviceId}/owners/{ownerId}")
+    @PostMapping("/services/{serviceId}/owners")
     @PreAuthorize(InventoryRoles.WRITE)
-    @Operation(summary = "Link an owner to a business service")
-    public ResponseEntity<Void> addServiceOwner(@PathVariable UUID serviceId, @PathVariable UUID ownerId) {
-        inventory.addServiceOwner(serviceId, ownerId);
-        return relationshipCreated("/api/inventory/services/" + serviceId + "/owners/" + ownerId);
+    @Operation(summary = "Assign an organization member holding the Service Owner role as one of a service's "
+            + "owners (verified against identity-service)")
+    public ResponseEntity<OwnerResponse> assignServiceOwner(
+            @PathVariable UUID serviceId, @Valid @RequestBody AssignOwnerRequest request) {
+        OwnerResponse response = OwnerResponse.from(inventory.assignServiceOwner(serviceId, request.userId()));
+        return ResponseEntity.created(uri("/api/inventory/services/" + serviceId + "/owners/" + response.id()))
+                .body(response);
     }
 
     @DeleteMapping("/services/{serviceId}/owners/{ownerId}")

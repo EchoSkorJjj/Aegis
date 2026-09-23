@@ -11,6 +11,7 @@ import com.aegis.core.advisories.AdvisoryStore;
 import com.aegis.core.advisories.AffectedProduct;
 import com.aegis.core.incidents.VendorIncident;
 import com.aegis.core.incidents.VendorIncidentStore;
+import com.aegis.core.inventory.InventoryRoles;
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
@@ -20,7 +21,9 @@ import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
 import com.aegis.core.news.NewsItem;
 import com.aegis.core.news.NewsItemStore;
+import com.aegis.core.platform.identity.DirectoryUser;
 import com.aegis.core.support.AbstractInventoryIntegrationTest;
+import com.aegis.core.support.TestOwners;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -37,6 +40,9 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
     private InventoryService inventory;
 
     @Autowired
+    private TestOwners owners;
+
+    @Autowired
     private AdvisoryStore advisories;
 
     @Autowired
@@ -50,8 +56,7 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
         String suffix = UUID.randomUUID().toString();
         BusinessService portal = inventory.createBusinessService(
                 "Portal " + suffix, BusinessCriticality.CRITICAL, ServiceExposure.INTERNET_FACING);
-        Owner owner = inventory.createOwner("Web team " + suffix);
-        inventory.addServiceOwner(portal.getId(), owner.getId());
+        Owner owner = owners.assign(portal.getId(), "Web team " + suffix);
 
         String packageName = "score-lib-" + suffix;
         SoftwareComponent vulnerable = inventory.createSoftwareComponent(
@@ -92,14 +97,14 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
     @Test
     void ranksAnIsolatedLowTierServiceBelowAPublicCriticalOneForTheSameAdvisory() throws Exception {
         String suffix = UUID.randomUUID().toString();
-        // Same owner on both, so the roll-up has to pick the worse of the two.
-        Owner owner = inventory.createOwner("Shared team " + suffix);
+        // Same owner (one person) on both, so the roll-up has to pick the worse of the two.
+        DirectoryUser sharedMember = owners.directory().member("Shared team " + suffix, InventoryRoles.SERVICE_OWNER);
         BusinessService exposed = inventory.createBusinessService(
                 "Aaa exposed " + suffix, BusinessCriticality.CRITICAL, ServiceExposure.INTERNET_FACING);
         BusinessService hidden = inventory.createBusinessService(
                 "Bbb hidden " + suffix, BusinessCriticality.LOW, ServiceExposure.ISOLATED);
-        inventory.addServiceOwner(exposed.getId(), owner.getId());
-        inventory.addServiceOwner(hidden.getId(), owner.getId());
+        Owner owner = owners.assign(exposed.getId(), sharedMember);
+        owners.assign(hidden.getId(), sharedMember);
 
         String packageName = "shared-lib-" + suffix;
         SoftwareComponent vulnerable = inventory.createSoftwareComponent(
@@ -201,13 +206,13 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
         // The integration suite shares one database, so the roll-up is narrowed with `search` to this
         // test's own signals — a global count here would break the moment another suite seeds a row.
         String tag = Long.toHexString(Math.abs(UUID.randomUUID().getMostSignificantBits()));
-        Owner owner = inventory.createOwner("Rollup team " + tag);
+        DirectoryUser rollupMember = owners.directory().member("Rollup team " + tag, InventoryRoles.SERVICE_OWNER);
         BusinessService exposed = inventory.createBusinessService(
                 "Rollup exposed " + tag, BusinessCriticality.CRITICAL, ServiceExposure.INTERNET_FACING);
         BusinessService hidden = inventory.createBusinessService(
                 "Rollup hidden " + tag, BusinessCriticality.LOW, ServiceExposure.ISOLATED);
-        inventory.addServiceOwner(exposed.getId(), owner.getId());
-        inventory.addServiceOwner(hidden.getId(), owner.getId());
+        Owner owner = owners.assign(exposed.getId(), rollupMember);
+        owners.assign(hidden.getId(), rollupMember);
 
         String packageName = "rollup-lib-" + tag;
         SoftwareComponent vulnerable = inventory.createSoftwareComponent(

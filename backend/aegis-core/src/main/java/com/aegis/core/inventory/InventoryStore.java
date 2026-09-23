@@ -51,10 +51,18 @@ public interface InventoryStore {
 
     Owner save(Owner value);
     Optional<Owner> findOwner(UUID id);
+    /** Owners in the caller's org; {@code search} matches the display name or email. */
     Page<Owner> findOwners(NamedFilter filter, Pageable pageable);
-    Optional<Owner> findOwnerByName(String name);
-    boolean ownerNameExists(String name, UUID excludingId);
-    void deleteOwner(UUID id);
+    /** The owner row for this identity-service user in the caller's org, if they own anything. */
+    Optional<Owner> findOwnerByUserId(UUID userId);
+    /** True when this identity-service user is one of the service's assigned owners. */
+    boolean isServiceOwnedBy(UUID serviceId, UUID userId);
+    /**
+     * Drop owners no longer linked to any service, so the owners list is exactly the people currently
+     * accountable for something. Flushes pending deletes first (a deleted service's owner links vanish
+     * by DB cascade, which only happens once the delete reaches the database).
+     */
+    void deleteOrphanedOwners();
 
     boolean serviceComponentExists(UUID serviceId, UUID componentId);
     void addServiceComponent(UUID serviceId, UUID componentId);

@@ -152,8 +152,8 @@ class ScoringServiceTest {
     void rollsUpToAnOwnersWorstServiceRatherThanTheSumOfTheirServices() {
         UUID signalId = UUID.randomUUID();
         ChangeSignal signal = signal(signalId, SignalType.VULNERABILITY, null);
-        OwnerRef web = new OwnerRef(UUID.randomUUID(), "Web Platform Team");
-        OwnerRef data = new OwnerRef(UUID.randomUUID(), "Data Team");
+        OwnerRef web = new OwnerRef(UUID.randomUUID(), UUID.randomUUID(), "Web Platform Team");
+        OwnerRef data = new OwnerRef(UUID.randomUUID(), UUID.randomUUID(), "Data Team");
         ServiceRef portal = service("Customer Portal", BusinessCriticality.HIGH, ServiceExposure.INTERNET_FACING);
         ServiceRef marketing = service("Marketing Site", BusinessCriticality.MEDIUM, ServiceExposure.INTERNET_FACING);
         ServiceRef reporting = service("Internal Reporting", BusinessCriticality.LOW, ServiceExposure.ISOLATED);

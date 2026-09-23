@@ -26,7 +26,7 @@ import org.springframework.stereotype.Component;
  * until a deployment configures a discount (see {@link ScoringProperties}).
  *
  * <p>Nothing here interprets advisory prose or calls a model. Severity is the number the feed already
- * published; everything else is an attribute the owner declared on the service.
+ * published; everything else is an attribute declared on the service (its criticality and exposure).
  */
 @Component
 public class ImpactScorer {

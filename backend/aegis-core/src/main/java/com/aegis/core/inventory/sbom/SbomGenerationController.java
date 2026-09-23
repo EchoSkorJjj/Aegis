@@ -33,8 +33,9 @@ public class SbomGenerationController {
     }
 
     @PostMapping("/services/{serviceId}/sbom/from-repo")
-    @PreAuthorize(InventoryRoles.WRITE)
-    @Operation(summary = "Generate a CycloneDX SBOM from a Git repository (syft) and import it into the service")
+    @PreAuthorize(InventoryRoles.COMPOSE)
+    @Operation(summary = "Generate a CycloneDX SBOM from a Git repository (syft) and import it into the service "
+            + "(governance roles, or the service's owners)")
     public SbomImportResult importFromRepo(@PathVariable UUID serviceId, @Valid @RequestBody RepoSbomRequest request) {
         return generation.importFromRepo(serviceId, request.repoUrl(), request.ref(), request.token());
     }

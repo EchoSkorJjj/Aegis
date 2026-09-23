@@ -51,6 +51,11 @@ aegis:
   ai:
     base-url: ${AI_SERVICE_URI:http://localhost:8083}
     service-token: ${AI_SERVICE_TOKEN:dev-internal-token-change-me}
+  # identity-service's member directory — e.g. to verify that a service's assigned owner is a member of
+  # the caller's organization holding the SERVICE_OWNER role. Called with the CALLER's own access token
+  # (token relay), so identity-service applies the caller's org scope; never with a service credential.
+  identity:
+    base-url: ${IDENTITY_BASE_URL:http://localhost:8081}
   # Opt-in: load the fictional demo estate (classpath:demo/) at startup. Idempotent; dev/demo only.
   demo:
     seed-enabled: ${AEGIS_DEMO_SEED_ENABLED:false}

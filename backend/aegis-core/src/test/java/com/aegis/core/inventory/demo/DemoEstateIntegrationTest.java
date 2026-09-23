@@ -5,7 +5,6 @@ import java.util.UUID;
 import com.aegis.core.inventory.InventoryFilters;
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
-import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.support.AbstractInventoryIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,7 +17,6 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
-import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -65,8 +63,9 @@ class DemoEstateIntegrationTest extends AbstractInventoryIntegrationTest {
                         "org.springframework.boot:spring-boot-starter-web",
                         "org.springframework.boot:spring-boot-starter-log4j2",
                         "org.postgresql:postgresql");
-        assertThat(inventory.listServiceOwners(payments, ALL).getContent())
-                .extracting(Owner::getName).containsExactlyInAnyOrder("Payments Team", "Platform SRE");
+        // The seed assigns no owners: an owner is a verified organization member, and the seed runs with
+        // no user to verify one against (DemoEstateSeeder). They are assigned from each service's page.
+        assertThat(inventory.listServiceOwners(payments, ALL).getContent()).isEmpty();
         assertThat(store.findSoftwareComponentByCoordinates("maven", "com.demo:payments-api", "1.4.0"))
                 .as("the SBOM root is the service itself, not a component").isEmpty();
     }
@@ -76,13 +75,13 @@ class DemoEstateIntegrationTest extends AbstractInventoryIntegrationTest {
         componentImpact("maven", "org.apache.logging.log4j:log4j-core", "2.14.1")
                 .andExpect(jsonPath("$.services[*].service.name", contains("Order Service", "Payments API")))
                 .andExpect(jsonPath("$.services[0].direct").value(true))
-                .andExpect(jsonPath("$.services[0].owners[*].name", contains("Commerce Team")))
+                .andExpect(jsonPath("$.services[0].owners").isEmpty())
                 .andExpect(jsonPath("$.services[1].direct").value(false))
                 .andExpect(jsonPath("$.services[1].service.criticality").value("CRITICAL"))
                 .andExpect(jsonPath("$.services[1].viaComponent.name")
                         .value("org.springframework.boot:spring-boot-starter-log4j2"))
-                .andExpect(jsonPath("$.services[1].owners[*].name",
-                        containsInAnyOrder("Payments Team", "Platform SRE")));
+                // The demo seeds no owners (owners are verified organization members).
+                .andExpect(jsonPath("$.services[1].owners").isEmpty());
     }
 
     @Test
@@ -113,7 +112,7 @@ class DemoEstateIntegrationTest extends AbstractInventoryIntegrationTest {
         componentImpact("pypi", "urllib3", "1.26.4")
                 .andExpect(jsonPath("$.services[*].service.name", contains("Internal Reporting")))
                 .andExpect(jsonPath("$.services[0].viaComponent.name").value("requests"))
-                .andExpect(jsonPath("$.services[0].owners[*].name", contains("Data Team")));
+                .andExpect(jsonPath("$.services[0].owners").isEmpty());
     }
 
     @Test
@@ -122,7 +121,7 @@ class DemoEstateIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.services[*].service.name", contains("Order Service", "Payments API")));
         vendorImpact("Cloudflare")
                 .andExpect(jsonPath("$.services[*].service.name", contains("Customer Portal", "Marketing Site")))
-                .andExpect(jsonPath("$.services[1].owners[*].name", contains("Web Platform Team")));
+                .andExpect(jsonPath("$.services[1].owners").isEmpty());
     }
 
     private ResultActions componentImpact(String ecosystem, String name, String version) throws Exception {

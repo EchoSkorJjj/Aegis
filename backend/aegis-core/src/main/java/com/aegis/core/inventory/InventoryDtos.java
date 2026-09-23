@@ -24,7 +24,7 @@ public final class InventoryDtos {
      * {@code exposure} is optional so a client written before the attribute existed keeps working; it
      * then falls back to {@link BusinessService#DEFAULT_EXPOSURE}. On an update, omitting it keeps the
      * service's current exposure rather than resetting it — a PUT that does not mention the attribute
-     * must not silently downgrade a service the owner declared internet-facing.
+     * must not silently downgrade a service declared internet-facing.
      */
     public record BusinessServiceRequest(
             @NotBlank @Size(max = 255) String name,
@@ -67,11 +67,21 @@ public final class InventoryDtos {
         }
     }
 
-    public record OwnerResponse(UUID id, String name, Instant createdAt, Instant updatedAt) {
+    /**
+     * An owner: an organization member holding {@code SERVICE_OWNER}. {@code userId} is their
+     * identity-service id; {@code name} and {@code email} are the snapshot taken when last assigned.
+     */
+    public record OwnerResponse(
+            UUID id, UUID userId, String name, String email, Instant createdAt, Instant updatedAt) {
         static OwnerResponse from(Owner value) {
             return new OwnerResponse(
-                    value.getId(), value.getName(), value.getCreatedAt(), value.getUpdatedAt());
+                    value.getId(), value.getUserId(), value.getName(), value.getEmail(),
+                    value.getCreatedAt(), value.getUpdatedAt());
         }
+    }
+
+    /** Assign an organization member (by identity-service user id) as one of a service's owners. */
+    public record AssignOwnerRequest(@NotNull UUID userId) {
     }
 
     /** A service impacted through a direct relationship only (e.g. via a vendor). */

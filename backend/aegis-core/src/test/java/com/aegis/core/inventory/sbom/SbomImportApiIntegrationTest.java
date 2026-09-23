@@ -73,8 +73,13 @@ class SbomImportApiIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.services[0].viaComponent.name").value("fixture-web-framework"));
     }
 
+    /**
+     * Importing is governance work, or the service's own owner's (InventoryRoles.COMPOSE). A
+     * SERVICE_OWNER who is not assigned to this service is refused like any non-domain role; the
+     * owner-can-import path is covered by ServiceOwnershipIntegrationTest.
+     */
     @Test
-    void requiresTheInventoryWriteRole() throws Exception {
+    void refusesCallersWhoAreNeitherGovernanceNorAnOwnerOfTheService() throws Exception {
         UUID serviceId = newService();
         String sbom = fixture();
 

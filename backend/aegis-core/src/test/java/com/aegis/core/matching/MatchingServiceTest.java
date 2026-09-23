@@ -70,7 +70,7 @@ class MatchingServiceTest {
         SoftwareComponent vulnerable = component("org.apache.logging.log4j:log4j-core", "2.14.1");
         SoftwareComponent direct = component("com.acme:orders", "1.0.0");
         BusinessService service = new BusinessService(UUID.randomUUID(), "Orders", BusinessCriticality.HIGH);
-        Owner owner = new Owner(UUID.randomUUID(), "Orders team");
+        Owner owner = new Owner(UUID.randomUUID(), UUID.randomUUID(), "Orders team", null);
 
         when(signals.findById(signalId)).thenReturn(Optional.of(signal));
         when(advisories.findByExternalId("nvd", signal.externalId())).thenReturn(Optional.of(advisory));
@@ -112,7 +112,7 @@ class MatchingServiceTest {
                 "investigating", "major", null, null, Instant.EPOCH, null, null);
         ThirdPartyVendor vendor = new ThirdPartyVendor(UUID.randomUUID(), "Acme Cloud");
         BusinessService service = new BusinessService(UUID.randomUUID(), "Checkout", BusinessCriticality.CRITICAL);
-        Owner owner = new Owner(UUID.randomUUID(), "Checkout team");
+        Owner owner = new Owner(UUID.randomUUID(), UUID.randomUUID(), "Checkout team", null);
 
         when(signals.findById(signalId)).thenReturn(Optional.of(signal));
         when(incidents.findByExternalId(signal.sourceId(), signal.externalId())).thenReturn(Optional.of(incident));
