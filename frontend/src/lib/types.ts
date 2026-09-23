@@ -221,15 +221,26 @@ export interface ThirdPartyVendor {
 }
 
 /** An owner (person/team) of a business service. */
+/**
+ * A service owner: an organization member holding SERVICE_OWNER (identity-service). `userId` is who
+ * they are; `name`/`email` are the snapshot aegis-core took when they were last assigned.
+ */
 export interface Owner {
   id: string;
+  userId: string;
   name: string;
+  email: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface OwnerInput {
-  name: string;
+/** A member of the active organization, as identity-service's directory (`GET /users`) returns it. */
+export interface DirectoryMember {
+  id: string;
+  email: string;
+  displayName: string | null;
+  roles: Role[];
+  enabled: boolean;
 }
 
 /** A service impacted by a component — directly, or transitively through a dependency chain. */

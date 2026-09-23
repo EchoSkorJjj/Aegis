@@ -25,3 +25,13 @@ export function canReadInventory(roles: readonly Role[]): boolean {
 export function canWriteInventory(roles: readonly Role[]): boolean {
   return roles.some((role) => INVENTORY_WRITE_ROLES.includes(role));
 }
+
+/**
+ * May the caller maintain one service's composition (SBOM import, components, vendors)? Mirrors
+ * aegis-core's `InventoryRoles.COMPOSE`: the governance roles for any service, or a SERVICE_OWNER for
+ * a service they are an assigned owner of. Registering a service, changing its criticality/exposure,
+ * and assigning its owners stay governance-only (`canWriteInventory`).
+ */
+export function canComposeService(roles: readonly Role[], isAssignedOwner: boolean): boolean {
+  return canWriteInventory(roles) || (roles.includes("SERVICE_OWNER") && isAssignedOwner);
+}

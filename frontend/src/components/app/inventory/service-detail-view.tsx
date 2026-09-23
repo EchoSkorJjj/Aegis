@@ -14,11 +14,12 @@ import {
   RelationshipSection,
   type RelationshipConfig,
 } from "@/components/app/inventory/relationship-section";
-import { ApiError, inventoryApi } from "@/lib/api";
-import { canWriteInventory } from "@/lib/roles";
+import { ApiError, directoryApi, inventoryApi } from "@/lib/api";
+import { canComposeService, canWriteInventory } from "@/lib/roles";
 import type {
   BusinessCriticality,
   BusinessService,
+  DirectoryMember,
   Owner,
   SbomImportResult,
   ServiceExposure,
@@ -101,25 +102,53 @@ const vendorsConfig: RelationshipConfig = {
   renderRow: (row) => <span className="text-sm font-medium">{(row as ThirdPartyVendor).name}</span>,
 };
 
+// Owners are organization members holding SERVICE_OWNER. Picker rows are directory members (id = their
+// user id, passed to `attach`); linked rows are owner records (id = the owner row, passed to `detach`).
 const ownersConfig: RelationshipConfig = {
   entityLabel: "owner",
-  title: "Owners",
-  addPlaceholder: "Link an existing owner…",
-  emptyLabel: "No owners linked yet.",
+  title: "Responsible service owners",
+  addPlaceholder: "Assign a member with the Service Owner role…",
+  emptyLabel: "No owners assigned yet.",
+  note: "Members holding the Service Owner role. An owner can keep this service's SBOM, components, and vendors up to date; its criticality, exposure, and owners are set by an analyst or compliance admin.",
+  noOptionsLabel: "No available members hold the Service Owner role — grant it under Users.",
   listLinked: (serviceId, page, size) => inventoryApi.listServiceOwners(serviceId, { page, size }),
-  searchOptions: async (serviceId, term, size) =>
-    (await inventoryApi.listOwners({ search: term, size, excludeLinkedToService: serviceId })).content,
-  attach: (serviceId, id) => inventoryApi.addServiceOwner(serviceId, id),
-  detach: (serviceId, id) => inventoryApi.removeServiceOwner(serviceId, id),
-  optionLabel: (row) => (row as Owner).name,
-  renderRow: (row) => <span className="text-sm font-medium">{(row as Owner).name}</span>,
+  searchOptions: async (serviceId, term, size) => {
+    const [members, assigned] = await Promise.all([
+      directoryApi.listMembers({ role: "SERVICE_OWNER", search: term || undefined, size }),
+      inventoryApi.listServiceOwners(serviceId, { size: 100 }),
+    ]);
+    const taken = new Set(assigned.content.map((owner) => owner.userId));
+    return members.content.filter((member) => member.enabled && !taken.has(member.id));
+  },
+  attach: async (serviceId, userId) => {
+    await inventoryApi.assignServiceOwner(serviceId, userId);
+  },
+  detach: (serviceId, ownerId) => inventoryApi.removeServiceOwner(serviceId, ownerId),
+  optionLabel: (row) => {
+    const member = row as DirectoryMember;
+    return member.displayName ? `${member.displayName} · ${member.email}` : member.email;
+  },
+  renderRow: (row) => {
+    const owner = row as Owner;
+    return (
+      <span className="flex flex-wrap items-baseline gap-x-2 text-sm">
+        <span className="font-medium">{owner.name}</span>
+        {owner.email && <span className="text-muted-foreground">{owner.email}</span>}
+      </span>
+    );
+  },
 };
 
 type Status = "loading" | "ok" | "forbidden" | "notfound" | "error";
 
 export function ServiceDetailView({ serviceId }: { serviceId: string }) {
   const { user, isLoading: authLoading } = useAuth();
-  const canWrite = canWriteInventory(user?.roles ?? []);
+  // Governance (analyst / compliance admin) registers and re-grades services and assigns owners; an
+  // assigned owner may keep the service's composition current. The backend enforces both — these only
+  // decide which controls to show (see lib/roles).
+  const canGovern = canWriteInventory(user?.roles ?? []);
+  const [isAssignedOwner, setIsAssignedOwner] = useState(false);
+  const canCompose = canComposeService(user?.roles ?? [], isAssignedOwner);
 
   const [service, setService] = useState<BusinessService | null>(null);
   const [status, setStatus] = useState<Status>("loading");
@@ -152,6 +181,23 @@ export function ServiceDetailView({ serviceId }: { serviceId: string }) {
       });
     return () => controller.abort();
   }, [authLoading, serviceId, user?.orgId]);
+
+  // Only a SERVICE_OWNER outside the governance roles needs to know whether they own *this* service.
+  useEffect(() => {
+    if (authLoading || !user || canGovern || !user.roles.includes("SERVICE_OWNER")) return;
+    const controller = new AbortController();
+    inventoryApi
+      .listServiceOwners(serviceId, { size: 100 })
+      .then((owners) => {
+        if (!controller.signal.aborted) {
+          setIsAssignedOwner(owners.content.some((owner) => owner.userId === user.id));
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setIsAssignedOwner(false);
+      });
+    return () => controller.abort();
+  }, [authLoading, user, canGovern, serviceId]);
 
   async function onFileSelected(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -263,11 +309,17 @@ export function ServiceDetailView({ serviceId }: { serviceId: string }) {
           </span>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          Compose this service from the components, vendors, and owners that make it up.
+          What this service is made of — its components and vendors — and who is accountable for it.
         </p>
+        {!canGovern && isAssignedOwner && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            You own this service, so you can keep its SBOM, components, and vendors current. Its
+            criticality, exposure, and owners are set by an analyst or compliance admin.
+          </p>
+        )}
       </div>
 
-      {canWrite && (
+      {canCompose && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4">
           <div className="min-w-0">
             <p className="text-sm font-medium">Import from SBOM</p>
@@ -420,12 +472,12 @@ export function ServiceDetailView({ serviceId }: { serviceId: string }) {
 
       <RelationshipSection
         serviceId={serviceId}
-        canWrite={canWrite}
+        canWrite={canCompose}
         config={componentsConfig}
         refreshSignal={componentsRefresh}
       />
-      <RelationshipSection serviceId={serviceId} canWrite={canWrite} config={vendorsConfig} />
-      <RelationshipSection serviceId={serviceId} canWrite={canWrite} config={ownersConfig} />
+      <RelationshipSection serviceId={serviceId} canWrite={canCompose} config={vendorsConfig} />
+      <RelationshipSection serviceId={serviceId} canWrite={canGovern} config={ownersConfig} />
 
       <p className="text-xs text-muted-foreground">
         Wired up? Trace the blast radius on the{" "}
