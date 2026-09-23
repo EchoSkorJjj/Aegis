@@ -27,8 +27,9 @@ public class SbomImportController {
     }
 
     @PostMapping(path = "/services/{serviceId}/sbom", consumes = {MediaType.APPLICATION_JSON_VALUE, CYCLONEDX_JSON})
-    @PreAuthorize(InventoryRoles.WRITE)
-    @Operation(summary = "Import a service's components and dependencies from a CycloneDX JSON SBOM")
+    @PreAuthorize(InventoryRoles.COMPOSE)
+    @Operation(summary = "Import a service's components and dependencies from a CycloneDX JSON SBOM "
+            + "(governance roles, or the service's owners)")
     public SbomImportResult importSbom(@PathVariable UUID serviceId, @RequestBody CycloneDxBom bom) {
         return sboms.importSbom(serviceId, bom);
     }

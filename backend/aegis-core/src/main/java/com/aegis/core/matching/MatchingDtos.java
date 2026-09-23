@@ -148,10 +148,14 @@ public final class MatchingDtos {
         }
     }
 
-    public record OwnerRef(UUID id, String name) {
+    /**
+     * An impacted service's owner: {@code id} is the inventory owner row, {@code userId} the person's
+     * identity-service id (what a signed-in user is matched against), {@code name} their display name.
+     */
+    public record OwnerRef(UUID id, UUID userId, String name) {
 
         static OwnerRef from(Owner owner) {
-            return new OwnerRef(owner.getId(), owner.getName());
+            return new OwnerRef(owner.getId(), owner.getUserId(), owner.getName());
         }
     }
 

@@ -75,6 +75,9 @@ services:
       DB_PASSWORD: identity
       # Fetch identity-service's public signing keys to validate access tokens.
       IDENTITY_JWKS_URI: http://identity-service:8081/oauth2/jwks
+      # identity-service's member directory (e.g. to verify a service's assigned owner). Called with the
+      # caller's own token, so identity-service applies the caller's org scope.
+      IDENTITY_BASE_URL: http://identity-service:8081
       # The internal ai-service (assess + draft). Called with a service token, not a user JWT.
       AI_SERVICE_URI: http://ai-service:8083
       AI_SERVICE_TOKEN: dev-internal-token-change-me

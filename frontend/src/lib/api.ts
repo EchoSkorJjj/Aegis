@@ -16,13 +16,14 @@ import type {
   Membership,
   MfaChallenge,
   MfaStatus,
+  DirectoryMember,
   Owner,
-  OwnerInput,
   Page,
   Passkey,
   RecoveryCodes,
   RegisterInput,
   ResetPasswordInput,
+  Role,
   SbomImportResult,
   SelectMethodInput,
   SoftwareComponent,
@@ -240,6 +241,17 @@ export const adminApi = {
 };
 
 /**
+ * The active organization's member directory (identity-service `GET /users`, read-only for any member
+ * and scoped to the active org server-side). `role` narrows to members holding that role in this org —
+ * e.g. SERVICE_OWNER for the owner picker.
+ */
+export const directoryApi = {
+  listMembers(params: { search?: string; role?: Role; page?: number; size?: number } = {}) {
+    return bffFetch<Page<DirectoryMember>>(`/api/users${qs(params)}`);
+  },
+};
+
+/**
  * The estate map (aegis-core inventory), proxied through the BFF. Scoped to the caller's active
  * organization server-side; the backend enforces the domain read/write roles (403 passed through).
  */
@@ -308,18 +320,11 @@ export const inventoryApi = {
     return bffFetch<void>(`/api/inventory/vendors/${id}`, { method: "DELETE" });
   },
 
-  // ---- Owners (people / teams accountable for services) ------------------------------------
+  // ---- Owners (organization members holding SERVICE_OWNER, assigned to services) ------------
+  /** The people currently assigned as an owner of at least one service. Read-only — owners are
+   *  created by assigning a member to a service, never by name. */
   listOwners(params: ListParams & { excludeLinkedToService?: string } = {}) {
     return bffFetch<Page<Owner>>(`/api/inventory/owners${qs(params)}`);
-  },
-  createOwner(input: OwnerInput) {
-    return bffFetch<Owner>("/api/inventory/owners", { method: "POST", body: JSON.stringify(input) });
-  },
-  updateOwner(id: string, input: OwnerInput) {
-    return bffFetch<Owner>(`/api/inventory/owners/${id}`, { method: "PUT", body: JSON.stringify(input) });
-  },
-  deleteOwner(id: string) {
-    return bffFetch<void>(`/api/inventory/owners/${id}`, { method: "DELETE" });
   },
 
   // ---- Service composition: the components / vendors / owners linked to one service ---------
@@ -344,8 +349,13 @@ export const inventoryApi = {
   listServiceOwners(serviceId: string, params: { page?: number; size?: number } = {}) {
     return bffFetch<Page<Owner>>(`/api/inventory/services/${serviceId}/owners${qs(params)}`);
   },
-  addServiceOwner(serviceId: string, ownerId: string) {
-    return bffFetch<void>(`/api/inventory/services/${serviceId}/owners/${ownerId}`, { method: "POST" });
+  /** Assign an org member (by identity user id) as a service owner. The backend verifies they are a
+   *  member of the active org holding SERVICE_OWNER. Governance roles only. */
+  assignServiceOwner(serviceId: string, userId: string) {
+    return bffFetch<Owner>(`/api/inventory/services/${serviceId}/owners`, {
+      method: "POST",
+      body: JSON.stringify({ userId }),
+    });
   },
   removeServiceOwner(serviceId: string, ownerId: string) {
     return bffFetch<void>(`/api/inventory/services/${serviceId}/owners/${ownerId}`, { method: "DELETE" });

@@ -75,10 +75,16 @@ interface ResourceManagerProps<T extends { id: string }> {
   fields: FieldSpec[];
   /** A stable (module-level) fetcher for one filtered, paged, sorted query. */
   list: (query: ListQuery) => Promise<Page<T>>;
-  create: (draft: Record<string, string>) => Promise<T>;
-  update: (id: string, draft: Record<string, string>) => Promise<T>;
-  remove: (id: string) => Promise<void>;
-  toDraft: (row: T) => Record<string, string>;
+  /** Write operations — omit all four with `readOnly` for a list nobody edits here. */
+  create?: (draft: Record<string, string>) => Promise<T>;
+  update?: (id: string, draft: Record<string, string>) => Promise<T>;
+  remove?: (id: string) => Promise<void>;
+  toDraft?: (row: T) => Record<string, string>;
+  /**
+   * A list that is never created or edited from this page (e.g. owners, which come from assigning an
+   * organization member to a service). Hides the create / edit / delete controls for everyone.
+   */
+  readOnly?: boolean;
   describe: (row: T) => string;
   /** Filter-bar configuration. */
   searchPlaceholder?: string;
@@ -100,13 +106,14 @@ export function ResourceManager<T extends { id: string }>({
   update,
   remove,
   toDraft,
+  readOnly = false,
   describe,
   searchPlaceholder,
   selectFilters = [],
   defaultSort,
 }: ResourceManagerProps<T>) {
   const { user, isLoading: authLoading } = useAuth();
-  const canWrite = canWriteInventory(user?.roles ?? []);
+  const canWrite = !readOnly && canWriteInventory(user?.roles ?? []);
   const columnCount = columns.length + (canWrite ? 1 : 0);
 
   const [searchInput, setSearchInput] = useState("");
@@ -238,6 +245,7 @@ export function ResourceManager<T extends { id: string }>({
   }
 
   function openEdit(row: T) {
+    if (!toDraft) return;
     setEditing(row);
     setDraft(toDraft(row));
     setFormError(null);
@@ -257,6 +265,7 @@ export function ResourceManager<T extends { id: string }>({
       setFormError("Please fill in every field.");
       return;
     }
+    if (!create || !update) return;
     setSaving(true);
     setFormError(null);
     try {
@@ -277,6 +286,7 @@ export function ResourceManager<T extends { id: string }>({
   }
 
   async function onDelete(row: T) {
+    if (!remove) return;
     if (!window.confirm(`Delete ${entityLabel} "${describe(row)}"? Its relationship edges are removed too.`)) {
       return;
     }

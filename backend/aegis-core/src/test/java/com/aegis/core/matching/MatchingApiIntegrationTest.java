@@ -16,6 +16,7 @@ import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
 import com.aegis.core.support.AbstractInventoryIntegrationTest;
+import com.aegis.core.support.TestOwners;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -32,6 +33,9 @@ class MatchingApiIntegrationTest extends AbstractInventoryIntegrationTest {
     private InventoryService inventory;
 
     @Autowired
+    private TestOwners owners;
+
+    @Autowired
     private AdvisoryStore advisories;
 
     @Autowired
@@ -41,8 +45,7 @@ class MatchingApiIntegrationTest extends AbstractInventoryIntegrationTest {
     void matchesAnAdvisoryAndReturnsTheTransitiveEvidenceChainToOwners() throws Exception {
         String suffix = UUID.randomUUID().toString();
         BusinessService service = inventory.createBusinessService("Checkout " + suffix, BusinessCriticality.HIGH);
-        Owner owner = inventory.createOwner("Payments team " + suffix);
-        inventory.addServiceOwner(service.getId(), owner.getId());
+        Owner owner = owners.assign(service.getId(), "Payments team " + suffix);
 
         String affectedProduct = "match-lib-" + suffix;
         SoftwareComponent vulnerable = inventory.createSoftwareComponent(
@@ -89,9 +92,8 @@ class MatchingApiIntegrationTest extends AbstractInventoryIntegrationTest {
     void matchesAVendorOutageToDependentServicesAndOwners() throws Exception {
         String suffix = UUID.randomUUID().toString();
         BusinessService service = inventory.createBusinessService("Orders " + suffix, BusinessCriticality.CRITICAL);
-        Owner owner = inventory.createOwner("Orders team " + suffix);
+        Owner owner = owners.assign(service.getId(), "Orders team " + suffix);
         ThirdPartyVendor vendor = inventory.createThirdPartyVendor("Acme Cloud " + suffix);
-        inventory.addServiceOwner(service.getId(), owner.getId());
         inventory.addServiceVendor(service.getId(), vendor.getId());
 
         VendorIncident incident = incidents.upsert(new VendorIncident(
@@ -155,8 +157,7 @@ class MatchingApiIntegrationTest extends AbstractInventoryIntegrationTest {
     void matchesAnOsvPurlAdvisoryToAnEcosystemComponent() throws Exception {
         String suffix = UUID.randomUUID().toString();
         BusinessService service = inventory.createBusinessService("Web " + suffix, BusinessCriticality.HIGH);
-        Owner owner = inventory.createOwner("Web team " + suffix);
-        inventory.addServiceOwner(service.getId(), owner.getId());
+        Owner owner = owners.assign(service.getId(), "Web team " + suffix);
         // An npm component the OSV advisory covers, and a same-name PyPI component it must not touch.
         SoftwareComponent axios = inventory.createSoftwareComponent("npm", "axios-" + suffix, "1.5.0");
         inventory.createSoftwareComponent("pypi", "axios-" + suffix, "1.5.0");

@@ -39,7 +39,8 @@ class SbomImportServiceTest {
     static final String FIXTURE = "fixtures/sbom/storefront.cdx.json";
 
     private final InventoryStore store = mock(InventoryStore.class);
-    private final SbomImportService importer = new SbomImportService(new InventoryService(store), store);
+    private final SbomImportService importer =
+            new SbomImportService(new InventoryService(store, userId -> Optional.empty()), store);
     private final UUID serviceId = UUID.randomUUID();
 
     private final Map<String, SoftwareComponent> componentsByCoordinates = new HashMap<>();

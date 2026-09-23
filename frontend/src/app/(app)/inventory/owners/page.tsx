@@ -20,34 +20,41 @@ const listOwners = (query: ListQuery) =>
 const columns: Column<Owner>[] = [
   { header: "Name", sortField: "name", render: (owner) => <span className="font-medium">{owner.name}</span> },
   {
-    header: "Updated",
-    sortField: "updatedAt",
+    header: "Email",
     className: "text-muted-foreground",
-    render: (owner) => formatDate(owner.updatedAt),
+    render: (owner) => owner.email ?? "—",
+  },
+  {
+    header: "Owner since",
+    sortField: "createdAt",
+    className: "text-muted-foreground",
+    render: (owner) => formatDate(owner.createdAt),
   },
 ];
 
+/**
+ * Read-only: an owner is an organization member holding the Service Owner role, and becomes one by
+ * being assigned to a service (from that service's page) — there is nothing to create or edit here.
+ */
 export default function OwnersPage() {
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Owners</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Service owners</h1>
         <p className="text-sm text-muted-foreground">
-          People or teams accountable for services — they&apos;re who impact analysis notifies.
+          Members with the Service Owner role who are accountable for at least one service. Assign
+          owners from a service&apos;s page; invite members and grant the role under Users.
         </p>
       </div>
 
       <ResourceManager<Owner>
         entityLabel="owner"
         columns={columns}
-        fields={[{ name: "name", label: "Name", kind: "text", placeholder: "Platform Team" }]}
+        fields={[]}
         list={listOwners}
-        create={(draft) => inventoryApi.createOwner({ name: draft.name })}
-        update={(id, draft) => inventoryApi.updateOwner(id, { name: draft.name })}
-        remove={(id) => inventoryApi.deleteOwner(id)}
-        toDraft={(owner) => ({ name: owner.name })}
+        readOnly
         describe={(owner) => owner.name}
-        searchPlaceholder="Owner name…"
+        searchPlaceholder="Name or email…"
         defaultSort="name,asc"
       />
     </div>

@@ -8,6 +8,7 @@ import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
 import com.aegis.core.support.AbstractInventoryIntegrationTest;
+import com.aegis.core.support.TestOwners;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -23,6 +24,9 @@ class GraphQueryApiIntegrationTest extends AbstractInventoryIntegrationTest {
     @Autowired
     private InventoryService inventory;
 
+    @Autowired
+    private TestOwners owners;
+
     /**
      * checkout (direct) --uses--> web (direct dep of vulnerable-lib)
      * checkout            --uses--> api  --depends on--> web --depends on--> vulnerable-lib
@@ -33,10 +37,8 @@ class GraphQueryApiIntegrationTest extends AbstractInventoryIntegrationTest {
         String suffix = UUID.randomUUID().toString();
         BusinessService checkout = inventory.createBusinessService("Checkout " + suffix, BusinessCriticality.HIGH);
         BusinessService other = inventory.createBusinessService("Other " + suffix, BusinessCriticality.LOW);
-        Owner checkoutOwner = inventory.createOwner("Checkout team " + suffix);
-        Owner otherOwner = inventory.createOwner("Other team " + suffix);
-        inventory.addServiceOwner(checkout.getId(), checkoutOwner.getId());
-        inventory.addServiceOwner(other.getId(), otherOwner.getId());
+        Owner checkoutOwner = owners.assign(checkout.getId(), "Checkout team " + suffix);
+        Owner otherOwner = owners.assign(other.getId(), "Other team " + suffix);
 
         SoftwareComponent vulnerable = inventory.createSoftwareComponent("npm", "vulnerable-lib-" + suffix, "1.0");
         SoftwareComponent web = inventory.createSoftwareComponent("npm", "web-" + suffix, "1.0");
@@ -114,8 +116,7 @@ class GraphQueryApiIntegrationTest extends AbstractInventoryIntegrationTest {
         String suffix = UUID.randomUUID().toString();
         BusinessService checkout = inventory.createBusinessService("Checkout " + suffix, BusinessCriticality.HIGH);
         BusinessService other = inventory.createBusinessService("Other " + suffix, BusinessCriticality.LOW);
-        Owner owner = inventory.createOwner("Checkout team " + suffix);
-        inventory.addServiceOwner(checkout.getId(), owner.getId());
+        Owner owner = owners.assign(checkout.getId(), "Checkout team " + suffix);
 
         ThirdPartyVendor vendor = inventory.createThirdPartyVendor("Cloud vendor " + suffix);
         inventory.addServiceVendor(checkout.getId(), vendor.getId());

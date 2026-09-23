@@ -48,8 +48,8 @@ class ScoringRollupTest {
             UUID.randomUUID(), "Customer Portal", BusinessCriticality.HIGH, ServiceExposure.INTERNET_FACING);
     private static final ServiceRef REPORTING = new ServiceRef(
             UUID.randomUUID(), "Internal Reporting", BusinessCriticality.LOW, ServiceExposure.ISOLATED);
-    private static final OwnerRef WEB = new OwnerRef(UUID.randomUUID(), "Web Platform Team");
-    private static final OwnerRef DATA = new OwnerRef(UUID.randomUUID(), "Data Team");
+    private static final OwnerRef WEB = new OwnerRef(UUID.randomUUID(), UUID.randomUUID(), "Web Platform Team");
+    private static final OwnerRef DATA = new OwnerRef(UUID.randomUUID(), UUID.randomUUID(), "Data Team");
 
     @Mock
     private MatchingService matching;

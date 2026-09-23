@@ -31,6 +31,8 @@ export interface RelationshipConfig {
   renderRow: (row: { id: string }) => React.ReactNode;
   /** Optional note under the section title (e.g. the direct-vs-transitive clarification). */
   note?: string;
+  /** Shown when the picker has nothing to offer before anything is typed (default "Type to search."). */
+  noOptionsLabel?: string;
 }
 
 interface RelationshipSectionProps {
@@ -167,7 +169,7 @@ export function RelationshipSection({
                   <p className="px-2 py-2 text-sm text-muted-foreground">Searching…</p>
                 ) : results.length === 0 ? (
                   <p className="px-2 py-2 text-sm text-muted-foreground">
-                    {term.trim() ? "No matches." : "Type to search."}
+                    {term.trim() ? "No matches." : (config.noOptionsLabel ?? "Type to search.")}
                   </p>
                 ) : (
                   results.map((row) => (

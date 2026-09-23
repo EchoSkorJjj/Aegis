@@ -33,7 +33,6 @@ class DemoEstateFixturesTest {
             // Scoring multiplies exposure in, so a demo service without one would silently take the
             // default and make the seeded estate a worse illustration than it should be.
             assertThat(service.exposure()).as("%s exposure", service.name()).isNotNull();
-            assertThat(service.owners()).isNotEmpty();
         });
     }
 

@@ -10,7 +10,6 @@ import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
-import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
 import com.aegis.core.inventory.sbom.CycloneDxBom;
@@ -22,9 +21,13 @@ import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Loads the fictional demo estate from {@code classpath:demo/} — services, owners, vendors, and each
- * service's CycloneDX SBOM (through the real import path). Find-or-create throughout, so it is safe
- * to run repeatedly and never duplicates or removes existing inventory.
+ * Loads the fictional demo estate from {@code classpath:demo/} — services, vendors, and each service's
+ * CycloneDX SBOM (through the real import path). Find-or-create throughout, so it is safe to run
+ * repeatedly and never duplicates or removes existing inventory.
+ *
+ * <p>It seeds <b>no owners</b>: an owner is a real organization member holding {@code SERVICE_OWNER}
+ * in identity-service, verified at assignment, and the seed runs with no user or token to verify one.
+ * Invite demo users with that role and assign them from each service's page.
  */
 @Service
 public class DemoEstateSeeder {
@@ -58,12 +61,6 @@ public class DemoEstateSeeder {
         for (ServiceSpec spec : estate.services()) {
             BusinessService service = store.findBusinessServiceByName(spec.name())
                     .orElseGet(() -> inventory.createBusinessService(spec.name(), spec.criticality(), spec.exposure()));
-            for (String ownerName : spec.owners()) {
-                Owner owner = store.findOwnerByName(ownerName).orElseGet(() -> inventory.createOwner(ownerName));
-                if (!store.serviceOwnerExists(service.getId(), owner.getId())) {
-                    store.addServiceOwner(service.getId(), owner.getId());
-                }
-            }
             for (String vendorName : spec.vendors()) {
                 ThirdPartyVendor vendor = store.findThirdPartyVendorByName(vendorName)
                         .orElseGet(() -> inventory.createThirdPartyVendor(vendorName));
@@ -93,9 +90,8 @@ public class DemoEstateSeeder {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record ServiceSpec(
             String name, BusinessCriticality criticality, ServiceExposure exposure,
-            List<String> owners, List<String> vendors, String sbom) {
+            List<String> vendors, String sbom) {
         public ServiceSpec {
-            owners = owners == null ? List.of() : owners;
             vendors = vendors == null ? List.of() : vendors;
         }
     }
