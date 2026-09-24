@@ -447,14 +447,17 @@ is weak on any one axis cannot be pushed to the top by the other two. Same read 
   outage is scored. An absent or unrecognised label falls back to a neutral `0.5`, never to zero:
   not knowing how bad something is must not rank it below something known to be mild. The response's
   `severity.source` says which of the three applied.
-- **exposure** — the `ServiceExposure` declared on the service (`INTERNET_FACING` 1.0, `INTERNAL` 0.6,
-  `ISOLATED` 0.4). The floor is well above zero because an isolated service is not invulnerable.
+- **exposure** — the `ServiceExposure` declared on the service (`INTERNET_FACING` 1.0, `INTERNAL` 0.9,
+  `ISOLATED` 0.5). The floor is well above zero because an isolated service is not invulnerable.
+  Exposure is inbound attack reach, so it applies to vulnerabilities only: a vendor outage takes an
+  internal service down as surely as an internet-facing one, and its breakdown says
+  `exposureApplies: false`.
 - **criticality** — the service's business tier (`CRITICAL` 1.0 → `LOW` 0.25).
 
 Each scored service carries the full `breakdown` (every multiplier, enough to reproduce the score by
 hand), its contributing `factors` (below), and a deterministic `explanation`, so a ranking can be
 reproduced and argued with. A score is
-banded into an `ImpactTier` (`CRITICAL` ≥ 75, `HIGH` ≥ 50, `MEDIUM` ≥ 25, `LOW` ≥ 10, else
+banded into an `ImpactTier` (`CRITICAL` ≥ 90, `HIGH` ≥ 70, `MEDIUM` ≥ 40, `LOW` ≥ 10, else
 `NEGLIGIBLE`) and marked `material` once it clears the materiality threshold (10.0). Immaterial rows
 are still returned with their evidence — this ranks noise down, it does not hide it.
 
@@ -487,13 +490,13 @@ knowing the model's shape.
 
 Headroom rather than a "percentage share" because the model is a product, not a sum — a share would
 pretend the terms are independent. Headroom reads the way an argument about a score actually goes:
-"were this service internet-facing it would be 24 points higher". It is computed by re-scoring with
+"were this service internet-facing it would be 32 points higher". It is computed by re-scoring with
 that one factor at 1.0, so `score + headroom` is exactly what the reader would see after the change,
 rounding included. The `explanation` sentence names the limiting factor too:
 
 ```
-CVE-2099-1 scores 36.0 (MEDIUM) for Orders: severity 0.80 (CVSS 3.1 base 8) x exposure 0.60 (INTERNAL)
-x criticality 0.75 (HIGH); exposure (INTERNAL) holds it down most, costing 24.0 points
+CVE-2099-1 scores 32.0 (LOW) for Orders: severity 0.80 (CVSS 3.1 base 8) x exposure 0.50 (ISOLATED)
+x criticality 0.80 (HIGH); exposure (ISOLATED) holds it down most, costing 32.0 points
 ```
 
 Roll-up rows carry the same reasons for their headline number: each `ServiceRollup` and `OwnerRollup`
@@ -509,14 +512,22 @@ tool is another's revenue path. Omit any entry to keep its default, or the whole
 shipped model; an override changes only what it names, so retuning one tier does not require
 restating the table.
 
+The defaults are **calibrated against the demo dataset (CS203-73)**, not picked by feel: the tiers are
+the CVSS v3.1 bands (so on a CRITICAL internet-facing service the tier is the published rating), and
+the weights are the smallest change to the original ones that satisfies a set of written anchors —
+e.g. Log4Shell on the demo's internal Order Service is HIGH, a critical CVE is never immaterial, and an
+outage is never discounted for exposure. [`SCORING-CALIBRATION.md`](SCORING-CALIBRATION.md) has the
+anchors, the method, the reviewed demo table, and the known limits; `ScoringCalibrationTest` enforces
+all of it against the real demo files, so a retune that breaks an anchor fails the build.
+
 | Key | Default | What it moves |
 |---|---|---|
-| `aegis.scoring.criticality.*` | `1.0 / 0.75 / 0.5 / 0.25` | How much severity a business tier retains |
-| `aegis.scoring.exposure.*` | `1.0 / 0.6 / 0.4` | What an attacker's reach is worth |
+| `aegis.scoring.criticality.*` | `1.0 / 0.8 / 0.5 / 0.25` | How much severity a business tier retains |
+| `aegis.scoring.exposure.*` | `1.0 / 0.9 / 0.5` | What an attacker's reach is worth |
 | `aegis.scoring.confidence.*` | `1.0 / 1.0` | Optional discount for an unreviewed (`POSSIBLE`) match |
-| `aegis.scoring.severity-label.*` | `critical 0.95 … none 0.1` | Severity per feed word when there is no CVSS; add a word for a new feed vocabulary |
+| `aegis.scoring.severity-label.*` | `critical 0.95 … none 0.05` | Severity per feed word when there is no CVSS; add a word for a new feed vocabulary |
 | `aegis.scoring.unknown-severity-factor` | `0.5` | Applied when neither a CVSS score nor a known label exists |
-| `aegis.scoring.tiers.*` | `75 / 50 / 25 / 10` | Lower bound of each `ImpactTier` |
+| `aegis.scoring.tiers.*` | `90 / 70 / 40 / 10` | Lower bound of each `ImpactTier` |
 | `aegis.scoring.materiality-threshold` | `10.0` | Below this a result is returned but marked immaterial |
 | `aegis.scoring.rollup.max-signals` | `200` | Ceiling on signals one roll-up may score |
 | `aegis.scoring.rollup.default-window` | `P30D` | How far back a roll-up reaches with no `from` |

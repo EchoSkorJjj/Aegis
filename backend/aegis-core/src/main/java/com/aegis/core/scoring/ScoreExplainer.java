@@ -38,6 +38,9 @@ final class ScoreExplainer {
 
     private static final String SETTINGS = "aegis.scoring.";
 
+    /** The exposure term's input when it does not apply — see {@link ImpactScorer#breakdown}. */
+    static final String NOT_APPLIED = "not applied to outages";
+
     private final ImpactScorer scorer;
 
     ScoreExplainer(ImpactScorer scorer) {
@@ -52,9 +55,12 @@ final class ScoreExplainer {
         List<Term> terms = List.of(
                 new Term(ScoreFactorKind.SEVERITY, describeSeverity(severity),
                         breakdown.severityFactor(), severitySetting(severity)),
-                new Term(ScoreFactorKind.EXPOSURE,
-                        breakdown.exposure() == null ? exposure + " (default)" : exposure.name(),
-                        breakdown.exposureFactor(), setting("exposure", exposure)),
+                breakdown.exposureApplies()
+                        ? new Term(ScoreFactorKind.EXPOSURE,
+                                breakdown.exposure() == null ? exposure + " (default)" : exposure.name(),
+                                breakdown.exposureFactor(), setting("exposure", exposure))
+                        // An outage is not an attack, so no exposure setting can move this term.
+                        : new Term(ScoreFactorKind.EXPOSURE, NOT_APPLIED, breakdown.exposureFactor(), null),
                 new Term(ScoreFactorKind.CRITICALITY,
                         breakdown.criticality() == null ? "unset" : breakdown.criticality().name(),
                         breakdown.criticalityFactor(), setting("criticality", breakdown.criticality())),
@@ -131,6 +137,7 @@ final class ScoreExplainer {
                 kind == ScoreFactorKind.SEVERITY ? 1.0 : b.severityFactor(),
                 b.exposure(),
                 kind == ScoreFactorKind.EXPOSURE ? 1.0 : b.exposureFactor(),
+                b.exposureApplies(),
                 b.criticality(),
                 kind == ScoreFactorKind.CRITICALITY ? 1.0 : b.criticalityFactor(),
                 b.confidence(),

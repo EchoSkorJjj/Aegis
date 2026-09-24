@@ -65,7 +65,7 @@ class ScoringPropertiesBindingTest {
                     assertThat(properties.tiers().critical()).isEqualTo(90.0);
                     assertThat(properties.tiers().high()).isEqualTo(70.0);
                     // Not named, so still the default rather than zero.
-                    assertThat(properties.tiers().medium()).isEqualTo(25.0);
+                    assertThat(properties.tiers().medium()).isEqualTo(40.0);
                     assertThat(properties.rollup().maxSignals()).isEqualTo(42);
                     assertThat(properties.rollup().defaultWindow()).isEqualTo(Duration.ofDays(7));
                 });

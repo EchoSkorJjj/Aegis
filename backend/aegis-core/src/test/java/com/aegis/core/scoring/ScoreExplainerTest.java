@@ -12,6 +12,7 @@ import com.aegis.core.scoring.ScoringDtos.ScoreBreakdown;
 import com.aegis.core.scoring.ScoringDtos.ScoreFactor;
 import com.aegis.core.scoring.ScoringDtos.ScoreFactorKind;
 import com.aegis.core.scoring.ScoringDtos.SeverityInput;
+import com.aegis.core.signals.ChangeSignal.SignalType;
 import org.junit.jupiter.api.Test;
 
 import static com.aegis.core.matching.MatchingDtos.MatchConfidence.CONFIRMED;
@@ -44,7 +45,7 @@ class ScoreExplainerTest {
                 .containsExactly(SEVERITY, EXPOSURE, CRITICALITY, CONFIDENCE);
         assertThat(factors).extracting(ScoreFactor::input)
                 .containsExactly("CVSS 3.1 base 8", "INTERNAL", "HIGH", "CONFIRMED");
-        assertThat(factors).extracting(ScoreFactor::weight).containsExactly(0.8, 0.6, 0.75, 1.0);
+        assertThat(factors).extracting(ScoreFactor::weight).containsExactly(0.8, 0.9, 0.8, 1.0);
         // A CVSS score is published by the feed, so nothing in configuration sets it; the rest are
         // the exact keys an operator would write in application.yml.
         assertThat(factors).extracting(ScoreFactor::setting).containsExactly(
@@ -58,20 +59,20 @@ class ScoreExplainerTest {
     void headroomIsWhatTheScoreWouldGainIfThatFactorAloneWereAtItsMaximum() {
         SeverityInput severity = scorer.severityFromCvss("3.1", new BigDecimal("8.0"));
         ScoreBreakdown breakdown = scorer.breakdown(
-                severity.factor(), ServiceExposure.INTERNAL, BusinessCriticality.HIGH, CONFIRMED);
+                severity.factor(), ServiceExposure.ISOLATED, BusinessCriticality.HIGH, CONFIRMED);
 
-        // 0.8 x 0.6 x 0.75 = 36.0. Maxing each term alone: severity -> 45.0, exposure -> 60.0,
-        // criticality -> 48.0, confidence is already 1.0.
-        assertThat(scorer.score(breakdown)).isEqualTo(36.0);
+        // 0.8 x 0.5 x 0.8 = 32.0. Maxing each term alone: severity -> 40.0, exposure -> 64.0,
+        // criticality -> 40.0, confidence is already 1.0.
+        assertThat(scorer.score(breakdown)).isEqualTo(32.0);
         List<ScoreFactor> factors = explainer.factors(severity, breakdown);
 
-        assertThat(factors).extracting(ScoreFactor::headroom).containsExactly(9.0, 24.0, 12.0, 0.0);
+        assertThat(factors).extracting(ScoreFactor::headroom).containsExactly(8.0, 32.0, 8.0, 0.0);
         // Exposure costs the most, so it is the one holding the score down.
         assertThat(factors).extracting(ScoreFactor::limiting).containsExactly(false, true, false, false);
-        assertThat(explainer.explain("CVE-2099-1", "Orders", 36.0, ImpactTier.MEDIUM, breakdown, factors))
-                .isEqualTo("CVE-2099-1 scores 36.0 (MEDIUM) for Orders: severity 0.80 (CVSS 3.1 base 8) "
-                        + "x exposure 0.60 (INTERNAL) x criticality 0.75 (HIGH); "
-                        + "exposure (INTERNAL) holds it down most, costing 24.0 points");
+        assertThat(explainer.explain("CVE-2099-1", "Orders", 32.0, ImpactTier.LOW, breakdown, factors))
+                .isEqualTo("CVE-2099-1 scores 32.0 (LOW) for Orders: severity 0.80 (CVSS 3.1 base 8) "
+                        + "x exposure 0.50 (ISOLATED) x criticality 0.80 (HIGH); "
+                        + "exposure (ISOLATED) holds it down most, costing 32.0 points");
     }
 
     @Test
@@ -108,20 +109,20 @@ class ScoreExplainerTest {
 
     @Test
     void headroomIsMeasuredAgainstTheRoundedScoreTheReaderSees() {
-        // A "major" vendor outage on an internal HIGH service: 0.75 x 0.6 x 0.75 = 33.75, shown as 33.8.
-        // Raw-weight headroom for exposure would be 22.5 but for severity 11.25 — neither adds up to
-        // what re-scoring shows, so headroom is taken from the rounded scores instead.
-        SeverityInput severity = scorer.severityFromLabel("major");
+        // A CVE still awaiting NVD analysis, labelled HIGH, on an internal MEDIUM-tier service:
+        // 0.75 x 0.9 x 0.5 = 33.75, shown as 33.8. Raw-weight headroom would be 11.25 / 3.75 / 33.75 —
+        // none of which adds up to what re-scoring shows, so headroom is taken from the rounded scores.
+        SeverityInput severity = scorer.severityFromLabel("high");
         ScoreBreakdown breakdown = scorer.breakdown(
-                severity.factor(), ServiceExposure.INTERNAL, BusinessCriticality.HIGH, CONFIRMED);
+                severity.factor(), ServiceExposure.INTERNAL, BusinessCriticality.MEDIUM, CONFIRMED);
 
         assertThat(scorer.score(breakdown)).isEqualTo(33.8);
         List<ScoreFactor> factors = explainer.factors(severity, breakdown);
 
-        // Maxed alone: severity -> 45.0, exposure -> 56.3, criticality -> 45.0.
-        assertThat(factors).extracting(ScoreFactor::headroom).containsExactly(11.2, 22.5, 11.2, 0.0);
-        assertThat(factors).extracting(ScoreFactor::limiting).containsExactly(false, true, false, false);
-        assertThat(factor(factors, SEVERITY).setting()).isEqualTo("aegis.scoring.severity-label.major");
+        // Maxed alone: severity -> 45.0, exposure -> 37.5, criticality -> 67.5.
+        assertThat(factors).extracting(ScoreFactor::headroom).containsExactly(11.2, 3.7, 33.7, 0.0);
+        assertThat(factors).extracting(ScoreFactor::limiting).containsExactly(false, false, true, false);
+        assertThat(factor(factors, SEVERITY).setting()).isEqualTo("aegis.scoring.severity-label.high");
     }
 
     @Test
@@ -144,7 +145,7 @@ class ScoreExplainerTest {
     void flagsEveryFactorTiedForHoldingTheScoreDownMost() {
         SeverityInput severity = scorer.severityFromCvss("3.1", new BigDecimal("10.0"));
         ScoreBreakdown breakdown = new ScoreBreakdown(
-                1.0, ServiceExposure.INTERNAL, 0.5, BusinessCriticality.MEDIUM, 0.5, CONFIRMED, 1.0);
+                1.0, ServiceExposure.INTERNAL, 0.5, true, BusinessCriticality.MEDIUM, 0.5, CONFIRMED, 1.0);
 
         List<ScoreFactor> factors = explainer.factors(severity, breakdown);
 
@@ -163,8 +164,30 @@ class ScoreExplainerTest {
 
         List<ScoreFactor> factors = explainer.factors(severity, breakdown);
 
-        assertThat(factors).extracting(ScoreFactor::headroom).containsExactly(45.0, 0.0, 0.0, 0.0);
+        assertThat(factors).extracting(ScoreFactor::headroom).containsExactly(72.0, 0.0, 0.0, 0.0);
         assertThat(factors).extracting(ScoreFactor::limiting).containsExactly(true, false, false, false);
+    }
+
+    @Test
+    void saysExposureWasNotAppliedToAnOutageRatherThanBlamingIt() {
+        // An outage is not an attack: exposure does not discount it, so it can never be the limiting
+        // factor and there is no setting that would move it.
+        SeverityInput severity = scorer.severityFromLabel("major");
+        ScoreBreakdown breakdown = scorer.breakdown(SignalType.VENDOR_OUTAGE,
+                severity.factor(), ServiceExposure.ISOLATED, BusinessCriticality.HIGH, CONFIRMED);
+
+        List<ScoreFactor> factors = explainer.factors(severity, breakdown);
+
+        assertThat(breakdown.exposureApplies()).isFalse();
+        ScoreFactor exposure = factor(factors, EXPOSURE);
+        assertThat(exposure.input()).isEqualTo("not applied to outages");
+        assertThat(exposure.weight()).isEqualTo(1.0);
+        assertThat(exposure.headroom()).isEqualTo(0.0);
+        assertThat(exposure.limiting()).isFalse();
+        assertThat(exposure.setting()).isNull();
+        // 0.75 x 0.8 = 60.0, held down by the severity word (and the tier) — never by the isolation.
+        assertThat(explainer.explain("acme:1", "Checkout", 60.0, ImpactTier.MEDIUM, breakdown, factors))
+                .contains("x exposure 1.00 (not applied to outages) x criticality 0.80 (HIGH)");
     }
 
     @Test
@@ -231,6 +254,7 @@ class ScoreExplainerTest {
                 kind == SEVERITY ? 1.0 : b.severityFactor(),
                 b.exposure(),
                 kind == EXPOSURE ? 1.0 : b.exposureFactor(),
+                b.exposureApplies(),
                 b.criticality(),
                 kind == CRITICALITY ? 1.0 : b.criticalityFactor(),
                 b.confidence(),

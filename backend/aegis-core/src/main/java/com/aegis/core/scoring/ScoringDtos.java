@@ -106,11 +106,16 @@ public final class ScoringDtos {
      * Every term in {@code score = severity x exposure x criticality x confidence x 100}, with the
      * input each factor was read from. Reproducing the score by hand from this record is the point;
      * {@code confidenceFactor} is 1.0 unless a deployment configured a discount.
+     *
+     * <p>{@code exposureApplies} is false for a vendor outage: exposure is inbound attack reach, and an
+     * outage is not an attack — it takes an internal service down as surely as an internet-facing one.
+     * {@code exposure} still reports what the service declared; {@code exposureFactor} is then 1.0.
      */
     public record ScoreBreakdown(
             double severityFactor,
             ServiceExposure exposure,
             double exposureFactor,
+            boolean exposureApplies,
             BusinessCriticality criticality,
             double criticalityFactor,
             MatchConfidence confidence,

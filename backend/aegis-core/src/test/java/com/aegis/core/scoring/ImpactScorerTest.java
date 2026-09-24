@@ -44,9 +44,12 @@ class ImpactScorerTest {
                 scorer.breakdown(severity, ServiceExposure.ISOLATED, BusinessCriticality.LOW, CONFIRMED));
 
         assertThat(publicCritical).isGreaterThan(internalCritical).isGreaterThan(isolatedLow);
-        assertThat(internalCritical).isEqualTo(60.0);
-        assertThat(isolatedLow).isEqualTo(10.0);
-        assertThat(scorer.tier(internalCritical)).isEqualTo(ImpactTier.HIGH);
+        // Internal costs CVSS's own Adjacent-network discount (0.9), not a band: still CRITICAL.
+        assertThat(internalCritical).isEqualTo(90.0);
+        // 0.5 (ISOLATED) x 0.25 (LOW) = 12.5 — a 10.0 stays material even on the least exposed, least
+        // important kind of service.
+        assertThat(isolatedLow).isEqualTo(12.5);
+        assertThat(scorer.tier(internalCritical)).isEqualTo(ImpactTier.CRITICAL);
         assertThat(scorer.tier(isolatedLow)).isEqualTo(ImpactTier.LOW);
     }
 
@@ -65,7 +68,8 @@ class ImpactScorerTest {
         assertThat(scorer.severityFromLabel("CRITICAL").factor()).isEqualTo(0.95);
         assertThat(scorer.severityFromLabel("major").factor()).isEqualTo(0.75);
         assertThat(scorer.severityFromLabel("  Minor  ").factor()).isEqualTo(0.5);
-        assertThat(scorer.severityFromLabel("none").factor()).isEqualTo(0.1);
+        // A no-impact notice sits under the materiality threshold even on a worst-case service.
+        assertThat(scorer.severityFromLabel("none").factor()).isEqualTo(0.05);
         assertThat(scorer.severityFromLabel("HIGH").source()).isEqualTo(SeveritySource.SEVERITY_LABEL);
     }
 
@@ -96,12 +100,13 @@ class ImpactScorerTest {
 
     @Test
     void bandsScoresIntoTiersAtTheConfiguredBoundaries() {
-        assertThat(scorer.tier(75.0)).isEqualTo(ImpactTier.CRITICAL);
-        assertThat(scorer.tier(74.9)).isEqualTo(ImpactTier.HIGH);
-        assertThat(scorer.tier(50.0)).isEqualTo(ImpactTier.HIGH);
-        assertThat(scorer.tier(49.9)).isEqualTo(ImpactTier.MEDIUM);
-        assertThat(scorer.tier(25.0)).isEqualTo(ImpactTier.MEDIUM);
-        assertThat(scorer.tier(24.9)).isEqualTo(ImpactTier.LOW);
+        // The CVSS v3.1 bands scaled to 0-100: 9.0 / 7.0 / 4.0.
+        assertThat(scorer.tier(90.0)).isEqualTo(ImpactTier.CRITICAL);
+        assertThat(scorer.tier(89.9)).isEqualTo(ImpactTier.HIGH);
+        assertThat(scorer.tier(70.0)).isEqualTo(ImpactTier.HIGH);
+        assertThat(scorer.tier(69.9)).isEqualTo(ImpactTier.MEDIUM);
+        assertThat(scorer.tier(40.0)).isEqualTo(ImpactTier.MEDIUM);
+        assertThat(scorer.tier(39.9)).isEqualTo(ImpactTier.LOW);
         assertThat(scorer.tier(10.0)).isEqualTo(ImpactTier.LOW);
         assertThat(scorer.tier(9.9)).isEqualTo(ImpactTier.NEGLIGIBLE);
         assertThat(scorer.tier(0.0)).isEqualTo(ImpactTier.NEGLIGIBLE);
@@ -115,15 +120,15 @@ class ImpactScorerTest {
         // A trivial advisory on an isolated, low-tier service is exactly the noise this suppresses.
         double noise = scorer.score(
                 scorer.breakdown(0.25, ServiceExposure.ISOLATED, BusinessCriticality.LOW, CONFIRMED));
-        assertThat(noise).isEqualTo(2.5);
+        assertThat(noise).isEqualTo(3.1);
         assertThat(scorer.material(noise)).isFalse();
     }
 
     @Test
     void roundsToOneDecimalAndStaysWithinTheScale() {
-        // 0.333 x 0.6 x 0.75 = 0.14985 -> 14.985 -> 15.0
-        assertThat(scorer.score(scorer.breakdown(0.333, ServiceExposure.INTERNAL, BusinessCriticality.HIGH, CONFIRMED)))
-                .isEqualTo(15.0);
+        // 0.3 x 0.9 x 0.25 = 0.0675 -> 6.75 -> 6.8 (half up)
+        assertThat(scorer.score(scorer.breakdown(0.3, ServiceExposure.INTERNAL, BusinessCriticality.LOW, CONFIRMED)))
+                .isEqualTo(6.8);
         // Out-of-range severity is clamped, never allowed to push a score past 100 or below 0.
         assertThat(scorer.score(
                         scorer.breakdown(4.0, ServiceExposure.INTERNET_FACING, BusinessCriticality.CRITICAL, CONFIRMED)))
@@ -136,11 +141,12 @@ class ImpactScorerTest {
     @Test
     void honoursSuppliedWeightsRatherThanTheDefaults() {
         ScoringProperties strict = new ScoringProperties(
-                null, null, null, null, 0.5, new ScoringProperties.Tiers(90.0, 70.0, 40.0, 20.0), 20.0, null);
+                null, null, null, null, 0.5, new ScoringProperties.Tiers(95.0, 80.0, 50.0, 20.0), 20.0, null);
         ImpactScorer strictScorer = new ImpactScorer(strict);
 
-        assertThat(strictScorer.tier(75.0)).isEqualTo(ImpactTier.HIGH);
-        assertThat(strictScorer.tier(90.0)).isEqualTo(ImpactTier.CRITICAL);
+        assertThat(scorer.tier(90.0)).isEqualTo(ImpactTier.CRITICAL);
+        assertThat(strictScorer.tier(90.0)).isEqualTo(ImpactTier.HIGH);
+        assertThat(strictScorer.tier(95.0)).isEqualTo(ImpactTier.CRITICAL);
         assertThat(strictScorer.material(15.0)).isFalse();
         assertThat(scorer.material(15.0)).isTrue();
     }

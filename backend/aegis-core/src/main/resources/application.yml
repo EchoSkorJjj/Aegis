@@ -82,18 +82,23 @@ aegis:
   # so the score stays a 0-100 percentage of the worst case. Omit any entry to keep its default, and
   # omit the whole block to get the shipped model.
   scoring:
+    # Every default below is calibrated against the demo dataset (CS203-73) — the anchors it must satisfy,
+    # the resulting demo scores, and why each number is what it is are in aegis-core's
+    # SCORING-CALIBRATION.md, and ScoringCalibrationTest fails the build if a retune breaks an anchor.
     # How much of an advisory's severity a service's business tier retains.
     criticality:
       critical: ${AEGIS_SCORING_CRITICALITY_CRITICAL:1.0}
-      high: ${AEGIS_SCORING_CRITICALITY_HIGH:0.75}
+      high: ${AEGIS_SCORING_CRITICALITY_HIGH:0.8}
       medium: ${AEGIS_SCORING_CRITICALITY_MEDIUM:0.5}
       low: ${AEGIS_SCORING_CRITICALITY_LOW:0.25}
-    # How much an attacker's reach is worth. The floor is well above zero: an isolated service is not
-    # invulnerable, an insider or a compromised neighbour still reaches it.
+    # How much an attacker's reach is worth — CVSS's Attack Vector by another name, so INTERNAL takes CVSS
+    # v3.1's own Adjacent-vs-Network ratio (0.9). The floor is well above zero: an isolated service is not
+    # invulnerable, an insider or a compromised neighbour still reaches it. Applied to vulnerabilities
+    # only: a vendor outage takes an internal service down as surely as an internet-facing one.
     exposure:
       internet-facing: ${AEGIS_SCORING_EXPOSURE_INTERNET_FACING:1.0}
-      internal: ${AEGIS_SCORING_EXPOSURE_INTERNAL:0.6}
-      isolated: ${AEGIS_SCORING_EXPOSURE_ISOLATED:0.4}
+      internal: ${AEGIS_SCORING_EXPOSURE_INTERNAL:0.9}
+      isolated: ${AEGIS_SCORING_EXPOSURE_ISOLATED:0.5}
     # Discount applied for a match's confidence. Both 1.0 by default — confidence answers whether the
     # match applies, not how bad it is, and a POSSIBLE row is already flagged for review. Lower
     # `possible` to rank unreviewed matches below proven ones.
@@ -110,13 +115,14 @@ aegis:
     # Applied when a signal carries neither a CVSS score nor a severity label we recognise. Neutral,
     # never zero: not knowing how bad something is must not rank it as harmless.
     unknown-severity-factor: ${AEGIS_SCORING_UNKNOWN_SEVERITY_FACTOR:0.5}
-    # Lower bound of each impact tier on the 0-100 scale. Raise them for a stricter queue. Must be a
+    # Lower bound of each impact tier on the 0-100 scale: the CVSS v3.1 bands (9.0/7.0/4.0) scaled, so on
+    # a CRITICAL internet-facing service the tier is the published rating. Raise them for a stricter queue. Must be a
     # descending ladder within 0-100 (critical >= high >= medium >= low); a non-descending or
     # out-of-range ladder fails fast at startup rather than mis-tiering every score in silence.
     tiers:
-      critical: ${AEGIS_SCORING_TIER_CRITICAL:75.0}
-      high: ${AEGIS_SCORING_TIER_HIGH:50.0}
-      medium: ${AEGIS_SCORING_TIER_MEDIUM:25.0}
+      critical: ${AEGIS_SCORING_TIER_CRITICAL:90.0}
+      high: ${AEGIS_SCORING_TIER_HIGH:70.0}
+      medium: ${AEGIS_SCORING_TIER_MEDIUM:40.0}
       low: ${AEGIS_SCORING_TIER_LOW:10.0}
     # Below this score a result is returned but marked immaterial — the noise control, not a filter.
     materiality-threshold: ${AEGIS_SCORING_MATERIALITY_THRESHOLD:10.0}

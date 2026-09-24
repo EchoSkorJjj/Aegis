@@ -88,15 +88,15 @@ class ScoringRollupTest {
         assertThat(rollup.services()).extracting(rolled -> rolled.service().name())
                 .containsExactly("Customer Portal", "Internal Reporting");
         ServiceRollup portal = rollup.services().getFirst();
-        assertThat(portal.topScore()).isEqualTo(75.0);
-        assertThat(portal.tier()).isEqualTo(ImpactTier.CRITICAL);
+        assertThat(portal.topScore()).isEqualTo(80.0);
+        assertThat(portal.tier()).isEqualTo(ImpactTier.HIGH);
         assertThat(portal.signalCount()).isEqualTo(1);
         assertThat(portal.topSignal().externalId()).isEqualTo("CVE-2099-1");
 
         ServiceRollup reporting = rollup.services().getLast();
         // Two signals reached it; the roll-up reports its worst, and how much else is queued.
         assertThat(reporting.signalCount()).isEqualTo(2);
-        assertThat(reporting.topScore()).isEqualTo(10.0);
+        assertThat(reporting.topScore()).isEqualTo(12.5);
         assertThat(reporting.topSignal().externalId()).isEqualTo("CVE-2099-1");
         assertThat(reporting.materialSignalCount()).isEqualTo(1);
 
@@ -123,13 +123,13 @@ class ScoringRollupTest {
         assertThat(reporting.topSignal().externalId()).isEqualTo("CVE-2099-1");
         assertThat(reporting.topFactors()).extracting(ScoreFactor::input)
                 .containsExactly("CVSS 3.1 base 10", "ISOLATED", "LOW", "CONFIRMED");
-        // 1.0 x 0.4 x 0.25 = 10.0; CRITICAL would make it 40.0, the most any one factor could add.
+        // 1.0 x 0.5 x 0.25 = 12.5; CRITICAL would make it 50.0, the most any one factor could add.
         assertThat(reporting.topFactors()).filteredOn(ScoreFactor::limiting)
                 .extracting(ScoreFactor::factor)
                 .containsExactly(ScoreFactorKind.CRITICALITY);
         assertThat(reporting.topExplanation())
-                .contains("scores 10.0 (LOW) for Internal Reporting")
-                .endsWith("; criticality (LOW) holds it down most, costing 30.0 points");
+                .contains("scores 12.5 (LOW) for Internal Reporting")
+                .endsWith("; criticality (LOW) holds it down most, costing 37.5 points");
 
         // The owner's headline is the same score, so it carries the same reasons.
         OwnerRollup data = rollup.owners().getFirst();

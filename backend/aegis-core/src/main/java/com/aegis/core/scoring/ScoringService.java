@@ -183,7 +183,7 @@ public class ScoringService {
     private ScoredService scoreService(
             ChangeMatchResponse match, SeverityInput severity, ImpactedServiceMatch impacted) {
         ServiceRef service = impacted.service();
-        ScoreBreakdown breakdown = scorer.breakdown(
+        ScoreBreakdown breakdown = scorer.breakdown(match.change().signalType(),
                 severity.factor(), service.exposure(), service.criticality(), impacted.confidence());
         double score = scorer.score(breakdown);
         ImpactTier tier = scorer.tier(score);
