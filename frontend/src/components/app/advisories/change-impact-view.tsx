@@ -291,7 +291,11 @@ function WhyThisScore({ scored }: { scored: ScoredService }) {
       </div>
       <ul className="space-y-2.5">
         {factors.map((factor) => (
-          <FactorRow key={factor.factor} factor={factor} />
+          <FactorRow
+            key={factor.factor}
+            factor={factor}
+            notApplied={factor.factor === "EXPOSURE" && !scored.breakdown.exposureApplies}
+          />
         ))}
       </ul>
       <p className="mt-3 text-xs text-muted-foreground">
@@ -316,12 +320,12 @@ function WhyThisScore({ scored }: { scored: ScoredService }) {
   );
 }
 
-function FactorRow({ factor }: { factor: ScoreFactor }) {
+function FactorRow({ factor, notApplied }: { factor: ScoreFactor; notApplied: boolean }) {
   return (
     <li className="flex items-center gap-3">
       <div className="flex w-24 shrink-0 items-center gap-1 text-sm font-medium">
         {FACTOR_LABEL[factor.factor]}
-        <SettingHint factor={factor} />
+        <SettingHint factor={factor} notApplied={notApplied} />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2 text-xs">
@@ -329,14 +333,19 @@ function FactorRow({ factor }: { factor: ScoreFactor }) {
           <span className="font-mono tabular-nums">×{factor.weight.toFixed(2)}</span>
         </div>
         <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-          <div
-            className={`h-full rounded-full ${factor.limiting ? "bg-amber-500" : "bg-foreground/50"}`}
-            style={{ width: `${Math.round(factor.weight * 100)}%` }}
-          />
+          {/* A term that does not apply gets no bar: ×1.00 there is "not counted", not "at max". */}
+          {!notApplied && (
+            <div
+              className={`h-full rounded-full ${factor.limiting ? "bg-amber-500" : "bg-foreground/50"}`}
+              style={{ width: `${Math.round(factor.weight * 100)}%` }}
+            />
+          )}
         </div>
       </div>
       <div className="w-20 shrink-0 text-right text-xs tabular-nums">
-        {factor.headroom > 0 ? (
+        {notApplied ? (
+          <span className="text-muted-foreground/70">n/a</span>
+        ) : factor.headroom > 0 ? (
           <span
             className={
               factor.limiting ? "font-medium text-amber-600 dark:text-amber-400" : "text-muted-foreground"
@@ -354,12 +363,14 @@ function FactorRow({ factor }: { factor: ScoreFactor }) {
 }
 
 /** Where a weight comes from — the setting to change, or why there is none. */
-function SettingHint({ factor }: { factor: ScoreFactor }) {
-  const text = factor.setting
-    ? `Weight set by ${factor.setting}`
-    : factor.factor === "SEVERITY"
-      ? "Published by the advisory feed (CVSS) — not a configurable weight"
-      : "Built-in fallback — the service doesn't declare this attribute";
+function SettingHint({ factor, notApplied }: { factor: ScoreFactor; notApplied: boolean }) {
+  const text = notApplied
+    ? "Not applied — exposure is attack reach, and an outage takes internal services down too"
+    : factor.setting
+      ? `Weight set by ${factor.setting}`
+      : factor.factor === "SEVERITY"
+        ? "Published by the advisory feed (CVSS) — not a configurable weight"
+        : "Built-in fallback — the service doesn't declare this attribute";
   return (
     <Tooltip>
       <TooltipTrigger

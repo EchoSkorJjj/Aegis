@@ -411,6 +411,8 @@ export interface ScoreBreakdown {
   severityFactor: number;
   exposure: ServiceExposure | null;
   exposureFactor: number;
+  /** False for a vendor outage: exposure is attack reach, and an outage is not an attack. */
+  exposureApplies: boolean;
   criticality: BusinessCriticality | null;
   criticalityFactor: number;
   confidence: MatchConfidence | null;
