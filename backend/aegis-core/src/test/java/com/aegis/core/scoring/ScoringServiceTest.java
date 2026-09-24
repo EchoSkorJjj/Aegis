@@ -20,6 +20,8 @@ import com.aegis.core.matching.MatchingService;
 import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.scoring.ScoringDtos.ChangeImpactResponse;
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
+import com.aegis.core.scoring.ScoringDtos.ScoreFactor;
+import com.aegis.core.scoring.ScoringDtos.ScoreFactorKind;
 import com.aegis.core.scoring.ScoringDtos.ScoredOwner;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.scoring.ScoringDtos.SeveritySource;
@@ -86,8 +88,36 @@ class ScoringServiceTest {
                         + "(CVSS 3.1 base 10) x exposure 1.00 (INTERNET_FACING) x criticality 1.00 (CRITICAL)");
 
         ScoredService least = response.services().getLast();
-        assertThat(least.score()).isEqualTo(10.0);
+        assertThat(least.score()).isEqualTo(12.5);
         assertThat(least.tier()).isEqualTo(ImpactTier.LOW);
+    }
+
+    @Test
+    void surfacesEachContributingFactorAndWhatHoldsTheScoreDown() {
+        UUID signalId = UUID.randomUUID();
+        ChangeSignal signal = signal(signalId, SignalType.VULNERABILITY, null);
+
+        stubSignal(signal);
+        stubAdvisory(signal, cvss("3.1", "10.0"));
+        stubMatch(signalId, signal,
+                impacted(service("Internal Reporting", BusinessCriticality.LOW, ServiceExposure.ISOLATED)));
+
+        ScoredService scored = scoring.scoreChange(signalId).services().getFirst();
+
+        // 1.0 x 0.5 (ISOLATED) x 0.25 (LOW) = 12.5. Were it CRITICAL it would score 50.0, were it
+        // internet-facing 25.0 — so the business tier, not the exposure, is what keeps it low.
+        assertThat(scored.score()).isEqualTo(12.5);
+        assertThat(scored.factors()).extracting(ScoreFactor::factor).containsExactly(
+                ScoreFactorKind.SEVERITY, ScoreFactorKind.EXPOSURE,
+                ScoreFactorKind.CRITICALITY, ScoreFactorKind.CONFIDENCE);
+        assertThat(scored.factors()).extracting(ScoreFactor::input)
+                .containsExactly("CVSS 3.1 base 10", "ISOLATED", "LOW", "CONFIRMED");
+        assertThat(scored.factors()).extracting(ScoreFactor::headroom).containsExactly(0.0, 12.5, 37.5, 0.0);
+        assertThat(scored.factors()).filteredOn(ScoreFactor::limiting)
+                .extracting(ScoreFactor::factor)
+                .containsExactly(ScoreFactorKind.CRITICALITY);
+        assertThat(scored.explanation())
+                .endsWith("; criticality (LOW) holds it down most, costing 37.5 points");
     }
 
     @Test
@@ -107,7 +137,8 @@ class ScoringServiceTest {
 
         // Under-scoring because one feed lagged is the failure that matters, so the worst score wins.
         assertThat(response.severity().cvssBaseScore()).isEqualByComparingTo("9.8");
-        assertThat(response.services().getFirst().score()).isEqualTo(44.1);
+        // 0.98 x 0.9 (INTERNAL) x 0.8 (HIGH) = 70.56 -> 70.6
+        assertThat(response.services().getFirst().score()).isEqualTo(70.6);
     }
 
     @Test
@@ -137,15 +168,20 @@ class ScoringServiceTest {
                 null, "major", null, Instant.EPOCH, Instant.EPOCH, Instant.EPOCH);
 
         stubSignal(signal);
+        // Isolated on purpose: an outage is not an attack, so the service's exposure must not discount it.
         stubMatch(signalId, signal,
-                impacted(service("Checkout", BusinessCriticality.CRITICAL, ServiceExposure.INTERNET_FACING)));
+                impacted(service("Checkout", BusinessCriticality.CRITICAL, ServiceExposure.ISOLATED)));
 
         ChangeImpactResponse response = scoring.scoreChange(signalId);
 
         // No advisory is consulted at all for an outage — there is no CVSS to look up.
         assertThat(response.severity().source()).isEqualTo(SeveritySource.SEVERITY_LABEL);
         assertThat(response.severity().factor()).isEqualTo(0.75);
-        assertThat(response.services().getFirst().score()).isEqualTo(75.0);
+        ScoredService checkout = response.services().getFirst();
+        assertThat(checkout.score()).isEqualTo(75.0);
+        assertThat(checkout.breakdown().exposure()).isEqualTo(ServiceExposure.ISOLATED);
+        assertThat(checkout.breakdown().exposureApplies()).isFalse();
+        assertThat(checkout.breakdown().exposureFactor()).isEqualTo(1.0);
     }
 
     @Test
@@ -170,15 +206,15 @@ class ScoringServiceTest {
         assertThat(owners).extracting(owner -> owner.owner().name())
                 .containsExactly("Web Platform Team", "Data Team");
         ScoredOwner web1 = owners.getFirst();
-        // 75 + 50 would outrank a single genuinely critical service; the worst one is what matters.
-        assertThat(web1.score()).isEqualTo(75.0);
-        assertThat(web1.tier()).isEqualTo(ImpactTier.CRITICAL); // 75.0 is the inclusive CRITICAL floor
+        // 80 + 50 would outrank a single genuinely critical service; the worst one is what matters.
+        assertThat(web1.score()).isEqualTo(80.0);
+        assertThat(web1.tier()).isEqualTo(ImpactTier.HIGH);
         assertThat(web1.impactedServiceCount()).isEqualTo(2);
         assertThat(web1.materialServiceCount()).isEqualTo(2);
         assertThat(web1.topService().name()).isEqualTo("Customer Portal");
 
         ScoredOwner dataTeam = owners.getLast();
-        assertThat(dataTeam.score()).isEqualTo(10.0);
+        assertThat(dataTeam.score()).isEqualTo(12.5);
         assertThat(dataTeam.impactedServiceCount()).isEqualTo(1);
     }
 
@@ -199,7 +235,7 @@ class ScoringServiceTest {
 
         // Confidence answers "does this apply", severity/exposure/criticality answer "how bad if it
         // does" — so an unreviewed match keeps its real score and is flagged, not silently discounted.
-        assertThat(services).extracting(ScoredService::score).containsExactly(45.0, 45.0);
+        assertThat(services).extracting(ScoredService::score).containsExactly(72.0, 72.0);
         assertThat(services).extracting(ScoredService::confidence)
                 .containsExactlyInAnyOrder(MatchConfidence.CONFIRMED, MatchConfidence.POSSIBLE);
     }

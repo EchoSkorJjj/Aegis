@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import static com.aegis.core.matching.MatchingDtos.MatchConfidence.CONFIRMED;
 import static com.aegis.core.matching.MatchingDtos.MatchConfidence.POSSIBLE;
+import static com.aegis.core.signals.ChangeSignal.SignalType.VULNERABILITY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -25,10 +26,10 @@ class ScoringPropertiesTest {
         assertThat(defaults.criticalityFactor(BusinessCriticality.CRITICAL)).isEqualTo(1.0);
         assertThat(defaults.criticalityFactor(BusinessCriticality.LOW)).isEqualTo(0.25);
         assertThat(defaults.exposureFactor(ServiceExposure.INTERNET_FACING)).isEqualTo(1.0);
-        assertThat(defaults.exposureFactor(ServiceExposure.ISOLATED)).isEqualTo(0.4);
+        assertThat(defaults.exposureFactor(ServiceExposure.ISOLATED)).isEqualTo(0.5);
         assertThat(defaults.unknownSeverityFactor()).isEqualTo(0.5);
         assertThat(defaults.materialityThreshold()).isEqualTo(10.0);
-        assertThat(defaults.tiers().critical()).isEqualTo(75.0);
+        assertThat(defaults.tiers().critical()).isEqualTo(90.0);
         assertThat(defaults.rollup().maxSignals()).isEqualTo(200);
         assertThat(defaults.rollup().defaultWindow()).isEqualTo(Duration.ofDays(30));
         // Confidence is reported, not discounted, unless a deployment says otherwise.
@@ -49,9 +50,9 @@ class ScoringPropertiesTest {
         assertThat(tuned.criticalityFactor(BusinessCriticality.LOW)).isEqualTo(0.05);
         // The entries it did not mention keep their defaults rather than vanishing.
         assertThat(tuned.criticalityFactor(BusinessCriticality.CRITICAL)).isEqualTo(1.0);
-        assertThat(tuned.criticalityFactor(BusinessCriticality.HIGH)).isEqualTo(0.75);
+        assertThat(tuned.criticalityFactor(BusinessCriticality.HIGH)).isEqualTo(0.8);
         assertThat(tuned.criticalityFactor(BusinessCriticality.MEDIUM)).isEqualTo(0.5);
-        assertThat(tuned.exposureFactor(ServiceExposure.INTERNAL)).isEqualTo(0.6);
+        assertThat(tuned.exposureFactor(ServiceExposure.INTERNAL)).isEqualTo(0.9);
     }
 
     @Test
@@ -62,15 +63,15 @@ class ScoringPropertiesTest {
                 new ScoringProperties(null, null, halved, null, null, null, null, null));
         ImpactScorer shipped = new ImpactScorer(ScoringProperties.defaults());
 
-        double confirmed = strict.score(strict.breakdown(
+        double confirmed = strict.score(strict.breakdown(VULNERABILITY,
                 1.0, ServiceExposure.INTERNET_FACING, BusinessCriticality.CRITICAL, CONFIRMED));
-        double possible = strict.score(strict.breakdown(
+        double possible = strict.score(strict.breakdown(VULNERABILITY,
                 1.0, ServiceExposure.INTERNET_FACING, BusinessCriticality.CRITICAL, POSSIBLE));
 
         assertThat(confirmed).isEqualTo(100.0);
         assertThat(possible).isEqualTo(50.0);
         // The shipped model leaves both alone, so enabling the discount is a deliberate act.
-        assertThat(shipped.score(shipped.breakdown(
+        assertThat(shipped.score(shipped.breakdown(VULNERABILITY,
                         1.0, ServiceExposure.INTERNET_FACING, BusinessCriticality.CRITICAL, POSSIBLE)))
                 .isEqualTo(100.0);
     }
@@ -84,9 +85,9 @@ class ScoringPropertiesTest {
 
         assertThat(broken.unknownSeverityFactor()).isEqualTo(0.5);
         assertThat(broken.materialityThreshold()).isEqualTo(10.0);
-        assertThat(broken.tiers().high()).isEqualTo(50.0);
+        assertThat(broken.tiers().high()).isEqualTo(70.0);
         assertThat(broken.rollup().maxSignals()).isEqualTo(200);
-        assertThat(broken.criticalityFactor(BusinessCriticality.HIGH)).isEqualTo(0.75);
+        assertThat(broken.criticalityFactor(BusinessCriticality.HIGH)).isEqualTo(0.8);
     }
 
     @Test
@@ -136,6 +137,6 @@ class ScoringPropertiesTest {
                 null, null, null, null, null, new ScoringProperties.Tiers(95.0, 85.0, 70.0, 50.0), null, null));
 
         assertThat(lenient.tier(80.0)).isEqualTo(ImpactTier.MEDIUM);
-        assertThat(new ImpactScorer(ScoringProperties.defaults()).tier(80.0)).isEqualTo(ImpactTier.CRITICAL);
+        assertThat(new ImpactScorer(ScoringProperties.defaults()).tier(80.0)).isEqualTo(ImpactTier.HIGH);
     }
 }

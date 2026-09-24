@@ -1,3 +1,5 @@
+import { NextResponse } from "next/server";
+
 import { backendFetch, type BackendResult } from "@/lib/server/backend";
 import {
   clearSession,
@@ -44,4 +46,28 @@ export async function authedBackendFetch(
   const tokens = refreshed.data as TokenResponse;
   await writeSession(tokens);
   return backendFetch(path, { ...init, token: tokens.accessToken });
+}
+
+/** The route context of a `[[...path]]` catch-all BFF route. */
+export type CatchAllRouteContext = { params: Promise<{ path?: string[] }> };
+
+/**
+ * The catch-all proxy shared by the BFF's GET-only domain routes (change signals, matching, scoring):
+ * forwards `{prefix}/{...path}?{query}` to the gateway as the signed-in user and passes the backend's
+ * status and body straight through (a 403 stays a 403). Dot segments are refused, so a crafted path
+ * can't climb out of `prefix` on the gateway.
+ */
+export async function proxyReadOnlyGet(
+  prefix: string,
+  request: Request,
+  ctx: CatchAllRouteContext,
+): Promise<NextResponse> {
+  const { path = [] } = await ctx.params;
+  if (path.some((segment) => segment === "." || segment === "..")) {
+    return NextResponse.json({ message: "Invalid path" }, { status: 400 });
+  }
+  const query = new URL(request.url).search;
+  const suffix = path.length > 0 ? `/${path.join("/")}` : "";
+  const result = await authedBackendFetch(`${prefix}${suffix}${query}`, { method: "GET" });
+  return NextResponse.json(result.data ?? {}, { status: result.status });
 }

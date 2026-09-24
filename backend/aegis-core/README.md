@@ -4,20 +4,22 @@ The domain and pipeline service for Aegis (Java / Spring): the inventory & map o
 advisory ingestion, matching, scoring, and the execution of approved actions. The AI steps
 (**assess** and **draft**) live in a separate Python **ai-service**, reached through the `ai` port.
 See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../../BUILD_PLAN.md), and
-[`docs/adr/0001-aegis-core-language.md`](../../docs/adr/0001-aegis-core-language.md).
+[`docs/adr/0001-aegis-architecture-and-multi-tenancy.md`](../../docs/adr/0001-aegis-architecture-and-multi-tenancy.md).
 
 > **Status:** the Spring Boot wiring, security, module seams, and AI port are in place. The inventory
 > module persists its core entities and direct relationships, exposes authenticated CRUD APIs, and
 > answers impact graph queries (component/vendor → impacted services + owners, including transitive
-> component dependents); the ingestion framework (scheduled polling, dedup, raw-event store) runs three
-> connectors — the **NVD CVE feed** (CPE, CVSS and affected versions → advisories), **vendor status
+> component dependents); the ingestion framework (scheduled polling, dedup, raw-event store) runs four
+> connectors — the **NVD CVE feed** (CPE, CVSS and affected versions → advisories), **OSV**
+> (ecosystem-native advisories keyed by purl; off by default), **vendor status
 > pages** (Statuspage/RSS → vendor incidents), and **security news** (RSS/Atom → articles with the CVE
 > identifiers they mention) — unified for reading through the **`change_signals`** view, with
 > per-feed health/counts/last-success exposed as Prometheus metrics. **Deterministic matching is
 > built:** advisory CPE/package + SemVer range matching, dependency and vendor traversal, and explicit
 > evidence chains. **Impact scoring is built:** every impacted service is scored
 > `severity x exposure x criticality`, banded into a tier and rolled up per owner and per service,
-> with every weight in the model configurable. Action workflows remain planned.
+> with every weight in the model configurable and every score's contributing factors surfaced.
+> Action workflows remain planned.
 
 ## Modules (a modular monolith, split by seams later)
 
@@ -445,13 +447,18 @@ is weak on any one axis cannot be pushed to the top by the other two. Same read 
   outage is scored. An absent or unrecognised label falls back to a neutral `0.5`, never to zero:
   not knowing how bad something is must not rank it below something known to be mild. The response's
   `severity.source` says which of the three applied.
-- **exposure** — the `ServiceExposure` declared on the service (`INTERNET_FACING` 1.0, `INTERNAL` 0.6,
-  `ISOLATED` 0.4). The floor is well above zero because an isolated service is not invulnerable.
+- **exposure** — the `ServiceExposure` declared on the service (`INTERNET_FACING` 1.0, `INTERNAL` 0.9,
+  `ISOLATED` 0.5). The floor is well above zero because an isolated service is not invulnerable.
+  Exposure is inbound attack reach, so it applies to vulnerabilities only: a vendor outage takes an
+  internal service down as surely as an internet-facing one, and its breakdown says
+  `exposureApplies: false`.
 - **criticality** — the service's business tier (`CRITICAL` 1.0 → `LOW` 0.25).
 
-Each scored service carries the full `breakdown` (every factor and the input it came from) and a
-deterministic `explanation`, so a ranking can be reproduced by hand and argued with. A score is
-banded into an `ImpactTier` (`CRITICAL` ≥ 75, `HIGH` ≥ 50, `MEDIUM` ≥ 25, `LOW` ≥ 10, else
+Each scored service carries the full `breakdown` (every multiplier, enough to reproduce the score by
+hand), its contributing `factors` (below), a deterministic `explanation`, and matching's `evidence`
+chains for it (the response also carries the match counts), so a ranking can be reproduced and argued
+with, and a page showing scores needs no second match request. A score is
+banded into an `ImpactTier` (`CRITICAL` ≥ 90, `HIGH` ≥ 70, `MEDIUM` ≥ 40, `LOW` ≥ 10, else
 `NEGLIGIBLE`) and marked `material` once it clears the materiality threshold (10.0). Immaterial rows
 are still returned with their evidence — this ranks noise down, it does not hide it.
 
@@ -467,6 +474,37 @@ Like matching, scoring is recomputed per request and persists nothing: a score d
 SBOM and today's CVSS data would be a lie tomorrow, and the findings table that freezes one is a
 later epic. Security-news signals are rejected by matching before scoring sees them.
 
+### Why this score — contributing factors (CS203-72)
+
+Every scored service lists its `factors`: one entry per term of the model, always in the order
+`SEVERITY`, `EXPOSURE`, `CRITICALITY`, `CONFIDENCE`, so a client can render "why this number" without
+knowing the model's shape.
+
+| Field | Meaning |
+|---|---|
+| `factor` | Which term this is |
+| `input` | What the multiplier was read from: `CVSS 3.1 base 9.8`, `severity major`, `INTERNET_FACING`, `HIGH`, `CONFIRMED`, … |
+| `weight` | The multiplier, in `[0,1]` |
+| `headroom` | Points the score would gain if this factor alone were at its maximum (1.0) — what it is costing the score |
+| `limiting` | True for the factor with the most headroom: the one holding the score down (every one tied, if several are; none at the worst case) |
+| `setting` | The `aegis.scoring.*` key that sets the weight, e.g. `aegis.scoring.exposure.internal`; `null` for a feed-published CVSS score or a built-in fallback |
+
+Headroom rather than a "percentage share" because the model is a product, not a sum — a share would
+pretend the terms are independent. Headroom reads the way an argument about a score actually goes:
+"were this service internet-facing it would be 32 points higher". It is computed by re-scoring with
+that one factor at 1.0, so `score + headroom` is exactly what the reader would see after the change,
+rounding included. The `explanation` sentence names the limiting factor too:
+
+```
+CVE-2099-1 scores 32.0 (LOW) for Orders: severity 0.80 (CVSS 3.1 base 8) x exposure 0.50 (ISOLATED)
+x criticality 0.80 (HIGH); exposure (ISOLATED) holds it down most, costing 32.0 points
+```
+
+Roll-up rows carry the same reasons for their headline number: each `ServiceRollup` and `OwnerRollup`
+has `topFactors` and `topExplanation`, the factors of the score `topSignal` earned against that service.
+The change-impact page in the frontend (`/advisories/{id}`) shows the score, tier, and factors on each
+impacted service.
+
 ### Configurable weights
 
 Every number the model multiplies lives under `aegis.scoring.*` (see `application.yml`), because the
@@ -475,14 +513,22 @@ tool is another's revenue path. Omit any entry to keep its default, or the whole
 shipped model; an override changes only what it names, so retuning one tier does not require
 restating the table.
 
+The defaults are **calibrated against the demo dataset (CS203-73)**, not picked by feel: the tiers are
+the CVSS v3.1 bands (so on a CRITICAL internet-facing service the tier is the published rating), and
+the weights are the smallest change to the original ones that satisfies a set of written anchors —
+e.g. Log4Shell on the demo's internal Order Service is HIGH, a critical CVE is never immaterial, and an
+outage is never discounted for exposure. [`SCORING-CALIBRATION.md`](SCORING-CALIBRATION.md) has the
+anchors, the method, the reviewed demo table, and the known limits; `ScoringCalibrationTest` enforces
+all of it against the real demo files, so a retune that breaks an anchor fails the build.
+
 | Key | Default | What it moves |
 |---|---|---|
-| `aegis.scoring.criticality.*` | `1.0 / 0.75 / 0.5 / 0.25` | How much severity a business tier retains |
-| `aegis.scoring.exposure.*` | `1.0 / 0.6 / 0.4` | What an attacker's reach is worth |
+| `aegis.scoring.criticality.*` | `1.0 / 0.8 / 0.5 / 0.25` | How much severity a business tier retains |
+| `aegis.scoring.exposure.*` | `1.0 / 0.9 / 0.5` | What an attacker's reach is worth |
 | `aegis.scoring.confidence.*` | `1.0 / 1.0` | Optional discount for an unreviewed (`POSSIBLE`) match |
-| `aegis.scoring.severity-label.*` | `critical 0.95 … none 0.1` | Severity per feed word when there is no CVSS; add a word for a new feed vocabulary |
+| `aegis.scoring.severity-label.*` | `critical 0.95 … none 0.05` | Severity per feed word when there is no CVSS; add a word for a new feed vocabulary |
 | `aegis.scoring.unknown-severity-factor` | `0.5` | Applied when neither a CVSS score nor a known label exists |
-| `aegis.scoring.tiers.*` | `75 / 50 / 25 / 10` | Lower bound of each `ImpactTier` |
+| `aegis.scoring.tiers.*` | `90 / 70 / 40 / 10` | Lower bound of each `ImpactTier` |
 | `aegis.scoring.materiality-threshold` | `10.0` | Below this a result is returned but marked immaterial |
 | `aegis.scoring.rollup.max-signals` | `200` | Ceiling on signals one roll-up may score |
 | `aegis.scoring.rollup.default-window` | `P30D` | How far back a roll-up reaches with no `from` |
@@ -514,7 +560,39 @@ which is the question an owner actually opens the app with.
   `signalCount` / `materialSignalCount` say how much else is queued behind it.
 - The work is bounded twice: by the window and by `rollup.max-signals` (a caller's `limit` is clamped
   to it). Each signal costs a match and a graph traversal, so this is a ceiling on what one request
-  can ask for. When the window held more, the newest are scored and the response sets `truncated` —
-  a roll-up that quietly covered an arbitrary subset would be worse than one that admits it.
+  can ask for. When the window held more, the newest are scored (by `occurredAt`, then id) and the
+  response sets `truncated` — a roll-up that quietly covered an arbitrary subset would be worse than one
+  that admits it.
 - Security-news signals are skipped rather than rejected: they carry no package or vendor identity,
-  and one unmatchable article must not fail the whole roll-up.
+  and one unmatchable article must not fail the whole roll-up. Nor does any other single signal whose
+  match fails: it is counted in `signalsSkipped` and the rest still rank.
+
+### Determinism and ranking guarantees (CS203-74)
+
+A score someone acted on must be reproducible later, and a work queue that reshuffles between two page
+loads is not a queue. These are guaranteed, and each is enforced by a named test:
+
+| Guarantee | Enforced by |
+|---|---|
+| A score is the **exact decimal** product of the factors shown, rounded half-up — the hand calculation, never a floating-point neighbour of it (checked for every CVSS score 0.0-10.0 x every service profile) | `ScoringDeterminismTest` |
+| The same signal and estate give the **same response** — on a rerun, and whatever order matching or the database hands things over in | `ScoringDeterminismTest` |
+| **Ties break stably**: equal scores by name (ignoring case), then id; equal CVSS scores across feeds by the newer CVSS version, then feed; a roll-up tie goes to the newest signal | `ScoringDeterminismTest` |
+| A worse input **never ranks lower**: more severe, more exposed, more critical, confirmed over possible, a worse outage word | `ScoringRankingTest` (full input grid) |
+| The **tier never contradicts the score**, and *immaterial* is exactly *NEGLIGIBLE* | `ScoringRankingTest` |
+| Every list is in **score order**; an owner stands exactly where their worst service stands | `ScoringRankingTest` (randomised estates, fixed seed) |
+| The **roll-up agrees** with scoring each signal on its own — same top score, same reasons, same counts | `ScoringRankingTest`, `ScoringApiIntegrationTest` |
+| A truncated roll-up covers the **newest** signals; one failing signal is **skipped**, not fatal | `ScoringApiIntegrationTest`, `ScoringRollupResilienceIntegrationTest` |
+
+Writing these tests found four real defects, each reproduced by a failing test before it was fixed:
+
+- **Floating-point rounding.** Scores were multiplied as doubles, so 0.07 x 0.5 x 0.5 = 1.75 came out as
+  1.7499… and displayed 1.7 — 98 of 2,424 CVSS combinations read a tenth low, and a CVSS 9.8 showed its
+  factor as `0.9800000000000001`. Products are now exact decimals.
+- **Unsorted roll-up page.** The roll-up asked the store for an unsorted page, so "the newest are scored"
+  was not true: Postgres returned the `change_signals` view in scan order, and a truncated roll-up
+  scored the *oldest* signal first (100.0 instead of 50.0 in the integration test).
+- **Feed-order CVSS.** When two feeds published the same base score under different CVSS versions, the
+  version reported — and the explanation sentence — depended on which row the database returned first.
+- **The roll-up's skip never worked.** A signal whose match threw marked the roll-up's shared transaction
+  rollback-only; the roll-up caught it, stepped over the signal, and then failed with a 500 at commit.
+  Each signal now runs in its own transaction.

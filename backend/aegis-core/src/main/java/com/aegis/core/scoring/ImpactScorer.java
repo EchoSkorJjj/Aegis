@@ -11,6 +11,7 @@ import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 import com.aegis.core.scoring.ScoringDtos.ScoreBreakdown;
 import com.aegis.core.scoring.ScoringDtos.SeverityInput;
 import com.aegis.core.scoring.ScoringDtos.SeveritySource;
+import com.aegis.core.signals.ChangeSignal.SignalType;
 import org.springframework.stereotype.Component;
 
 /**
@@ -50,7 +51,9 @@ public class ImpactScorer {
         if (baseScore == null) {
             return severityFromLabel(null);
         }
-        double factor = clamp(baseScore.doubleValue() / 10.0);
+        // Decimal division, not doubleValue() / 10: 9.8 / 10 in binary floating point is
+        // 0.9800000000000001, which then prints in every breakdown and mis-rounds products (CS203-74).
+        double factor = clamp(baseScore.movePointLeft(1).doubleValue());
         return new SeverityInput(SeveritySource.CVSS, cvssVersion, baseScore, null, factor);
     }
 
@@ -75,7 +78,13 @@ public class ImpactScorer {
     }
 
     /**
-     * The per-service breakdown: every factor and the input it was read from.
+     * The per-service breakdown: every factor and the input it was read from. The signal type is
+     * deliberately required: whether the exposure term applies depends on it.
+     *
+     * <p>Exposure is inbound attack reach, so it only discounts a vulnerability. A vendor outage is an
+     * availability incident — the AWS region is down for an internal service exactly as it is for an
+     * internet-facing one — so for any other signal type the exposure term is 1.0 and the breakdown
+     * says it was not applied, rather than a quietly different number (CS203-73).
      *
      * <p>{@code confidenceFactor} is 1.0 under the shipped weighting, so confidence is reported
      * without discounting the score — see {@link ScoringProperties}. A deployment that lowers
@@ -83,27 +92,38 @@ public class ImpactScorer {
      * term rather than hiding inside one of the other three.
      */
     public ScoreBreakdown breakdown(
+            SignalType signalType,
             double severityFactor,
             ServiceExposure exposure,
             BusinessCriticality criticality,
             MatchConfidence confidence) {
+        boolean exposureApplies = signalType == SignalType.VULNERABILITY;
         return new ScoreBreakdown(
                 clamp(severityFactor),
                 exposure,
-                weights.exposureFactor(exposure),
+                exposureApplies ? weights.exposureFactor(exposure) : 1.0,
+                exposureApplies,
                 criticality,
                 weights.criticalityFactor(criticality),
                 confidence,
                 weights.confidenceFactor(confidence));
     }
 
-    /** The 0-100 score for a breakdown, rounded to one decimal so it is stable to display and compare. */
+    /**
+     * The 0-100 score for a breakdown, rounded half-up to one decimal so it is stable to display and
+     * compare.
+     *
+     * <p>The product is taken in exact decimal arithmetic over the factors as they are displayed
+     * ({@code 0.98 x 0.9 x 0.8}), not in binary floating point. In doubles, 0.07 x 0.5 x 0.5 is
+     * 0.017499999..., so a score that is exactly 1.75 by hand rounded to 1.7 — one in every 25 CVSS
+     * combinations came out a tenth low, and at a tier bound that is a different tier (CS203-74).
+     */
     public double score(ScoreBreakdown breakdown) {
-        double product = breakdown.severityFactor()
-                * breakdown.exposureFactor()
-                * breakdown.criticalityFactor()
-                * breakdown.confidenceFactor();
-        return round(clamp(product) * 100.0);
+        BigDecimal product = BigDecimal.valueOf(clamp(breakdown.severityFactor()))
+                .multiply(BigDecimal.valueOf(clamp(breakdown.exposureFactor())))
+                .multiply(BigDecimal.valueOf(clamp(breakdown.criticalityFactor())))
+                .multiply(BigDecimal.valueOf(clamp(breakdown.confidenceFactor())));
+        return product.movePointRight(2).setScale(1, RoundingMode.HALF_UP).doubleValue();
     }
 
     public ImpactTier tier(double score) {
@@ -137,9 +157,5 @@ public class ImpactScorer {
             return 0;
         }
         return Math.min(value, 1.0);
-    }
-
-    private static double round(double value) {
-        return BigDecimal.valueOf(value).setScale(1, RoundingMode.HALF_UP).doubleValue();
     }
 }

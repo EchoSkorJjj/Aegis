@@ -26,7 +26,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *
  * <p>Each factor is a multiplier in {@code [0,1]}, so the product is too and the score stays a plain
  * percentage of "the worst this could be". Defaults are relative, not absolute: an internet-facing
- * service is worth 2.5x an isolated one, a CRITICAL tier 4x a LOW one.
+ * service is worth 2x an isolated one, a CRITICAL tier 4x a LOW one.
+ *
+ * <p><b>Calibration (CS203-73).</b> The shipped defaults are calibrated against the demo dataset, not
+ * picked by feel: they are the smallest change to the original weighting that makes every calibration
+ * anchor hold — e.g. on a worst-case service the tier is the published CVSS rating, and Log4Shell on
+ * the demo's internal Order Service is HIGH. The anchors, the demo results, and why each number is
+ * what it is live in {@code SCORING-CALIBRATION.md}; {@code ScoringCalibrationTest} enforces them, so
+ * a retune that breaks one fails the build rather than quietly re-ranking the queue.
  *
  * <p><b>Validation.</b> Absent values take the default. A present value that is out of range is
  * handled by its kind: a single weight or threshold has a safe reading, so it is clamped into range
@@ -149,6 +156,12 @@ public record ScoringProperties(
      * {@code critical} is CRITICAL, at or above {@code high} is HIGH, and so on; anything below
      * {@code low} is NEGLIGIBLE.
      *
+     * <p>The defaults are the CVSS v3.1 qualitative bands scaled to 0-100 (Critical 9.0, High 7.0,
+     * Medium 4.0, Low from the 1.0 the materiality threshold starts at), so on a service where nothing
+     * mitigates — CRITICAL tier, internet-facing — the impact tier is exactly the published rating, and
+     * every discount below that is the service's context speaking. The earlier quartile ladder
+     * (75/50/25) promoted every worst-case score a band above its CVSS rating: a 7.5 read CRITICAL.
+     *
      * <p>Unlike a single weight, a tier ladder cannot be clamped to something sensible: if the bounds
      * are not descending, or exceed the top of the scale, every score above the inversion mis-tiers
      * and there is no safe value to substitute. A broken ladder therefore throws — surfacing as a
@@ -159,13 +172,13 @@ public record ScoringProperties(
 
         public Tiers {
             if (critical == null || critical < 0) {
-                critical = 75.0;
+                critical = 90.0;
             }
             if (high == null || high < 0) {
-                high = 50.0;
+                high = 70.0;
             }
             if (medium == null || medium < 0) {
-                medium = 25.0;
+                medium = 40.0;
             }
             if (low == null || low < 0) {
                 low = 10.0;
@@ -204,11 +217,15 @@ public record ScoringProperties(
     /**
      * How much of an advisory's severity a service's business tier retains. A vulnerability in a
      * CRITICAL revenue path is the full number; the same one in a LOW internal tool is a quarter of it.
+     *
+     * <p>HIGH is 0.8 rather than the original 0.75: one step below the worst case may cost a critical
+     * CVE at most one band (9.0 x 0.8 = 72, still HIGH), and together with INTERNAL's 0.9 it keeps
+     * Log4Shell on the demo's internal Order Service at HIGH (72) rather than MEDIUM.
      */
     private static Map<BusinessCriticality, Double> defaultCriticality() {
         Map<BusinessCriticality, Double> weights = new EnumMap<>(BusinessCriticality.class);
         weights.put(BusinessCriticality.CRITICAL, 1.0);
-        weights.put(BusinessCriticality.HIGH, 0.75);
+        weights.put(BusinessCriticality.HIGH, 0.8);
         weights.put(BusinessCriticality.MEDIUM, 0.5);
         weights.put(BusinessCriticality.LOW, 0.25);
         return Map.copyOf(weights);
@@ -217,12 +234,23 @@ public record ScoringProperties(
     /**
      * How much an attacker's reach is worth. An isolated service is not invulnerable — an insider or a
      * compromised neighbour still reaches it — so the floor is well above zero, not 0.
+     *
+     * <p>Exposure is CVSS's Attack Vector by another name, so INTERNAL takes CVSS v3.1's own discount:
+     * re-scoring a critical network vector (AV:N/AC:L/PR:N/UI:N, 9.8) as Adjacent gives 8.8 — 0.9 of
+     * it. The original 0.6 punished internal services four times harder than CVSS itself does. ISOLATED
+     * is set by the noise window instead (see {@code SCORING-CALIBRATION.md}): on a LOW-tier isolated
+     * service a critical CVE must stay material and a medium one must not, which 0.5 x 0.25 satisfies
+     * with a point of margin either side.
+     *
+     * <p>Exposure measures inbound attack reach, so it applies to vulnerabilities only — a vendor outage
+     * takes an internal service down exactly as surely as an internet-facing one (see
+     * {@link ImpactScorer#breakdown}).
      */
     private static Map<ServiceExposure, Double> defaultExposure() {
         Map<ServiceExposure, Double> weights = new EnumMap<>(ServiceExposure.class);
         weights.put(ServiceExposure.INTERNET_FACING, 1.0);
-        weights.put(ServiceExposure.INTERNAL, 0.6);
-        weights.put(ServiceExposure.ISOLATED, 0.4);
+        weights.put(ServiceExposure.INTERNAL, 0.9);
+        weights.put(ServiceExposure.ISOLATED, 0.5);
         return Map.copyOf(weights);
     }
 
@@ -247,6 +275,11 @@ public record ScoringProperties(
      * that speaks a third can add its words here rather than living with the neutral fallback. An
      * unrecognised word still falls back to {@code unknownSeverityFactor}: a label we cannot read must
      * not rank as harmless.
+     *
+     * <p>Calibrated like CVSS: on a worst-case service each word lands in the tier it names (critical
+     * 95 CRITICAL, high/major 75 HIGH, medium/minor 50 MEDIUM, low 25 LOW). The no-impact words sit at
+     * 0.05 rather than 0.1 because 0.1 scored exactly the materiality threshold on a worst-case service,
+     * so a maintenance notice could land in the queue.
      */
     private static Map<String, Double> defaultSeverityLabels() {
         Map<String, Double> labels = new HashMap<>();
@@ -258,9 +291,9 @@ public record ScoringProperties(
         labels.put("moderate", 0.5);
         labels.put("minor", 0.5);
         labels.put("low", 0.25);
-        labels.put("none", 0.1);
-        labels.put("maintenance", 0.1);
-        labels.put("informational", 0.1);
+        labels.put("none", 0.05);
+        labels.put("maintenance", 0.05);
+        labels.put("informational", 0.05);
         return Map.copyOf(labels);
     }
 

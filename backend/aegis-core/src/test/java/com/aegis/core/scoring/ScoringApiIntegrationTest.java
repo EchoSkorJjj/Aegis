@@ -24,11 +24,13 @@ import com.aegis.core.news.NewsItemStore;
 import com.aegis.core.platform.identity.DirectoryUser;
 import com.aegis.core.support.AbstractInventoryIntegrationTest;
 import com.aegis.core.support.TestOwners;
+import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import static org.hamcrest.Matchers.endsWith;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -69,6 +71,10 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
         mvc.perform(get("/api/scoring/change-signals/{id}", advisory.id()).with(role("ANALYST")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.change.signalType").value("VULNERABILITY"))
+                // The match the scores came from rides along, so the change-impact page needs one request.
+                .andExpect(jsonPath("$.matchedComponentCount").value(1))
+                .andExpect(jsonPath("$.matchedVendorCount").value(0))
+                .andExpect(jsonPath("$.services[0].evidence[0].kind").value("ADVISORY_COMPONENT"))
                 .andExpect(jsonPath("$.severity.source").value("CVSS"))
                 .andExpect(jsonPath("$.severity.cvssVersion").value("3.1"))
                 .andExpect(jsonPath("$.severity.cvssBaseScore").value(10.0))
@@ -120,8 +126,8 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.services[0].service.id").value(exposed.getId().toString()))
                 .andExpect(jsonPath("$.services[0].score").value(100.0))
                 .andExpect(jsonPath("$.services[1].service.id").value(hidden.getId().toString()))
-                // 1.0 x 0.4 (ISOLATED) x 0.25 (LOW) = 10.0 — material, but bottom of the queue.
-                .andExpect(jsonPath("$.services[1].score").value(10.0))
+                // 1.0 x 0.5 (ISOLATED) x 0.25 (LOW) = 12.5 — material, but bottom of the queue.
+                .andExpect(jsonPath("$.services[1].score").value(12.5))
                 .andExpect(jsonPath("$.services[1].tier").value("LOW"))
                 .andExpect(jsonPath("$.owners[0].score").value(100.0))
                 .andExpect(jsonPath("$.owners[0].impactedServiceCount").value(2))
@@ -141,7 +147,8 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
                 "Acme Cloud " + suffix, "API outage", "investigating", "major", null,
                 "Elevated errors", Instant.now(), null, null));
 
-        // 0.75 ("major") x 0.6 (INTERNAL) x 0.75 (HIGH) = 33.75 -> 33.8
+        // 0.75 ("major") x 0.8 (HIGH) = 60.0 — the service is INTERNAL, but an outage is not an attack,
+        // so exposure is not applied (CS203-73): AWS being down takes an internal service down too.
         mvc.perform(get("/api/scoring/change-signals/{id}", incident.id()).with(role("COMPLIANCE_ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.change.signalType").value("VENDOR_OUTAGE"))
@@ -149,8 +156,32 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.severity.label").value("major"))
                 .andExpect(jsonPath("$.severity.cvssBaseScore").doesNotExist())
                 .andExpect(jsonPath("$.services[0].service.id").value(service.getId().toString()))
-                .andExpect(jsonPath("$.services[0].score").value(33.8))
-                .andExpect(jsonPath("$.services[0].tier").value("MEDIUM"));
+                .andExpect(jsonPath("$.services[0].score").value(60.0))
+                .andExpect(jsonPath("$.services[0].tier").value("MEDIUM"))
+                .andExpect(jsonPath("$.services[0].breakdown.exposure").value("INTERNAL"))
+                .andExpect(jsonPath("$.services[0].breakdown.exposureApplies").value(false))
+                .andExpect(jsonPath("$.services[0].breakdown.exposureFactor").value(1.0))
+                // Every contributing factor, in model order, with what it cost the score (CS203-72):
+                // maxing one alone gives severity 80.0, criticality 75.0; exposure has nothing to give.
+                .andExpect(jsonPath("$.services[0].factors.length()").value(4))
+                .andExpect(jsonPath("$.services[0].factors[0].factor").value("SEVERITY"))
+                .andExpect(jsonPath("$.services[0].factors[0].input").value("severity major"))
+                .andExpect(jsonPath("$.services[0].factors[0].weight").value(0.75))
+                .andExpect(jsonPath("$.services[0].factors[0].headroom").value(20.0))
+                .andExpect(jsonPath("$.services[0].factors[0].limiting").value(true))
+                .andExpect(jsonPath("$.services[0].factors[0].setting").value("aegis.scoring.severity-label.major"))
+                .andExpect(jsonPath("$.services[0].factors[1].factor").value("EXPOSURE"))
+                .andExpect(jsonPath("$.services[0].factors[1].input").value("not applied to outages"))
+                .andExpect(jsonPath("$.services[0].factors[1].headroom").value(0.0))
+                .andExpect(jsonPath("$.services[0].factors[1].limiting").value(false))
+                .andExpect(jsonPath("$.services[0].factors[1].setting").doesNotExist())
+                .andExpect(jsonPath("$.services[0].factors[2].factor").value("CRITICALITY"))
+                .andExpect(jsonPath("$.services[0].factors[2].headroom").value(15.0))
+                .andExpect(jsonPath("$.services[0].factors[2].limiting").value(false))
+                .andExpect(jsonPath("$.services[0].factors[3].factor").value("CONFIDENCE"))
+                .andExpect(jsonPath("$.services[0].factors[3].headroom").value(0.0))
+                .andExpect(jsonPath("$.services[0].explanation").value(endsWith(
+                        "; severity (severity major) holds it down most, costing 20.0 points")));
     }
 
     @Test
@@ -165,11 +196,11 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
 
         Advisory advisory = advisories.upsert(advisory(suffix, packageName, new BigDecimal("2.0")));
 
-        // 0.2 x 0.4 x 0.25 = 2.0 — under the materiality threshold, but still returned with its reason.
+        // 0.2 x 0.5 x 0.25 = 2.5 — under the materiality threshold, but still returned with its reason.
         mvc.perform(get("/api/scoring/change-signals/{id}", advisory.id()).with(role("ANALYST")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.services.length()").value(1))
-                .andExpect(jsonPath("$.services[0].score").value(2.0))
+                .andExpect(jsonPath("$.services[0].score").value(2.5))
                 .andExpect(jsonPath("$.services[0].tier").value("NEGLIGIBLE"))
                 .andExpect(jsonPath("$.services[0].material").value(false))
                 .andExpect(jsonPath("$.services[0].explanation").isNotEmpty())
@@ -242,9 +273,20 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.services[0].materialSignalCount").value(2))
                 .andExpect(jsonPath("$.services[0].topSignal.externalId").value("CVE-2099-" + tag + "1"))
                 .andExpect(jsonPath("$.services[1].service.id").value(hidden.getId().toString()))
-                .andExpect(jsonPath("$.services[1].topScore").value(10.0))
-                // 0.4 x 0.25 x 0.4 = 4.0, under the threshold, so only one of its two signals is material.
+                .andExpect(jsonPath("$.services[1].topScore").value(12.5))
+                // 0.4 x 0.5 x 0.25 = 5.0, under the threshold, so only one of its two signals is material.
                 .andExpect(jsonPath("$.services[1].materialSignalCount").value(1))
+                // Each headline number carries its own reasons: the hidden service's 12.5 is held
+                // down by its LOW tier (CRITICAL would make it 50.0) more than by its isolation.
+                .andExpect(jsonPath("$.services[1].topFactors.length()").value(4))
+                .andExpect(jsonPath("$.services[1].topFactors[2].factor").value("CRITICALITY"))
+                .andExpect(jsonPath("$.services[1].topFactors[2].headroom").value(37.5))
+                .andExpect(jsonPath("$.services[1].topFactors[2].limiting").value(true))
+                .andExpect(jsonPath("$.services[1].topExplanation").value(
+                        endsWith("; criticality (LOW) holds it down most, costing 37.5 points")))
+                // The worst case has nothing to blame, so no factor is limiting.
+                .andExpect(jsonPath("$.services[0].topFactors[?(@.limiting == true)]").isEmpty())
+                .andExpect(jsonPath("$.owners[0].topExplanation").isNotEmpty())
                 .andExpect(jsonPath("$.owners[0].owner.id").value(owner.getId().toString()))
                 .andExpect(jsonPath("$.owners[0].topScore").value(100.0))
                 .andExpect(jsonPath("$.owners[0].impactedServiceCount").value(2))
@@ -275,6 +317,78 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
     }
 
     @Test
+    void aTruncatedRollupCoversTheNewestSignalsNotAnArbitrarySubset() throws Exception {
+        // CS203-74: the roll-up promised "the newest are scored" but asked the store for an unsorted
+        // page, so Postgres returned the change_signals view in whatever order it liked. The oldest
+        // signal here is the most severe and is written first — exactly the row an unsorted scan hands
+        // back first — so scoring it would show up as a 100.0.
+        String tag = Long.toHexString(Math.abs(UUID.randomUUID().getMostSignificantBits()));
+        BusinessService service = inventory.createBusinessService(
+                "Newest " + tag, BusinessCriticality.CRITICAL, ServiceExposure.INTERNET_FACING);
+        String packageName = "newest-lib-" + tag;
+        SoftwareComponent vulnerable = inventory.createSoftwareComponent(
+                "maven", "com.acme:" + packageName, "1.0.0");
+        inventory.addServiceComponent(service.getId(), vulnerable.getId());
+        Instant now = Instant.now();
+        advisories.upsert(taggedAdvisory(tag, "1", packageName, new BigDecimal("10.0"), now.minusSeconds(3600)));
+        advisories.upsert(taggedAdvisory(tag, "2", packageName, new BigDecimal("5.0"), now.minusSeconds(60)));
+        advisories.upsert(taggedAdvisory(tag, "3", packageName, new BigDecimal("4.0"), now.minusSeconds(30)));
+
+        mvc.perform(get("/api/scoring/rollups")
+                        .param("search", tag)
+                        .param("from", now.minus(Duration.ofDays(1)).toString())
+                        .param("limit", "2")
+                        .with(role("ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.truncated").value(true))
+                .andExpect(jsonPath("$.signalsConsidered").value(2))
+                .andExpect(jsonPath("$.services[0].signalCount").value(2))
+                // The two newest (5.0 and 4.0) — not the older, more severe 10.0.
+                .andExpect(jsonPath("$.services[0].topScore").value(50.0))
+                .andExpect(jsonPath("$.services[0].topSignal.externalId").value("CVE-2099-" + tag + "2"));
+    }
+
+    @Test
+    void theRollupAgreesWithScoringEachSignalOnItsOwn() throws Exception {
+        // The two endpoints are one model: a service's roll-up headline is exactly the score its top
+        // signal earns against it on GET /change-signals/{id}, reasons included.
+        String tag = Long.toHexString(Math.abs(UUID.randomUUID().getMostSignificantBits()));
+        BusinessService portal = inventory.createBusinessService(
+                "Agree portal " + tag, BusinessCriticality.HIGH, ServiceExposure.INTERNET_FACING);
+        BusinessService batch = inventory.createBusinessService(
+                "Agree batch " + tag, BusinessCriticality.LOW, ServiceExposure.ISOLATED);
+        String packageName = "agree-lib-" + tag;
+        SoftwareComponent vulnerable = inventory.createSoftwareComponent(
+                "maven", "com.acme:" + packageName, "1.0.0");
+        inventory.addServiceComponent(portal.getId(), vulnerable.getId());
+        inventory.addServiceComponent(batch.getId(), vulnerable.getId());
+        Instant now = Instant.now();
+        advisories.upsert(taggedAdvisory(tag, "1", packageName, new BigDecimal("6.1"), now.minusSeconds(120)));
+        Advisory top = advisories.upsert(
+                taggedAdvisory(tag, "2", packageName, new BigDecimal("9.1"), now.minusSeconds(60)));
+
+        String alone = mvc.perform(get("/api/scoring/change-signals/{id}", top.id()).with(role("ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.services[0].service.id").value(portal.getId().toString()))
+                .andReturn().getResponse().getContentAsString();
+        double portalAlone = JsonPath.<Number>read(alone, "$.services[0].score").doubleValue();
+        String portalReason = JsonPath.read(alone, "$.services[0].explanation");
+
+        mvc.perform(get("/api/scoring/rollups")
+                        .param("search", tag)
+                        .param("from", now.minus(Duration.ofDays(1)).toString())
+                        .with(role("ANALYST")))
+                .andExpect(status().isOk())
+                // 0.91 x 1.0 x 0.8 = 72.8 alone, and exactly that as the portal's roll-up headline.
+                .andExpect(jsonPath("$.services[0].service.id").value(portal.getId().toString()))
+                .andExpect(jsonPath("$.services[0].topScore").value(portalAlone))
+                .andExpect(jsonPath("$.services[0].topScore").value(72.8))
+                .andExpect(jsonPath("$.services[0].topSignal.externalId").value("CVE-2099-" + tag + "2"))
+                .andExpect(jsonPath("$.services[0].topExplanation").value(portalReason))
+                .andExpect(jsonPath("$.services[1].service.id").value(batch.getId().toString()));
+    }
+
+    @Test
     void theRollupNeedsADomainReadRoleToo() throws Exception {
         mvc.perform(get("/api/scoring/rollups"))
                 .andExpect(status().isUnauthorized());
@@ -286,8 +400,14 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
 
     private static Advisory taggedAdvisory(
             String tag, String ordinal, String packageName, BigDecimal baseScore) {
+        return taggedAdvisory(tag, ordinal, packageName, baseScore, Instant.now());
+    }
+
+    /** A tagged advisory published at {@code publishedAt} — which is the change signal's occurredAt. */
+    private static Advisory taggedAdvisory(
+            String tag, String ordinal, String packageName, BigDecimal baseScore, Instant publishedAt) {
         return new Advisory(
-                null, "nvd", "CVE-2099-" + tag + ordinal, "rollup advisory", Instant.now(), Instant.now(),
+                null, "nvd", "CVE-2099-" + tag + ordinal, "rollup advisory", publishedAt, publishedAt,
                 new Advisory.Cvss("3.1", null, baseScore, "CRITICAL"),
                 List.of(new AffectedProduct(
                         "cpe:2.3:a:acme:" + packageName + ":*:*:*:*:*:*:*:*",

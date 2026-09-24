@@ -341,6 +341,7 @@ export interface MatchedServiceRef {
   id: string;
   name: string;
   criticality: BusinessCriticality;
+  exposure: ServiceExposure;
 }
 
 export interface MatchedRef {
@@ -384,4 +385,85 @@ export interface ChangeMatchResponse {
   matchedComponentCount: number;
   matchedVendorCount: number;
   impactedServices: ImpactedServiceMatch[];
+}
+
+// ---- aegis-core scoring (Epic 7): how much a change matters to each service it reaches ---------
+
+/** A score banded for display; the raw 0-100 score stays authoritative for ordering. */
+export type ImpactTier = "NEGLIGIBLE" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+/** Where the severity multiplier came from: a published CVSS score, a feed's severity word, or neither. */
+export type SeveritySource = "CVSS" | "SEVERITY_LABEL" | "NONE";
+
+/** The terms of score = severity × exposure × criticality × confidence × 100, in that order. */
+export type ScoreFactorKind = "SEVERITY" | "EXPOSURE" | "CRITICALITY" | "CONFIDENCE";
+
+export interface SeverityInput {
+  source: SeveritySource;
+  cvssVersion: string | null;
+  cvssBaseScore: number | null;
+  label: string | null;
+  factor: number;
+}
+
+/** Every multiplier in the score — enough to reproduce it by hand. */
+export interface ScoreBreakdown {
+  severityFactor: number;
+  exposure: ServiceExposure | null;
+  exposureFactor: number;
+  /** False for a vendor outage: exposure is attack reach, and an outage is not an attack. */
+  exposureApplies: boolean;
+  criticality: BusinessCriticality | null;
+  criticalityFactor: number;
+  confidence: MatchConfidence | null;
+  confidenceFactor: number;
+}
+
+/** One term of a score, explained (CS203-72). */
+export interface ScoreFactor {
+  factor: ScoreFactorKind;
+  /** What the multiplier was read from, e.g. "CVSS 3.1 base 9.8", "INTERNET_FACING", "HIGH". */
+  input: string;
+  /** The multiplier, 0–1. */
+  weight: number;
+  /** Points the score would gain if this factor alone were at its maximum. */
+  headroom: number;
+  /** The factor holding the score down most (all tied ones; none at the worst case). */
+  limiting: boolean;
+  /** The aegis.scoring.* property that sets this weight; null for a published CVSS score. */
+  setting: string | null;
+}
+
+export interface ScoredService {
+  service: MatchedServiceRef;
+  score: number;
+  tier: ImpactTier;
+  material: boolean;
+  confidence: MatchConfidence;
+  breakdown: ScoreBreakdown;
+  factors: ScoreFactor[];
+  explanation: string;
+  owners: MatchedRef[];
+  /** Matching's evidence chains for this service — why the change reaches it at all. */
+  evidence: EvidenceChain[];
+}
+
+export interface ScoredOwner {
+  owner: MatchedRef;
+  score: number;
+  tier: ImpactTier;
+  impactedServiceCount: number;
+  materialServiceCount: number;
+  topService: MatchedServiceRef;
+}
+
+/** GET /api/scoring/change-signals/{id} — one signal scored per impacted service, highest first. */
+export interface ChangeImpactResponse {
+  change: MatchedChangeRef;
+  /** From the one match the scores were computed from — no separate match request needed. */
+  matchedComponentCount: number;
+  matchedVendorCount: number;
+  severity: SeverityInput;
+  services: ScoredService[];
+  owners: ScoredOwner[];
 }

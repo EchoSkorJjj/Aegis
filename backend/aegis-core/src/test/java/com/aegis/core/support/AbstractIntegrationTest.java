@@ -1,11 +1,13 @@
 package com.aegis.core.support;
 
+import com.aegis.core.matching.MatchingService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
@@ -39,6 +41,16 @@ public abstract class AbstractIntegrationTest {
 
     @Autowired
     private WebApplicationContext webApplicationContext;
+
+    /**
+     * A pass-through spy on matching, for a test that must make a match fail inside matching's own
+     * transaction (the roll-up resilience test). Declared here rather than in that test because a bean
+     * override is part of the context cache key: in one class it would boot a second application
+     * context just for that class. It behaves as the real bean unless stubbed; stubbing resets after
+     * each test.
+     */
+    @MockitoSpyBean
+    protected MatchingService matchingSpy;
 
     protected MockMvc mvc;
 

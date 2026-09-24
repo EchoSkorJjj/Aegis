@@ -6,7 +6,6 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -26,17 +25,18 @@ import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 import com.aegis.core.scoring.ScoringDtos.OwnerRollup;
 import com.aegis.core.scoring.ScoringDtos.RollupWindow;
 import com.aegis.core.scoring.ScoringDtos.ScoreBreakdown;
+import com.aegis.core.scoring.ScoringDtos.ScoreFactor;
 import com.aegis.core.scoring.ScoringDtos.ScoredOwner;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.scoring.ScoringDtos.ServiceRollup;
 import com.aegis.core.scoring.ScoringDtos.SeverityInput;
-import com.aegis.core.scoring.ScoringDtos.SeveritySource;
 import com.aegis.core.signals.ChangeSignal;
 import com.aegis.core.signals.ChangeSignalFilter;
 import com.aegis.core.signals.ChangeSignalStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -54,10 +54,25 @@ public class ScoringService {
 
     private static final Logger log = LoggerFactory.getLogger(ScoringService.class);
 
+    /**
+     * Which of several feeds' CVSS scores for one vulnerability to report: the highest base score;
+     * on a tie, the newest CVSS generation (3.1 over 3.0 over 2.0); then the feed and its identifier
+     * in alphabetical order — arbitrary, but the same answer every time.
+     */
+    private static final Comparator<Advisory> STRONGEST_CVSS = Comparator
+            .comparing((Advisory advisory) -> advisory.cvss().baseScore())
+            .thenComparing(advisory -> cvssGeneration(advisory.cvss().version()))
+            .thenComparing(Advisory::sourceId, Comparator.reverseOrder())
+            .thenComparing(Advisory::externalId, Comparator.reverseOrder());
+
+    /** Where the newest window of signals comes first, with the id breaking ties on the same instant. */
+    private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("occurredAt"), Sort.Order.asc("id"));
+
     private final MatchingService matching;
     private final ChangeSignalStore signals;
     private final AdvisoryStore advisories;
     private final ImpactScorer scorer;
+    private final ScoreExplainer explainer;
 
     public ScoringService(
             MatchingService matching,
@@ -68,6 +83,7 @@ public class ScoringService {
         this.signals = signals;
         this.advisories = advisories;
         this.scorer = scorer;
+        this.explainer = new ScoreExplainer(scorer);
     }
 
     @Transactional(readOnly = true)
@@ -89,7 +105,8 @@ public class ScoringService {
                         .thenComparing(scored -> scored.service().id()))
                 .toList();
 
-        return new ChangeImpactResponse(match.change(), severity, services, rollUpByOwner(services, match.change()));
+        return new ChangeImpactResponse(match.change(), match.matchedComponentCount(), match.matchedVendorCount(),
+                severity, services, rollUpByOwner(services, match.change()));
     }
 
 
@@ -107,8 +124,15 @@ public class ScoringService {
      * <p>No single signal fails the whole roll-up. A security-news signal carries no package or vendor
      * identity to match and is skipped before it is counted; any other signal whose advisory or match
      * cannot be resolved is logged, counted as {@code signalsSkipped}, and stepped over.
+     *
+     * <p>Deliberately <em>not</em> {@code @Transactional}: each signal's match runs in matching's own
+     * transaction, so one that throws rolls back alone. Wrapped in a shared transaction, that same
+     * exception marks the whole transaction rollback-only even though it is caught here, and the
+     * roll-up then failed at commit with {@code UnexpectedRollbackException} — the skip above never
+     * actually worked (CS203-74, {@code ScoringRollupResilienceIntegrationTest}). Nothing is lost: under
+     * Postgres's READ COMMITTED every statement reads the latest committed data anyway, so the outer
+     * transaction never gave the roll-up a single snapshot to begin with.
      */
-    @Transactional(readOnly = true)
     public EstateRollupResponse rollUpEstate(ChangeSignalFilter filter, Integer requestedLimit) {
         int maxSignals = scorer.weights().rollup().maxSignals();
         int limit = requestedLimit == null ? maxSignals : Math.clamp(requestedLimit, 1, maxSignals);
@@ -119,8 +143,11 @@ public class ScoringService {
                 filter.type(), filter.severity(), filter.source(), filter.search(), filter.ecosystem(),
                 from, filter.to());
 
-        // One extra row is fetched purely to tell "exactly at the bound" from "there was more".
-        List<ChangeSignal> page = signals.findPage(windowed, PageRequest.of(0, limit + 1)).getContent();
+        // One extra row is fetched purely to tell "exactly at the bound" from "there was more". The page
+        // must be explicitly newest-first: unsorted, Postgres returns the change_signals view in no
+        // particular order, and a truncated roll-up would cover an arbitrary subset (CS203-74).
+        List<ChangeSignal> page = signals.findPage(windowed, PageRequest.of(0, limit + 1, NEWEST_FIRST))
+                .getContent();
         boolean truncated = page.size() > limit;
         List<ChangeSignal> scored = truncated ? page.subList(0, limit) : page;
 
@@ -183,10 +210,11 @@ public class ScoringService {
     private ScoredService scoreService(
             ChangeMatchResponse match, SeverityInput severity, ImpactedServiceMatch impacted) {
         ServiceRef service = impacted.service();
-        ScoreBreakdown breakdown = scorer.breakdown(
+        ScoreBreakdown breakdown = scorer.breakdown(match.change().signalType(),
                 severity.factor(), service.exposure(), service.criticality(), impacted.confidence());
         double score = scorer.score(breakdown);
         ImpactTier tier = scorer.tier(score);
+        List<ScoreFactor> factors = explainer.factors(severity, breakdown);
         return new ScoredService(
                 service,
                 score,
@@ -194,8 +222,10 @@ public class ScoringService {
                 scorer.material(score),
                 impacted.confidence(),
                 breakdown,
-                explain(match, severity, service, score, tier, breakdown),
-                impacted.owners());
+                factors,
+                explainer.explain(match.change().title(), service.name(), score, tier, breakdown, factors),
+                impacted.owners(),
+                impacted.evidence());
     }
 
     /**
@@ -203,6 +233,10 @@ public class ScoringService {
      * may carry a CVSS score for a CVE that OSV reports without one, and vice versa. The highest
      * published base score wins — under-scoring a vulnerability because one feed lagged is the
      * failure that matters.
+     *
+     * <p>Ties are broken explicitly (see {@link #STRONGEST_CVSS}) rather than by whichever row the
+     * database returned first, so the reported CVSS version — and the explanation built on it — is the
+     * same on every request (CS203-74).
      */
     private SeverityInput resolveSeverity(ChangeSignal signal) {
         if (signal.signalType() != ChangeSignal.SignalType.VULNERABILITY) {
@@ -211,20 +245,24 @@ public class ScoringService {
         }
         Advisory representative = advisories.findByExternalId(signal.sourceId(), signal.externalId())
                 .orElseThrow(() -> new ApiExceptions.NotFound("Advisory backing change signal was not found"));
-        Advisory best = null;
-        for (Advisory candidate : advisories.findByCanonicalId(representative.canonicalId())) {
-            if (candidate.cvss() == null || candidate.cvss().baseScore() == null) {
-                continue;
-            }
-            if (best == null || candidate.cvss().baseScore().compareTo(best.cvss().baseScore()) > 0) {
-                best = candidate;
-            }
-        }
+        Advisory best = advisories.findByCanonicalId(representative.canonicalId()).stream()
+                .filter(candidate -> candidate.cvss() != null && candidate.cvss().baseScore() != null)
+                .max(STRONGEST_CVSS)
+                .orElse(null);
         if (best == null) {
             // No feed has scored it yet — fall back to whatever severity label the signal carries.
             return scorer.severityFromLabel(signal.severity());
         }
         return scorer.severityFromCvss(best.cvss().version(), best.cvss().baseScore());
+    }
+
+    /** A CVSS version as a comparable number ("3.1" → 3.1); an absent or unreadable one sorts last. */
+    private static BigDecimal cvssGeneration(String version) {
+        try {
+            return version == null ? BigDecimal.ZERO : new BigDecimal(version.trim());
+        } catch (NumberFormatException unreadable) {
+            return BigDecimal.ZERO;
+        }
     }
 
     /**
@@ -246,59 +284,6 @@ public class ScoringService {
                         .thenComparing(owner -> owner.owner().id()))
                 .toList();
     }
-
-    private String explain(
-            ChangeMatchResponse match,
-            SeverityInput severity,
-            ServiceRef service,
-            double score,
-            ImpactTier tier,
-            ScoreBreakdown breakdown) {
-        String base = "%s scores %s (%s) for %s: severity %s (%s) x exposure %s (%s) x criticality %s (%s)"
-                .formatted(
-                        match.change().title(),
-                        format(score),
-                        tier,
-                        service.name(),
-                        factor(breakdown.severityFactor()),
-                        describeSeverity(severity),
-                        factor(breakdown.exposureFactor()),
-                        breakdown.exposure(),
-                        factor(breakdown.criticalityFactor()),
-                        breakdown.criticality());
-        // Only mentioned when a deployment actually configured a discount, so the default explanation
-        // stays the three-factor sentence the model is described as.
-        return breakdown.confidenceFactor() == 1.0
-                ? base
-                : base + " x confidence %s (%s)".formatted(
-                        factor(breakdown.confidenceFactor()), breakdown.confidence());
-    }
-
-    private static String describeSeverity(SeverityInput severity) {
-        if (severity.source() == SeveritySource.CVSS) {
-            String version = severity.cvssVersion() == null ? "CVSS" : "CVSS " + severity.cvssVersion();
-            return version + " base " + trim(severity.cvssBaseScore());
-        }
-        if (severity.source() == SeveritySource.SEVERITY_LABEL) {
-            return "severity " + severity.label();
-        }
-        return severity.label() == null
-                ? "no published severity"
-                : "unrecognised severity '" + severity.label() + "'";
-    }
-
-    private static String trim(BigDecimal value) {
-        return value == null ? "n/a" : value.stripTrailingZeros().toPlainString();
-    }
-
-    private static String format(double value) {
-        return String.format(Locale.ROOT, "%.1f", value);
-    }
-
-    private static String factor(double value) {
-        return String.format(Locale.ROOT, "%.2f", value);
-    }
-
 
     /**
      * Running aggregate over one window. {@code worst} is kept rather than a total for the same reason
@@ -333,7 +318,8 @@ public class ScoringService {
         private ServiceRollup toRollup() {
             return new ServiceRollup(
                     service, super.worst.score(), super.worst.tier(),
-                    super.signalCount, super.materialSignalCount, super.worstSignal);
+                    super.signalCount, super.materialSignalCount, super.worstSignal,
+                    super.worst.factors(), super.worst.explanation());
         }
     }
 
@@ -355,7 +341,8 @@ public class ScoringService {
             return new OwnerRollup(
                     owner, super.worst.score(), super.worst.tier(), serviceIds.size(),
                     super.signalCount, super.materialSignalCount,
-                    super.worst.service(), super.worstSignal);
+                    super.worst.service(), super.worstSignal,
+                    super.worst.factors(), super.worst.explanation());
         }
 
         /**

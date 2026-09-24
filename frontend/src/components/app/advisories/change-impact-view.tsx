@@ -2,19 +2,24 @@
 
 import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { ArrowLeft, ArrowRight, Info } from "lucide-react";
 
 import { Skeleton } from "@/components/ui/skeleton";
-import { ApiError, matchApi } from "@/lib/api";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ApiError, scoringApi } from "@/lib/api";
 import { canReadInventory } from "@/lib/roles";
 import type {
   AffectedProductEvidence,
   BusinessCriticality,
-  ChangeMatchResponse,
+  ChangeImpactResponse,
   EvidenceChain,
   IdentityMatch,
-  ImpactedServiceMatch,
+  ImpactTier,
   MatchConfidence,
+  ScoredService,
+  ScoreFactor,
+  ScoreFactorKind,
+  SeverityInput,
   SignalType,
   VersionMatchState,
 } from "@/lib/types";
@@ -52,11 +57,26 @@ const VERSION_LABEL: Record<VersionMatchState, string> = {
   UNDETERMINED: "Version unverified",
 };
 
+const TIER_CLASS: Record<ImpactTier, string> = {
+  CRITICAL: "bg-red-500/10 text-red-600 dark:text-red-400",
+  HIGH: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  MEDIUM: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+  LOW: "bg-muted text-muted-foreground",
+  NEGLIGIBLE: "bg-muted text-muted-foreground/70",
+};
+
+const FACTOR_LABEL: Record<ScoreFactorKind, string> = {
+  SEVERITY: "Severity",
+  EXPOSURE: "Exposure",
+  CRITICALITY: "Criticality",
+  CONFIDENCE: "Confidence",
+};
+
 export function ChangeImpactView({ signalId }: { signalId: string }) {
   const { user, isLoading: authLoading } = useAuth();
   const canRead = canReadInventory(user?.roles ?? []);
 
-  const [data, setData] = useState<ChangeMatchResponse | null>(null);
+  const [data, setData] = useState<ChangeImpactResponse | null>(null);
   const [status, setStatus] = useState<Status>("loading");
 
   useEffect(() => {
@@ -64,8 +84,10 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setStatus("loading");
-    matchApi
-      .matchChange(signalId)
+    // One request: the scored response carries the match it was computed from (evidence and counts),
+    // so the match never runs twice and the scores and evidence can't disagree.
+    scoringApi
+      .scoreChange(signalId)
       .then((result) => {
         if (cancelled) return;
         setData(result);
@@ -127,9 +149,10 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
     );
   }
 
-  const { change, impactedServices, matchedComponentCount, matchedVendorCount } = data;
+  // Scored services arrive highest first — a work queue — so the cards render in that order.
+  const { change, matchedComponentCount, matchedVendorCount, services } = data;
   const type = SIGNAL_TYPE[change.signalType];
-  const needsReview = impactedServices.filter((s) => s.confidence === "POSSIBLE").length;
+  const needsReview = services.filter((s) => s.confidence === "POSSIBLE").length;
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6">
@@ -142,7 +165,8 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
         </div>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight">{change.title ?? change.externalId}</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Impact of this change on your organization&apos;s estate, with the evidence for each hit.
+          Impact of this change on your organization&apos;s estate, ranked by impact score, with what
+          drives each score and the evidence for each hit.
         </p>
       </div>
 
@@ -154,16 +178,21 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
           <Stat value={matchedComponentCount} label="component" plural="components" trailing="matched" />
         )}
         <span className="text-muted-foreground/40">·</span>
-        <Stat value={impactedServices.length} label="service" plural="services" trailing="impacted" />
+        <Stat value={services.length} label="service" plural="services" trailing="impacted" />
         {needsReview > 0 && (
           <>
             <span className="text-muted-foreground/40">·</span>
             <span className="font-medium text-amber-600 dark:text-amber-400">{needsReview} need review</span>
           </>
         )}
+        <span className="text-muted-foreground/40">·</span>
+        <span>
+          <span className="text-muted-foreground">Severity</span>{" "}
+          <span className="font-semibold text-foreground">{describeSeverity(data.severity)}</span>
+        </span>
       </div>
 
-      {impactedServices.length === 0 ? (
+      {services.length === 0 ? (
         <StateCard>
           {matchedComponentCount === 0 && matchedVendorCount === 0
             ? "Nothing in your inventory matches this change."
@@ -172,10 +201,10 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
       ) : (
         <div className="space-y-4">
           <h2 className="text-sm font-medium text-muted-foreground">
-            Impacted services ({impactedServices.length})
+            Impacted services ({services.length})
           </h2>
-          {impactedServices.map((impact) => (
-            <ServiceCard key={impact.service.id} impact={impact} />
+          {services.map((scored) => (
+            <ServiceCard key={scored.service.id} scored={scored} />
           ))}
         </div>
       )}
@@ -183,33 +212,187 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
   );
 }
 
-function ServiceCard({ impact }: { impact: ImpactedServiceMatch }) {
-  const confidence = CONFIDENCE[impact.confidence];
+function ServiceCard({ scored }: { scored: ScoredService }) {
+  const confidence = CONFIDENCE[scored.confidence];
   return (
     <div className="rounded-lg border">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3">
-        <span className="font-medium">{impact.service.name}</span>
+        <ScoreBadge score={scored.score} tier={scored.tier} />
+        <span className="font-medium">{scored.service.name}</span>
         <span
-          className={`rounded-full px-2 py-0.5 text-xs font-medium ${CRITICALITY_CLASS[impact.service.criticality]}`}
+          className={`rounded-full px-2 py-0.5 text-xs font-medium ${CRITICALITY_CLASS[scored.service.criticality]}`}
         >
-          {impact.service.criticality}
+          {scored.service.criticality}
         </span>
         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${confidence.className}`}>
           {confidence.label}
         </span>
         <span className="ml-auto text-xs text-muted-foreground">
-          {impact.owners.length > 0
-            ? impact.owners.map((owner) => owner.name).join(", ")
+          {scored.owners.length > 0
+            ? scored.owners.map((owner) => owner.name).join(", ")
             : "No owners assigned"}
         </span>
       </div>
       <div className="space-y-3 p-4">
-        {impact.evidence.map((evidence, index) => (
+        <WhyThisScore scored={scored} />
+        {scored.evidence.map((evidence, index) => (
           <Evidence key={index} evidence={evidence} />
         ))}
       </div>
     </div>
   );
+}
+
+function ScoreBadge({ score, tier }: { score: number; tier: ImpactTier }) {
+  // Worded as an impact, in sentence case, so it never reads as the service's own criticality badge
+  // (which shares the vocabulary — a CRITICAL service can carry a LOW-impact score and vice versa).
+  const label = `${tier.charAt(0)}${tier.slice(1).toLowerCase()} impact`;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="rounded-md border px-1.5 py-0.5 font-mono text-sm font-semibold tabular-nums">
+        {score.toFixed(1)}
+      </span>
+      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${TIER_CLASS[tier]}`}>{label}</span>
+    </span>
+  );
+}
+
+/**
+ * The score's contributing factors (CS203-72): each multiplier, what it was read from, and how many
+ * points it is costing — so "why is this 36 and not 60" is answered on the page, not in a spreadsheet.
+ */
+function WhyThisScore({ scored }: { scored: ScoredService }) {
+  // Confidence only discounts when a deployment configures it; at ×1.00 it is noise here, just as the
+  // backend leaves it out of the explanation sentence.
+  const factors = scored.factors.filter((factor) => factor.factor !== "CONFIDENCE" || factor.weight !== 1);
+  const limiting = factors.filter((factor) => factor.limiting);
+  const formula = `${factors.map((factor) => factor.weight.toFixed(2)).join(" × ")} × 100 = ${scored.score.toFixed(1)}`;
+
+  return (
+    <div className="rounded-md border p-3">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <p className="text-xs font-medium text-muted-foreground">Why this score</p>
+        <p className="font-mono text-xs text-muted-foreground">{formula}</p>
+      </div>
+      <ul className="space-y-2.5">
+        {factors.map((factor) => (
+          <FactorRow
+            key={factor.factor}
+            factor={factor}
+            notApplied={factor.factor === "EXPOSURE" && !scored.breakdown.exposureApplies}
+          />
+        ))}
+      </ul>
+      <p className="mt-3 text-xs text-muted-foreground">
+        {limiting.length > 0 ? (
+          <>
+            Held down most by{" "}
+            <span className="font-medium text-foreground">
+              {limiting.map((factor) => FACTOR_LABEL[factor.factor].toLowerCase()).join(" and ")}
+            </span>
+            {limiting.length === 1 ? ": at its maximum this would score " : ": each at its maximum would score "}
+            <span className="font-medium text-foreground tabular-nums">
+              {(scored.score + limiting[0].headroom).toFixed(1)}
+            </span>
+            .
+          </>
+        ) : (
+          "Every factor is at its maximum — this is the worst case."
+        )}
+        {!scored.material && " Below the materiality threshold: shown for the record, not queued."}
+      </p>
+    </div>
+  );
+}
+
+function FactorRow({ factor, notApplied }: { factor: ScoreFactor; notApplied: boolean }) {
+  return (
+    <li className="flex items-center gap-3">
+      <div className="flex w-24 shrink-0 items-center gap-1 text-sm font-medium">
+        {FACTOR_LABEL[factor.factor]}
+        <SettingHint factor={factor} notApplied={notApplied} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-2 text-xs">
+          <span className="truncate text-muted-foreground">{describeInput(factor)}</span>
+          <span className="font-mono tabular-nums">×{factor.weight.toFixed(2)}</span>
+        </div>
+        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+          {/* A term that does not apply gets no bar: ×1.00 there is "not counted", not "at max". */}
+          {!notApplied && (
+            <div
+              className={`h-full rounded-full ${factor.limiting ? "bg-amber-500" : "bg-foreground/50"}`}
+              style={{ width: `${Math.round(factor.weight * 100)}%` }}
+            />
+          )}
+        </div>
+      </div>
+      <div className="w-20 shrink-0 text-right text-xs tabular-nums">
+        {notApplied ? (
+          <span className="text-muted-foreground/70">n/a</span>
+        ) : factor.headroom > 0 ? (
+          <span
+            className={
+              factor.limiting ? "font-medium text-amber-600 dark:text-amber-400" : "text-muted-foreground"
+            }
+            title={`${factor.headroom.toFixed(1)} points higher if this factor were at its maximum`}
+          >
+            −{factor.headroom.toFixed(1)} pts
+          </span>
+        ) : (
+          <span className="text-muted-foreground/70">at max</span>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/** Where a weight comes from — the setting to change, or why there is none. */
+function SettingHint({ factor, notApplied }: { factor: ScoreFactor; notApplied: boolean }) {
+  const text = notApplied
+    ? "Not applied — exposure is attack reach, and an outage takes internal services down too"
+    : factor.setting
+      ? `Weight set by ${factor.setting}`
+      : factor.factor === "SEVERITY"
+        ? "Published by the advisory feed (CVSS) — not a configurable weight"
+        : "Built-in fallback — the service doesn't declare this attribute";
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label={`Where the ${FACTOR_LABEL[factor.factor].toLowerCase()} weight comes from`}
+            className="inline-flex text-muted-foreground hover:text-foreground"
+          >
+            <Info className="size-3" />
+          </button>
+        }
+      />
+      <TooltipContent side="top" align="start" className="max-w-xs">
+        <span className="font-mono">{text}</span>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** Enum inputs ("INTERNET_FACING") read as words; severity inputs are already prose ("CVSS 3.1 base 9.8"). */
+function describeInput(factor: ScoreFactor) {
+  if (factor.factor === "SEVERITY") {
+    // "severity major" sits in the Severity row, so name it for what it is: the feed's own word.
+    if (factor.input.startsWith("severity ")) return `Feed label “${factor.input.slice("severity ".length)}”`;
+    return factor.input.charAt(0).toUpperCase() + factor.input.slice(1);
+  }
+  const words = factor.input.toLowerCase().replace(/_/g, "-");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function describeSeverity(severity: SeverityInput) {
+  if (severity.source === "CVSS") {
+    return `CVSS ${severity.cvssVersion ? `${severity.cvssVersion} ` : ""}${severity.cvssBaseScore}`;
+  }
+  if (severity.source === "SEVERITY_LABEL") return severity.label;
+  return severity.label ? `unrecognised (“${severity.label}”)` : "not published";
 }
 
 function Evidence({ evidence }: { evidence: EvidenceChain }) {

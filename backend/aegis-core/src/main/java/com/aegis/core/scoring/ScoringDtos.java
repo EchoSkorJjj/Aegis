@@ -7,6 +7,7 @@ import java.util.List;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.matching.MatchingDtos.ChangeRef;
+import com.aegis.core.matching.MatchingDtos.EvidenceChain;
 import com.aegis.core.matching.MatchingDtos.MatchConfidence;
 import com.aegis.core.matching.MatchingDtos.OwnerRef;
 import com.aegis.core.matching.MatchingDtos.ServiceRef;
@@ -20,9 +21,14 @@ public final class ScoringDtos {
     /**
      * One change signal scored against every service it reaches, plus the per-owner roll-up of those
      * scores. Services and owners are both ordered highest score first — this is a work queue.
+     *
+     * <p>The match counts (and each service's {@code evidence}) come from the one match the scores were
+     * computed from, so a client showing the scores needs no second, separately computed match.
      */
     public record ChangeImpactResponse(
             ChangeRef change,
+            int matchedComponentCount,
+            int matchedVendorCount,
             SeverityInput severity,
             List<ScoredService> services,
             List<ScoredOwner> owners) {
@@ -54,6 +60,11 @@ public final class ScoringDtos {
      * One service's impact score. {@code confidence} is carried through from matching rather than
      * folded into the number: it says whether the match applies at all, which is a different question
      * from how bad it is if it does. A POSSIBLE row is a review item at whatever score it earned.
+     *
+     * <p>{@code breakdown} is the arithmetic (every multiplier, enough to reproduce the score by hand);
+     * {@code factors} is the same terms explained — what each was read from, where it is configured,
+     * and which one is holding the score down. {@code evidence} is matching's evidence chains for this
+     * service — why the change reaches it at all.
      */
     public record ScoredService(
             ServiceRef service,
@@ -62,19 +73,57 @@ public final class ScoringDtos {
             boolean material,
             MatchConfidence confidence,
             ScoreBreakdown breakdown,
+            List<ScoreFactor> factors,
             String explanation,
-            List<OwnerRef> owners) {
+            List<OwnerRef> owners,
+            List<EvidenceChain> evidence) {
+    }
+
+    /**
+     * One term of the score, explained. A scored row lists every term in model order (severity,
+     * exposure, criticality, confidence), so a client can render "why this number" without knowing the
+     * model's shape.
+     *
+     * @param factor   which term of the model this is
+     * @param input    what the multiplier was read from — the published CVSS score or severity word,
+     *                 or the exposure / criticality declared on the service, or the match confidence
+     * @param weight   the multiplier itself, in {@code [0,1]}
+     * @param headroom how many points higher the score would be if this factor alone were at its
+     *                 maximum (1.0) and the others stayed where they are — what this factor is costing
+     *                 the score. 0 for a factor already at its maximum.
+     * @param limiting true for the factor with the most headroom, i.e. the one holding the score down
+     *                 most (every factor tied for most, if several are); false throughout when nothing
+     *                 is holding it down
+     * @param setting  the {@code aegis.scoring.*} property the weight comes from, so an argument with
+     *                 the number has somewhere to go; null when the value was published by a feed (a
+     *                 CVSS base score) or is a built-in fallback rather than configuration
+     */
+    public record ScoreFactor(
+            ScoreFactorKind factor, String input, double weight, double headroom, boolean limiting, String setting) {
+    }
+
+    /** The terms of {@code score = severity x exposure x criticality x confidence x 100}, in that order. */
+    public enum ScoreFactorKind {
+        SEVERITY,
+        EXPOSURE,
+        CRITICALITY,
+        CONFIDENCE
     }
 
     /**
      * Every term in {@code score = severity x exposure x criticality x confidence x 100}, with the
      * input each factor was read from. Reproducing the score by hand from this record is the point;
      * {@code confidenceFactor} is 1.0 unless a deployment configured a discount.
+     *
+     * <p>{@code exposureApplies} is false for a vendor outage: exposure is inbound attack reach, and an
+     * outage is not an attack — it takes an internal service down as surely as an internet-facing one.
+     * {@code exposure} still reports what the service declared; {@code exposureFactor} is then 1.0.
      */
     public record ScoreBreakdown(
             double severityFactor,
             ServiceExposure exposure,
             double exposureFactor,
+            boolean exposureApplies,
             BusinessCriticality criticality,
             double criticalityFactor,
             MatchConfidence confidence,
@@ -129,7 +178,8 @@ public final class ScoringDtos {
     /**
      * One service's standing across the window. {@code topScore} is its worst single signal — the same
      * "worst, not sum" rule as the per-owner roll-up, for the same reason — and the counts say how
-     * much else is queued behind it.
+     * much else is queued behind it. {@code topFactors} and {@code topExplanation} are that worst
+     * score's own reasons, so the headline number explains itself without a second request.
      */
     public record ServiceRollup(
             ServiceRef service,
@@ -137,10 +187,16 @@ public final class ScoringDtos {
             ImpactTier tier,
             int signalCount,
             int materialSignalCount,
-            ChangeRef topSignal) {
+            ChangeRef topSignal,
+            List<ScoreFactor> topFactors,
+            String topExplanation) {
     }
 
-    /** One owner's standing across the window, aggregated over every service they own. */
+    /**
+     * One owner's standing across the window, aggregated over every service they own. As with
+     * {@link ServiceRollup}, {@code topFactors} and {@code topExplanation} explain {@code topScore} —
+     * the score {@code topSignal} earned against {@code topService}.
+     */
     public record OwnerRollup(
             OwnerRef owner,
             double topScore,
@@ -149,7 +205,9 @@ public final class ScoringDtos {
             int signalCount,
             int materialSignalCount,
             ServiceRef topService,
-            ChangeRef topSignal) {
+            ChangeRef topSignal,
+            List<ScoreFactor> topFactors,
+            String topExplanation) {
     }
 
     /**
