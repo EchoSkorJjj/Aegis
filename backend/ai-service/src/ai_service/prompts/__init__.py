@@ -1,0 +1,45 @@
+"""Versioned package resources and exact, bounded grounding passages.
+
+Escaping keeps external text inside its data block. It is a defence in depth measure, not a
+guarantee that a model will ignore an injection: output and citations must still be validated.
+"""
+
+from dataclasses import dataclass
+from html import escape
+from importlib.resources import files
+from typing import Literal
+
+PASSAGE_CHARS = 1000
+
+
+@dataclass(frozen=True)
+class Prompt:
+    template_id: str
+    system: str
+    user: str
+    passages: dict[str, str]
+
+
+def build_prompt(
+    capability: Literal["assess", "draft"],
+    sources: list[tuple[str, str | None]],
+    *,
+    draft_type: Literal["risk_ticket", "upgrade", "memo"] | None = None,
+) -> Prompt:
+    """Split without trimming or truncation; retain originals for server-side citation resolution."""
+    passages = {
+        f"{prefix}{index // PASSAGE_CHARS + 1}": text[index : index + PASSAGE_CHARS]
+        for prefix, text in sources
+        if text
+        for index in range(0, len(text), PASSAGE_CHARS)
+    }
+    blocks = "\n".join(
+        f'<passage id="{passage_id}">{escape(text, quote=False)}</passage>'
+        for passage_id, text in passages.items()
+    )
+    resources = files(__package__)
+    system = resources.joinpath(f"{capability}.system.md").read_text(encoding="utf-8")
+    user = resources.joinpath(f"{capability}.user.md").read_text(encoding="utf-8").format(
+        passages=blocks, draft_type=draft_type
+    )
+    return Prompt(f"{capability}.v1", system, user, passages)

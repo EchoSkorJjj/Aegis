@@ -5,29 +5,35 @@ capabilities. Snake_case on the wire; intentionally minimal for the scaffold, gr
 (BUILD_PLAN step 7).
 """
 
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class AssessmentRequest(BaseModel):
+class ContractModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class AssessmentRequest(ContractModel):
     finding_id: str
     advisory_text: str
     service_context: str | None = None
 
 
-class Assessment(BaseModel):
+class Assessment(ContractModel):
     material: bool
     rationale: str
     suggested_severity: str
-    citations: list[str] = []
+    citations: list[str] = Field(default_factory=list)
 
 
-class DraftRequest(BaseModel):
+class DraftRequest(ContractModel):
     finding_id: str
-    draft_type: str  # risk_ticket | upgrade | memo
+    draft_type: Literal["risk_ticket", "upgrade", "memo"]
     context: str | None = None
 
 
-class Draft(BaseModel):
+class Draft(ContractModel):
     draft_type: str
     content: str
-    citations: list[str] = []
+    citations: list[str] = Field(default_factory=list)

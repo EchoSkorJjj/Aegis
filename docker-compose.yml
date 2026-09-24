@@ -106,7 +106,7 @@ services:
       - "8082:8082"
     networks: [edge, internal]
 
-  # Aegis AI Service — internal Python/FastAPI service for the AI logic (assess + draft + RAG).
+  # Aegis AI Service — internal Python/FastAPI service for assessment and drafting.
   # Locked down to aegis-core only: it joins ONLY the `internal` network (so the gateway, frontend,
   # identity-service and Prometheus on `edge` cannot reach it) and publishes NO host port. The
   # service token (X-Service-Token) is the app-level second layer. To poke it while debugging, go
@@ -116,9 +116,18 @@ services:
       context: ./backend/ai-service
     environment:
       SERVICE_TOKEN: dev-internal-token-change-me
-      # LLM is stubbed in dev. To enable real drafting: build with the `llm` extra and set
-      # LLM_PROVIDER=anthropic + ANTHROPIC_API_KEY (see backend/ai-service/README.md).
-      LLM_PROVIDER: stub
+      # Offline stub by default. Compose reads the repo-root .env; set LLM_PROVIDER=groq
+      # and GROQ_API_KEY there for real calls. No optional SDK extra is needed.
+      LLM_PROVIDER: ${LLM_PROVIDER:-stub}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+      GROQ_BASE_URL: ${GROQ_BASE_URL:-https://api.groq.com/openai/v1}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-20}
+      LLM_MAX_OUTPUT_TOKENS: ${LLM_MAX_OUTPUT_TOKENS:-1000}
+      LLM_MAX_INPUT_CHARS: ${LLM_MAX_INPUT_CHARS:-16000}
+      LLM_MAX_REQUESTS_PER_MINUTE: ${LLM_MAX_REQUESTS_PER_MINUTE:-25}
+      LLM_MAX_TOKENS_PER_MINUTE: ${LLM_MAX_TOKENS_PER_MINUTE:-7000}
+      LLM_DAILY_TOKEN_BUDGET: ${LLM_DAILY_TOKEN_BUDGET:-150000}
     networks: [internal]
 
   # API gateway (Spring Cloud Gateway, WebMVC) — the single entry point on :8080. Authenticates at
@@ -198,7 +207,7 @@ networks:
   edge:
   # Private link for the AI boundary: only aegis-core and ai-service join it, so ai-service is
   # reachable by aegis-core alone. Not marked `internal: true`, so ai-service keeps outbound
-  # internet access for the LLM API later.
+  # internet access for the configured LLM API.
   internal:
 
 volumes:

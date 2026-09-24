@@ -1,13 +1,16 @@
 """Domain exceptions and handlers — same error body shape as the Java services
 ({timestamp, status, error, message, path})."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-_REASON = {400: "Bad Request", 401: "Unauthorized", 422: "Unprocessable Entity", 500: "Internal Server Error"}
+_REASON = {
+    400: "Bad Request", 401: "Unauthorized", 422: "Unprocessable Entity",
+    500: "Internal Server Error", 502: "Bad Gateway", 503: "Service Unavailable",
+}
 
 
 class ApiError(Exception):
@@ -26,9 +29,17 @@ class Unauthorized(ApiError):
     status_code = 401
 
 
+class BadGateway(ApiError):
+    status_code = 502
+
+
+class ServiceUnavailable(ApiError):
+    status_code = 503
+
+
 def _body(status: int, message: str, path: str) -> dict:
     return {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "status": status,
         "error": _REASON.get(status, "Error"),
         "message": message,

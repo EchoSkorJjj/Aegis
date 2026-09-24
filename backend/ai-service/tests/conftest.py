@@ -5,14 +5,17 @@ import os
 
 import pytest
 
-os.environ.setdefault("SERVICE_TOKEN", "test-token")
+os.environ["SERVICE_TOKEN"] = "test-token"
+os.environ["LLM_PROVIDER"] = "stub"
 
 
 @pytest.fixture()
 def client():
     from fastapi.testclient import TestClient
 
-    from ai_service.main import app
+    from ai_service.core.config import Settings
+    from ai_service.main import create_app
 
-    with TestClient(app) as test_client:
+    config = Settings(_env_file=None, llm_provider="stub", service_token="test-token")
+    with TestClient(create_app(config)) as test_client:
         yield test_client
