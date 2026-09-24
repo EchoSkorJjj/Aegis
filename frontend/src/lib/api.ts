@@ -3,6 +3,7 @@ import type {
   AuthConfig,
   BusinessService,
   BusinessServiceInput,
+  ChangeImpactResponse,
   ChangePasswordInput,
   ChangeMatchResponse,
   ChangeSignal,
@@ -418,6 +419,13 @@ export const signalApi = {
 export const matchApi = {
   matchChange(signalId: string) {
     return bffFetch<ChangeMatchResponse>(`/api/matching/change-signals/${signalId}`);
+  },
+};
+
+/** aegis-core impact scoring (Epic 7) — read-only, recomputed per request. */
+export const scoringApi = {
+  scoreChange(signalId: string) {
+    return bffFetch<ChangeImpactResponse>(`/api/scoring/change-signals/${signalId}`);
   },
 };
 
