@@ -267,7 +267,13 @@ public class JpaInventoryStore implements InventoryStore {
     @Override
     public Page<Owner> findOwners(NamedFilter filter, Pageable pageable) {
         UUID org = scope();
-        List<Specification<Owner>> specs = namedSpecs(org, filter);
+        List<Specification<Owner>> specs = orgAndCreated(org, filter.createdAfter(), filter.createdBefore());
+        if (hasText(filter.search())) {
+            String like = like(filter.search());
+            specs.add((root, query, cb) -> cb.or(
+                    cb.like(cb.lower(root.get("name")), like),
+                    cb.like(cb.lower(root.get("email")), like)));
+        }
         if (filter.excludeServiceId() != null) {
             specs.add(notLinkedToService(ServiceOwnerEntity.class, "ownerId", filter.excludeServiceId(), org));
         }
@@ -275,21 +281,22 @@ public class JpaInventoryStore implements InventoryStore {
     }
 
     @Override
-    public Optional<Owner> findOwnerByName(String name) {
-        return owners.findByNameIgnoreCaseAndOrgId(name, scope());
+    public Optional<Owner> findOwnerByUserId(UUID userId) {
+        return owners.findByUserIdAndOrgId(userId, scope());
     }
 
     @Override
-    public boolean ownerNameExists(String name, UUID excludingId) {
+    public boolean isServiceOwnedBy(UUID serviceId, UUID userId) {
+        return owners.countServiceLinksForUser(serviceId, userId, scope()) > 0;
+    }
+
+    @Override
+    public void deleteOrphanedOwners() {
         UUID org = scope();
-        return excludingId == null ? owners.existsByNameIgnoreCaseAndOrgId(name, org)
-                : owners.existsByNameIgnoreCaseAndOrgIdAndIdNot(name, org, excludingId);
-    }
-
-    @Override
-    public void deleteOwner(UUID id) {
-        scope();
-        owners.deleteById(id);
+        // A bulk delete bypasses the persistence context, so pending removals — a service whose owner
+        // links go by DB cascade, or an unlinked edge — must reach the database first.
+        entityManager.flush();
+        owners.deleteOrphans(org);
     }
 
     @Override

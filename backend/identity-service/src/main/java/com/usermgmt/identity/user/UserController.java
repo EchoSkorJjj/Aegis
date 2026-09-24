@@ -81,11 +81,12 @@ public class UserController {
     @PreAuthorize(READ)
     public Page<UserResponse> list(
             @RequestParam(required = false) String search,
+            @RequestParam(required = false) Role role,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable,
             @AuthenticationPrincipal Jwt jwt) {
-        return service.list(callerScope(jwt), search, from, to, pageable);
+        return service.list(callerScope(jwt), search, role, from, to, pageable);
     }
 
     @GetMapping("/{id}")

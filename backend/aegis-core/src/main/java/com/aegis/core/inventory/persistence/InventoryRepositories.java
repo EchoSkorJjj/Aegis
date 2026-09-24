@@ -13,6 +13,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -81,14 +82,25 @@ interface OwnerJpaRepository
     Optional<Owner> findByIdAndOrgId(UUID id, UUID orgId);
     Page<Owner> findByOrgId(UUID orgId, Pageable pageable);
     List<Owner> findByIdInAndOrgId(Collection<UUID> ids, UUID orgId);
-    Optional<Owner> findByNameIgnoreCaseAndOrgId(String name, UUID orgId);
-    boolean existsByNameIgnoreCaseAndOrgId(String name, UUID orgId);
-    boolean existsByNameIgnoreCaseAndOrgIdAndIdNot(String name, UUID orgId, UUID id);
+    Optional<Owner> findByUserIdAndOrgId(UUID userId, UUID orgId);
 
     @Query("select o from Owner o where o.orgId = :orgId and o.id in "
             + "(select r.ownerId from ServiceOwnerEntity r "
             + "where r.businessServiceId = :serviceId and r.orgId = :orgId)")
     Page<Owner> findForService(@Param("serviceId") UUID serviceId, @Param("orgId") UUID orgId, Pageable pageable);
+
+    /** How many of the service's owner links point at this user (0 or 1) — the owner-permission check. */
+    @Query("select count(r) from ServiceOwnerEntity r, Owner o where r.ownerId = o.id "
+            + "and r.businessServiceId = :serviceId and o.userId = :userId "
+            + "and r.orgId = :orgId and o.orgId = :orgId")
+    long countServiceLinksForUser(
+            @Param("serviceId") UUID serviceId, @Param("userId") UUID userId, @Param("orgId") UUID orgId);
+
+    /** Remove the org's owners that no service links to any more. */
+    @Modifying
+    @Query("delete from Owner o where o.orgId = :orgId and o.id not in "
+            + "(select r.ownerId from ServiceOwnerEntity r where r.orgId = :orgId)")
+    int deleteOrphans(@Param("orgId") UUID orgId);
 }
 
 interface ServiceComponentJpaRepository extends JpaRepository<ServiceComponentEntity, ServiceComponentEntity.Key> {

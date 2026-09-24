@@ -18,6 +18,7 @@ import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
 import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.support.AbstractInventoryIntegrationTest;
+import com.aegis.core.support.TestOwners;
 import org.hibernate.Hibernate;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,6 +42,9 @@ class InventoryPersistenceIntegrationTest extends AbstractInventoryIntegrationTe
 
     @Autowired
     private InventoryService inventory;
+
+    @Autowired
+    private TestOwners owners;
 
     @Autowired
     private JdbcTemplate jdbc;
@@ -69,7 +73,7 @@ class InventoryPersistenceIntegrationTest extends AbstractInventoryIntegrationTe
         BusinessService service = inventory.createBusinessService("Payments " + suffix, BusinessCriticality.CRITICAL);
         SoftwareComponent component = inventory.createSoftwareComponent("Maven", "spring-core-" + suffix, "7.0.0");
         ThirdPartyVendor vendor = inventory.createThirdPartyVendor("Acme " + suffix);
-        Owner owner = inventory.createOwner("Platform " + suffix);
+        Owner owner = owners.assign(service.getId(), "Platform " + suffix);
 
         for (var value : List.of(service, component, vendor, owner)) {
             assertThat(value.getId()).isNotNull();
@@ -123,13 +127,10 @@ class InventoryPersistenceIntegrationTest extends AbstractInventoryIntegrationTe
         SoftwareComponent app = inventory.createSoftwareComponent("npm", "orders-" + suffix, "1.0.0");
         SoftwareComponent library = inventory.createSoftwareComponent("npm", "library-" + suffix, "2.0.0");
         ThirdPartyVendor vendor = inventory.createThirdPartyVendor("Cloud " + suffix);
-        Owner firstOwner = inventory.createOwner("Orders team " + suffix);
-        Owner secondOwner = inventory.createOwner("Risk partner " + suffix);
-
         inventory.addServiceComponent(service.getId(), app.getId());
         inventory.addServiceVendor(service.getId(), vendor.getId());
-        inventory.addServiceOwner(service.getId(), firstOwner.getId());
-        inventory.addServiceOwner(service.getId(), secondOwner.getId());
+        Owner firstOwner = owners.assign(service.getId(), "Orders team " + suffix);
+        Owner secondOwner = owners.assign(service.getId(), "Risk partner " + suffix);
         inventory.addComponentDependency(app.getId(), library.getId());
 
         assertThat(inventory.listServiceComponents(service.getId(), PAGE).getContent()).containsExactly(app);
@@ -187,12 +188,21 @@ class InventoryPersistenceIntegrationTest extends AbstractInventoryIntegrationTe
                 UUID.randomUUID(), vendorName.toUpperCase(), ORG))
                 .isInstanceOf(DataIntegrityViolationException.class);
 
-        UUID ownerId = UUID.randomUUID();
-        String ownerName = "db-owner-" + ownerId;
-        jdbc.update("insert into core.owners (id, name, org_id) values (?, ?, ?)", ownerId, ownerName, ORG);
+        // Owners are unique per person (identity user id) per org — not by name (V16): one person can't
+        // be two owners, but two people may share a display name.
+        UUID ownerUserId = UUID.randomUUID();
+        String ownerName = "db-owner-" + ownerUserId;
+        jdbc.update("insert into core.owners (id, user_id, name, org_id) values (?, ?, ?, ?)",
+                UUID.randomUUID(), ownerUserId, ownerName, ORG);
+        assertThatThrownBy(() -> jdbc.update(
+                "insert into core.owners (id, user_id, name, org_id) values (?, ?, ?, ?)",
+                UUID.randomUUID(), ownerUserId, "someone else", ORG))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        jdbc.update("insert into core.owners (id, user_id, name, org_id) values (?, ?, ?, ?)",
+                UUID.randomUUID(), UUID.randomUUID(), ownerName, ORG);
         assertThatThrownBy(() -> jdbc.update(
                 "insert into core.owners (id, name, org_id) values (?, ?, ?)",
-                UUID.randomUUID(), ownerName.toUpperCase(), ORG))
+                UUID.randomUUID(), "no-user-" + ownerUserId, ORG))
                 .isInstanceOf(DataIntegrityViolationException.class);
 
         jdbc.update("insert into core.business_service_components (business_service_id, component_id, org_id)"

@@ -66,6 +66,7 @@ domain. See `ARCHITECTURE.md` for the topology.
 | `SERVER_PORT` | `8082` | HTTP port |
 | `DB_URL` / `DB_USER` / `DB_PASSWORD` | `…/identity`, `identity`, `identity` | Shared datasource |
 | `IDENTITY_JWKS_URI` | `http://localhost:8081/oauth2/jwks` | identity-service's public keys |
+| `IDENTITY_BASE_URL` | `http://localhost:8081` | identity-service's member directory — verifies a service's assigned owner, called with the caller's own token |
 | `AI_SERVICE_URI` | `http://localhost:8083` | The internal ai-service base URL |
 | `AI_SERVICE_TOKEN` | `dev-internal-token-change-me` | Shared service token sent to the ai-service |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | SPA origins allowed in dev |
@@ -102,21 +103,41 @@ In Docker Compose it builds and starts alongside identity-service and the ai-ser
 ## Inventory API
 
 Inventory endpoints are rooted at `/api/inventory`. Paginated entity collections and direct
-relationship collections default to name/ID ascending order. `SERVICE_OWNER`, `ANALYST`, and
-`COMPLIANCE_ADMIN` may read inventory; `ANALYST` and `COMPLIANCE_ADMIN` may create, update, delete,
-link, and unlink it. `PLATFORM_ADMIN` and `ORG_ADMIN` are user-management roles, not Aegis domain roles.
+relationship collections default to name/ID ascending order. Permissions follow the three lines of
+defence (ADR §6d) — governance sets how risky a service is and who answers for it; the owner keeps
+what it is made of accurate:
 
-A business service carries the two attributes its owner declares and scoring consumes: its
-`criticality` (`LOW`/`MEDIUM`/`HIGH`/`CRITICAL`) and its **`exposure`** — `INTERNET_FACING`,
-`INTERNAL`, or `ISOLATED`, i.e. whether the service talks to anything outside its own application.
-Neither is derivable from the estate graph, so both are the owner's call. `exposure` is optional on
+| Who | May |
+|---|---|
+| `SERVICE_OWNER`, `ANALYST`, `COMPLIANCE_ADMIN` | Read the whole inventory |
+| `ANALYST`, `COMPLIANCE_ADMIN` (governance) | Register, edit, and delete services, components, and vendors; set a service's criticality and exposure; assign and unassign its owners; maintain any service's composition |
+| A service's assigned owner (`SERVICE_OWNER`) | Maintain **that** service's composition — import or generate its SBOM, link and unlink its components and vendors — but not re-grade or re-staff it, and not anyone else's |
+
+`PLATFORM_ADMIN` and `ORG_ADMIN` are user-management roles, not Aegis domain roles.
+
+A business service carries the two attributes scoring multiplies in: its `criticality`
+(`LOW`/`MEDIUM`/`HIGH`/`CRITICAL`) and its **`exposure`** — `INTERNET_FACING`, `INTERNAL`, or
+`ISOLATED`, i.e. whether the service talks to anything outside its own application. Neither is
+derivable from the estate graph; both are business declarations, and because they set the score they
+are governance's to make — an owner cannot lower their own service's risk. `exposure` is optional on
 create (it defaults to `INTERNAL`) and omitting it on update leaves the current value alone, so a PUT
 that predates the attribute cannot silently downgrade a service declared internet-facing.
 
-The map supports multiple owners per business service. Deleting an inventory entity cascades only
-its relationship rows; the related services, components, vendors, and owners remain intact. The
-component dependency API stores direct edges only; transitive reachability is resolved at query
-time by the impact endpoints below.
+### Owners
+
+An owner is a real person — an organization member holding the `SERVICE_OWNER` role in
+identity-service — never a free-text name. `POST /api/inventory/services/{serviceId}/owners` with
+`{"userId": "…"}` (governance roles) assigns one: aegis-core first looks the member up in
+identity-service **using the caller's own token**, so a user outside the caller's organization is
+simply not found (404), and a member without `SERVICE_OWNER` or with a disabled account is refused
+(400). A service may have several owners; `DELETE /api/inventory/services/{serviceId}/owners/{ownerId}`
+removes one. Each owner record keeps a snapshot of the person's name and email, refreshed on every
+assignment. Someone who no longer owns any service stops being an owner, so the read-only
+`GET /api/inventory/owners` is exactly the people currently accountable for something.
+
+Deleting an inventory entity cascades only its relationship rows; the related services, components,
+and vendors remain intact. The component dependency API stores direct edges only; transitive
+reachability is resolved at query time by the impact endpoints below.
 
 ### Impact graph queries
 
@@ -134,7 +155,8 @@ Both require the same read role as the rest of the inventory API (`SERVICE_OWNER
 
 ### SBOM import (CycloneDX)
 
-`POST /api/inventory/services/{serviceId}/sbom` (`ANALYST`, `COMPLIANCE_ADMIN`) takes a CycloneDX JSON
+`POST /api/inventory/services/{serviceId}/sbom` (`ANALYST`, `COMPLIANCE_ADMIN`, or the service's assigned
+owner — as is `…/sbom/from-repo`) takes a CycloneDX JSON
 SBOM (`application/json` or `application/vnd.cyclonedx+json`) and merges it into the map:
 
 - Components are matched by (ecosystem, name, version), case-insensitively, or created. The ecosystem
@@ -149,11 +171,13 @@ SBOM (`application/json` or `application/vnd.cyclonedx+json`) and merges it into
 
 ### Demo estate
 
-A fictional estate — five services, their owners and vendors, and four CycloneDX SBOMs (Maven, npm,
+A fictional estate — five services, their vendors, and four CycloneDX SBOMs (Maven, npm,
 PyPI) — lives in `src/main/resources/demo/`. Set `AEGIS_DEMO_SEED_ENABLED=true` (Docker Compose does)
 to load it at startup through the SBOM import; seeding is idempotent. Try the impact of
 `org.apache.logging.log4j:log4j-core 2.14.1`: Order Service uses it directly, Payments API reaches it
-through three hops.
+through three hops. The seed assigns **no owners** — an owner is a verified organization member, and
+the seed runs with no user to verify one against. To demo ownership, invite members with the Service
+Owner role and assign them from each service's page.
 
 ## Ingestion
 
@@ -421,7 +445,7 @@ is weak on any one axis cannot be pushed to the top by the other two. Same read 
   outage is scored. An absent or unrecognised label falls back to a neutral `0.5`, never to zero:
   not knowing how bad something is must not rank it below something known to be mild. The response's
   `severity.source` says which of the three applied.
-- **exposure** — the `ServiceExposure` its owner declared (`INTERNET_FACING` 1.0, `INTERNAL` 0.6,
+- **exposure** — the `ServiceExposure` declared on the service (`INTERNET_FACING` 1.0, `INTERNAL` 0.6,
   `ISOLATED` 0.4). The floor is well above zero because an isolated service is not invulnerable.
 - **criticality** — the service's business tier (`CRITICAL` 1.0 → `LOW` 0.25).
 

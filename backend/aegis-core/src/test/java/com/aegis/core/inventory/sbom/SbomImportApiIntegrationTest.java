@@ -8,6 +8,7 @@ import java.util.UUID;
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.domain.BusinessCriticality;
+import com.aegis.core.platform.tenant.CurrentOrg;
 import com.aegis.core.support.AbstractInventoryIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,8 +36,21 @@ class SbomImportApiIntegrationTest extends AbstractInventoryIntegrationTest {
     @Autowired
     private InventoryStore store;
 
+    @Autowired
+    private CurrentOrg currentOrg;
+
+    /**
+     * Asserts exact created/matched counts, which is only sound in a tenant no other test has imported
+     * the fixture into: its components have fixed coordinates, and the suite shares one database and —
+     * for inventory tests — one org. Components are per-org, so a fresh org guarantees a clean slate no
+     * matter which test classes ran first (the order differs between machines and CI runners).
+     */
     @Test
-    void importsIdempotentlyAndFeedsTransitiveImpact() throws Exception {
+    void importsIdempotentlyAndFeedsTransitiveImpact() throws Throwable {
+        inFreshOrg(this::importTheFixtureTwiceAndTraceItsTransitiveImpact);
+    }
+
+    private void importTheFixtureTwiceAndTraceItsTransitiveImpact() throws Exception {
         UUID serviceId = newService();
         String sbom = fixture();
 
@@ -73,8 +87,13 @@ class SbomImportApiIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.services[0].viaComponent.name").value("fixture-web-framework"));
     }
 
+    /**
+     * Importing is governance work, or the service's own owner's (InventoryRoles.COMPOSE). A
+     * SERVICE_OWNER who is not assigned to this service is refused like any non-domain role; the
+     * owner-can-import path is covered by ServiceOwnershipIntegrationTest.
+     */
     @Test
-    void requiresTheInventoryWriteRole() throws Exception {
+    void refusesCallersWhoAreNeitherGovernanceNorAnOwnerOfTheService() throws Exception {
         UUID serviceId = newService();
         String sbom = fixture();
 
@@ -136,6 +155,26 @@ class SbomImportApiIntegrationTest extends AbstractInventoryIntegrationTest {
 
     private UUID newService() {
         return inventory.createBusinessService("SBOM " + UUID.randomUUID(), BusinessCriticality.MEDIUM).getId();
+    }
+
+    /** Run {@code body} as a brand-new tenant, so it sees none of the rows other tests left behind. */
+    private void inFreshOrg(ThrowingRunnable body) throws Throwable {
+        Throwable[] thrown = new Throwable[1];
+        currentOrg.runAs(UUID.randomUUID(), () -> {
+            try {
+                body.run();
+            } catch (Throwable failure) {
+                thrown[0] = failure;
+            }
+        });
+        if (thrown[0] != null) {
+            throw thrown[0];
+        }
+    }
+
+    @FunctionalInterface
+    private interface ThrowingRunnable {
+        void run() throws Exception;
     }
 
     private static String fixture() throws IOException {

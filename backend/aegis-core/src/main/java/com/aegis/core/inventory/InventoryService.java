@@ -26,6 +26,8 @@ import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
 import com.aegis.core.platform.common.ApiExceptions;
+import com.aegis.core.platform.identity.DirectoryUser;
+import com.aegis.core.platform.identity.IdentityDirectory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -35,9 +37,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class InventoryService {
 
     private final InventoryStore store;
+    private final IdentityDirectory directory;
 
-    public InventoryService(InventoryStore store) {
+    public InventoryService(InventoryStore store, IdentityDirectory directory) {
         this.store = store;
+        this.directory = directory;
     }
 
     /** {@code exposure} may be null — the service then takes {@link BusinessService#DEFAULT_EXPOSURE}. */
@@ -90,6 +94,8 @@ public class InventoryService {
     public void deleteBusinessService(UUID id) {
         getBusinessService(id);
         store.deleteBusinessService(id);
+        // Its owner links go with it (DB cascade); anyone who owned only this service is no longer an owner.
+        store.deleteOrphanedOwners();
     }
 
     @Transactional
@@ -161,36 +167,16 @@ public class InventoryService {
         store.deleteThirdPartyVendor(id);
     }
 
-    @Transactional
-    public Owner createOwner(String name) {
-        Owner value = new Owner(UUID.randomUUID(), name);
-        rejectDuplicateOwnerName(value.getName(), null);
-        return store.save(value);
-    }
-
     @Transactional(readOnly = true)
     public Owner getOwner(UUID id) {
         return store.findOwner(id)
                 .orElseThrow(() -> new ApiExceptions.NotFound("Owner not found: " + id));
     }
 
+    /** The people currently accountable for at least one service in the caller's org. */
     @Transactional(readOnly = true)
     public Page<Owner> listOwners(InventoryFilters.NamedFilter filter, Pageable pageable) {
         return store.findOwners(filter, pageable);
-    }
-
-    @Transactional
-    public Owner updateOwner(UUID id, String name) {
-        Owner value = getOwner(id);
-        value.rename(name);
-        rejectDuplicateOwnerName(value.getName(), id);
-        return store.save(value);
-    }
-
-    @Transactional
-    public void deleteOwner(UUID id) {
-        getOwner(id);
-        store.deleteOwner(id);
     }
 
     @Transactional
@@ -243,16 +229,42 @@ public class InventoryService {
         return store.findServiceVendors(serviceId, pageable);
     }
 
+    /**
+     * Make an organization member one of a service's responsible owners. The member must exist in the
+     * caller's active org, be enabled, and hold the {@code SERVICE_OWNER} role — all verified against
+     * identity-service with the caller's own token, so a client cannot assign someone outside the org
+     * or without the role. There is one owner row per person per org; its name/email snapshot is
+     * refreshed on every assignment.
+     */
     @Transactional
-    public void addServiceOwner(UUID serviceId, UUID ownerId) {
+    public Owner assignServiceOwner(UUID serviceId, UUID userId) {
         getBusinessService(serviceId);
-        getOwner(ownerId);
-        if (store.serviceOwnerExists(serviceId, ownerId)) {
-            throw new ApiExceptions.Conflict("Business service already has that owner");
+        DirectoryUser member = directory.findMember(userId)
+                .orElseThrow(() -> new ApiExceptions.NotFound("No member of this organization with id " + userId));
+        if (!member.enabled()) {
+            throw new ApiExceptions.BadRequest(member.label() + "'s account is disabled");
         }
-        store.addServiceOwner(serviceId, ownerId);
+        if (!member.hasRole(InventoryRoles.SERVICE_OWNER)) {
+            throw new ApiExceptions.BadRequest(member.label() + " does not hold the Service Owner role");
+        }
+        Owner owner = store.findOwnerByUserId(userId).orElse(null);
+        if (owner == null) {
+            owner = new Owner(UUID.randomUUID(), userId, member.label(), member.email());
+        } else {
+            owner.refreshProfile(member.label(), member.email());
+        }
+        owner = store.save(owner);
+        if (store.serviceOwnerExists(serviceId, owner.getId())) {
+            throw new ApiExceptions.Conflict(owner.getName() + " already owns this service");
+        }
+        store.addServiceOwner(serviceId, owner.getId());
+        return owner;
     }
 
+    /**
+     * Remove an owner from a service. Someone no longer responsible for any service stops being an
+     * owner at all, so the owners list is exactly the people currently accountable for something.
+     */
     @Transactional
     public void removeServiceOwner(UUID serviceId, UUID ownerId) {
         getBusinessService(serviceId);
@@ -260,6 +272,16 @@ public class InventoryService {
         if (!store.removeServiceOwner(serviceId, ownerId)) {
             throw new ApiExceptions.NotFound("Business service owner relationship not found");
         }
+        store.deleteOrphanedOwners();
+    }
+
+    /**
+     * True when {@code userId} is one of the service's assigned owners in the caller's org — the check
+     * behind the owner-scoped permission to maintain a service ({@link InventoryRoles#COMPOSE}).
+     */
+    @Transactional(readOnly = true)
+    public boolean isAssignedOwner(UUID serviceId, UUID userId) {
+        return store.isServiceOwnedBy(serviceId, userId);
     }
 
     @Transactional(readOnly = true)
@@ -395,12 +417,6 @@ public class InventoryService {
     private void rejectDuplicateVendorName(String name, UUID excludingId) {
         if (store.thirdPartyVendorNameExists(name, excludingId)) {
             throw new ApiExceptions.Conflict("Third-party vendor name already exists: " + name);
-        }
-    }
-
-    private void rejectDuplicateOwnerName(String name, UUID excludingId) {
-        if (store.ownerNameExists(name, excludingId)) {
-            throw new ApiExceptions.Conflict("Owner name already exists: " + name);
         }
     }
 }

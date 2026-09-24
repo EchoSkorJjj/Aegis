@@ -92,11 +92,12 @@ public class UserService {
 
     /**
      * Admin listing. Platform scope lists all identities; an org scope lists only that org's members.
-     * Optional filters: a case-insensitive substring on email/display name, and a createdAt window.
+     * Optional filters: a case-insensitive substring on email/display name, a role the user holds in
+     * the viewed scope (e.g. {@code SERVICE_OWNER} for aegis-core's owner picker), and a createdAt window.
      */
     @Transactional(readOnly = true)
     public Page<UserResponse> list(
-            UUID orgScope, String search, Instant createdAfter, Instant createdBefore, Pageable pageable) {
+            UUID orgScope, String search, Role role, Instant createdAfter, Instant createdBefore, Pageable pageable) {
         List<Specification<User>> specs = new ArrayList<>();
         if (orgScope != null) {
             specs.add((root, query, cb) -> {
@@ -113,6 +114,9 @@ public class UserService {
                     cb.like(cb.lower(root.get("email")), like),
                     cb.like(cb.lower(root.get("displayName")), like)));
         }
+        if (role != null) {
+            specs.add(role.isPlatformScoped() ? hasPlatformRole(role) : hasOrgRole(role, orgScope));
+        }
         if (createdAfter != null) {
             specs.add((root, query, cb) -> cb.greaterThanOrEqualTo(root.get("createdAt"), createdAfter));
         }
@@ -120,6 +124,30 @@ public class UserService {
             specs.add((root, query, cb) -> cb.lessThanOrEqualTo(root.get("createdAt"), createdBefore));
         }
         return users.findAll(Specification.allOf(specs), pageable).map(u -> describe(u, orgScope));
+    }
+
+    /** A platform-scoped role lives on the identity itself ({@code user_roles}). */
+    private static Specification<User> hasPlatformRole(Role role) {
+        return (root, query, cb) -> cb.isMember(role, root.<Set<Role>>get("roles"));
+    }
+
+    /**
+     * An org-scoped role lives on a membership ({@code organization_member_roles}). Within an org scope
+     * the membership must be in that org — the same roles {@link #describe} reports for it; at platform
+     * scope (a platform admin's cross-org view) a membership in any org counts.
+     */
+    private static Specification<User> hasOrgRole(Role role, UUID orgScope) {
+        return (root, query, cb) -> {
+            var membership = query.subquery(UUID.class);
+            var m = membership.from(OrganizationMember.class);
+            var memberRole = m.join("roles");
+            var sameUser = cb.equal(m.get("userId"), root.get("id"));
+            var holdsRole = cb.equal(memberRole, role);
+            membership.select(m.get("userId")).where(orgScope == null
+                    ? cb.and(sameUser, holdsRole)
+                    : cb.and(sameUser, holdsRole, cb.equal(m.get("orgId"), orgScope)));
+            return cb.exists(membership);
+        };
     }
 
     @Transactional

@@ -37,7 +37,8 @@ import static org.mockito.Mockito.when;
 class InventoryImpactGraphTest {
 
     private final InventoryStore store = mock(InventoryStore.class);
-    private final InventoryService inventory = new InventoryService(store);
+    // The impact graph never looks anyone up; an empty directory keeps the service honest about that.
+    private final InventoryService inventory = new InventoryService(store, userId -> Optional.empty());
 
     private final Map<UUID, SoftwareComponent> components = new HashMap<>();
     private final Map<UUID, BusinessService> services = new HashMap<>();
@@ -223,7 +224,7 @@ class InventoryImpactGraphTest {
     }
 
     private Owner owner(BusinessService service, String name) {
-        Owner owner = new Owner(UUID.randomUUID(), name);
+        Owner owner = new Owner(UUID.randomUUID(), UUID.randomUUID(), name, null);
         owners.computeIfAbsent(service.getId(), key -> new ArrayList<>()).add(owner);
         return owner;
     }
