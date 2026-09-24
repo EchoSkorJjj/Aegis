@@ -4,20 +4,22 @@ The domain and pipeline service for Aegis (Java / Spring): the inventory & map o
 advisory ingestion, matching, scoring, and the execution of approved actions. The AI steps
 (**assess** and **draft**) live in a separate Python **ai-service**, reached through the `ai` port.
 See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../../BUILD_PLAN.md), and
-[`docs/adr/0001-aegis-core-language.md`](../../docs/adr/0001-aegis-core-language.md).
+[`docs/adr/0001-aegis-architecture-and-multi-tenancy.md`](../../docs/adr/0001-aegis-architecture-and-multi-tenancy.md).
 
 > **Status:** the Spring Boot wiring, security, module seams, and AI port are in place. The inventory
 > module persists its core entities and direct relationships, exposes authenticated CRUD APIs, and
 > answers impact graph queries (component/vendor → impacted services + owners, including transitive
-> component dependents); the ingestion framework (scheduled polling, dedup, raw-event store) runs three
-> connectors — the **NVD CVE feed** (CPE, CVSS and affected versions → advisories), **vendor status
+> component dependents); the ingestion framework (scheduled polling, dedup, raw-event store) runs four
+> connectors — the **NVD CVE feed** (CPE, CVSS and affected versions → advisories), **OSV**
+> (ecosystem-native advisories keyed by purl; off by default), **vendor status
 > pages** (Statuspage/RSS → vendor incidents), and **security news** (RSS/Atom → articles with the CVE
 > identifiers they mention) — unified for reading through the **`change_signals`** view, with
 > per-feed health/counts/last-success exposed as Prometheus metrics. **Deterministic matching is
 > built:** advisory CPE/package + SemVer range matching, dependency and vendor traversal, and explicit
 > evidence chains. **Impact scoring is built:** every impacted service is scored
 > `severity x exposure x criticality`, banded into a tier and rolled up per owner and per service,
-> with every weight in the model configurable. Action workflows remain planned.
+> with every weight in the model configurable and every score's contributing factors surfaced.
+> Action workflows remain planned.
 
 ## Modules (a modular monolith, split by seams later)
 
@@ -449,8 +451,9 @@ is weak on any one axis cannot be pushed to the top by the other two. Same read 
   `ISOLATED` 0.4). The floor is well above zero because an isolated service is not invulnerable.
 - **criticality** — the service's business tier (`CRITICAL` 1.0 → `LOW` 0.25).
 
-Each scored service carries the full `breakdown` (every factor and the input it came from) and a
-deterministic `explanation`, so a ranking can be reproduced by hand and argued with. A score is
+Each scored service carries the full `breakdown` (every multiplier, enough to reproduce the score by
+hand), its contributing `factors` (below), and a deterministic `explanation`, so a ranking can be
+reproduced and argued with. A score is
 banded into an `ImpactTier` (`CRITICAL` ≥ 75, `HIGH` ≥ 50, `MEDIUM` ≥ 25, `LOW` ≥ 10, else
 `NEGLIGIBLE`) and marked `material` once it clears the materiality threshold (10.0). Immaterial rows
 are still returned with their evidence — this ranks noise down, it does not hide it.
@@ -466,6 +469,37 @@ team with many trivial hits above one whose payment gateway is about to be explo
 Like matching, scoring is recomputed per request and persists nothing: a score derived from today's
 SBOM and today's CVSS data would be a lie tomorrow, and the findings table that freezes one is a
 later epic. Security-news signals are rejected by matching before scoring sees them.
+
+### Why this score — contributing factors (CS203-72)
+
+Every scored service lists its `factors`: one entry per term of the model, always in the order
+`SEVERITY`, `EXPOSURE`, `CRITICALITY`, `CONFIDENCE`, so a client can render "why this number" without
+knowing the model's shape.
+
+| Field | Meaning |
+|---|---|
+| `factor` | Which term this is |
+| `input` | What the multiplier was read from: `CVSS 3.1 base 9.8`, `severity major`, `INTERNET_FACING`, `HIGH`, `CONFIRMED`, … |
+| `weight` | The multiplier, in `[0,1]` |
+| `headroom` | Points the score would gain if this factor alone were at its maximum (1.0) — what it is costing the score |
+| `limiting` | True for the factor with the most headroom: the one holding the score down (every one tied, if several are; none at the worst case) |
+| `setting` | The `aegis.scoring.*` key that sets the weight, e.g. `aegis.scoring.exposure.internal`; `null` for a feed-published CVSS score or a built-in fallback |
+
+Headroom rather than a "percentage share" because the model is a product, not a sum — a share would
+pretend the terms are independent. Headroom reads the way an argument about a score actually goes:
+"were this service internet-facing it would be 24 points higher". It is computed by re-scoring with
+that one factor at 1.0, so `score + headroom` is exactly what the reader would see after the change,
+rounding included. The `explanation` sentence names the limiting factor too:
+
+```
+CVE-2099-1 scores 36.0 (MEDIUM) for Orders: severity 0.80 (CVSS 3.1 base 8) x exposure 0.60 (INTERNAL)
+x criticality 0.75 (HIGH); exposure (INTERNAL) holds it down most, costing 24.0 points
+```
+
+Roll-up rows carry the same reasons for their headline number: each `ServiceRollup` and `OwnerRollup`
+has `topFactors` and `topExplanation`, the factors of the score `topSignal` earned against that service.
+The change-impact page in the frontend (`/advisories/{id}`) shows the score, tier, and factors on each
+impacted service.
 
 ### Configurable weights
 

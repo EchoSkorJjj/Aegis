@@ -1,12 +1,10 @@
 package com.aegis.core.scoring;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -26,11 +24,11 @@ import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 import com.aegis.core.scoring.ScoringDtos.OwnerRollup;
 import com.aegis.core.scoring.ScoringDtos.RollupWindow;
 import com.aegis.core.scoring.ScoringDtos.ScoreBreakdown;
+import com.aegis.core.scoring.ScoringDtos.ScoreFactor;
 import com.aegis.core.scoring.ScoringDtos.ScoredOwner;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.scoring.ScoringDtos.ServiceRollup;
 import com.aegis.core.scoring.ScoringDtos.SeverityInput;
-import com.aegis.core.scoring.ScoringDtos.SeveritySource;
 import com.aegis.core.signals.ChangeSignal;
 import com.aegis.core.signals.ChangeSignalFilter;
 import com.aegis.core.signals.ChangeSignalStore;
@@ -58,6 +56,7 @@ public class ScoringService {
     private final ChangeSignalStore signals;
     private final AdvisoryStore advisories;
     private final ImpactScorer scorer;
+    private final ScoreExplainer explainer;
 
     public ScoringService(
             MatchingService matching,
@@ -68,6 +67,7 @@ public class ScoringService {
         this.signals = signals;
         this.advisories = advisories;
         this.scorer = scorer;
+        this.explainer = new ScoreExplainer(scorer);
     }
 
     @Transactional(readOnly = true)
@@ -187,6 +187,7 @@ public class ScoringService {
                 severity.factor(), service.exposure(), service.criticality(), impacted.confidence());
         double score = scorer.score(breakdown);
         ImpactTier tier = scorer.tier(score);
+        List<ScoreFactor> factors = explainer.factors(severity, breakdown);
         return new ScoredService(
                 service,
                 score,
@@ -194,7 +195,8 @@ public class ScoringService {
                 scorer.material(score),
                 impacted.confidence(),
                 breakdown,
-                explain(match, severity, service, score, tier, breakdown),
+                factors,
+                explainer.explain(match.change().title(), service.name(), score, tier, breakdown, factors),
                 impacted.owners());
     }
 
@@ -247,59 +249,6 @@ public class ScoringService {
                 .toList();
     }
 
-    private String explain(
-            ChangeMatchResponse match,
-            SeverityInput severity,
-            ServiceRef service,
-            double score,
-            ImpactTier tier,
-            ScoreBreakdown breakdown) {
-        String base = "%s scores %s (%s) for %s: severity %s (%s) x exposure %s (%s) x criticality %s (%s)"
-                .formatted(
-                        match.change().title(),
-                        format(score),
-                        tier,
-                        service.name(),
-                        factor(breakdown.severityFactor()),
-                        describeSeverity(severity),
-                        factor(breakdown.exposureFactor()),
-                        breakdown.exposure(),
-                        factor(breakdown.criticalityFactor()),
-                        breakdown.criticality());
-        // Only mentioned when a deployment actually configured a discount, so the default explanation
-        // stays the three-factor sentence the model is described as.
-        return breakdown.confidenceFactor() == 1.0
-                ? base
-                : base + " x confidence %s (%s)".formatted(
-                        factor(breakdown.confidenceFactor()), breakdown.confidence());
-    }
-
-    private static String describeSeverity(SeverityInput severity) {
-        if (severity.source() == SeveritySource.CVSS) {
-            String version = severity.cvssVersion() == null ? "CVSS" : "CVSS " + severity.cvssVersion();
-            return version + " base " + trim(severity.cvssBaseScore());
-        }
-        if (severity.source() == SeveritySource.SEVERITY_LABEL) {
-            return "severity " + severity.label();
-        }
-        return severity.label() == null
-                ? "no published severity"
-                : "unrecognised severity '" + severity.label() + "'";
-    }
-
-    private static String trim(BigDecimal value) {
-        return value == null ? "n/a" : value.stripTrailingZeros().toPlainString();
-    }
-
-    private static String format(double value) {
-        return String.format(Locale.ROOT, "%.1f", value);
-    }
-
-    private static String factor(double value) {
-        return String.format(Locale.ROOT, "%.2f", value);
-    }
-
-
     /**
      * Running aggregate over one window. {@code worst} is kept rather than a total for the same reason
      * the per-owner roll-up takes a max: twenty low-severity hits are not worse than one imminent
@@ -333,7 +282,8 @@ public class ScoringService {
         private ServiceRollup toRollup() {
             return new ServiceRollup(
                     service, super.worst.score(), super.worst.tier(),
-                    super.signalCount, super.materialSignalCount, super.worstSignal);
+                    super.signalCount, super.materialSignalCount, super.worstSignal,
+                    super.worst.factors(), super.worst.explanation());
         }
     }
 
@@ -355,7 +305,8 @@ public class ScoringService {
             return new OwnerRollup(
                     owner, super.worst.score(), super.worst.tier(), serviceIds.size(),
                     super.signalCount, super.materialSignalCount,
-                    super.worst.service(), super.worstSignal);
+                    super.worst.service(), super.worstSignal,
+                    super.worst.factors(), super.worst.explanation());
         }
 
         /**

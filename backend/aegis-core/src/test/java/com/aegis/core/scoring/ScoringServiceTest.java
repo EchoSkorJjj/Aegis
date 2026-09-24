@@ -20,6 +20,8 @@ import com.aegis.core.matching.MatchingService;
 import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.scoring.ScoringDtos.ChangeImpactResponse;
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
+import com.aegis.core.scoring.ScoringDtos.ScoreFactor;
+import com.aegis.core.scoring.ScoringDtos.ScoreFactorKind;
 import com.aegis.core.scoring.ScoringDtos.ScoredOwner;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.scoring.ScoringDtos.SeveritySource;
@@ -88,6 +90,34 @@ class ScoringServiceTest {
         ScoredService least = response.services().getLast();
         assertThat(least.score()).isEqualTo(10.0);
         assertThat(least.tier()).isEqualTo(ImpactTier.LOW);
+    }
+
+    @Test
+    void surfacesEachContributingFactorAndWhatHoldsTheScoreDown() {
+        UUID signalId = UUID.randomUUID();
+        ChangeSignal signal = signal(signalId, SignalType.VULNERABILITY, null);
+
+        stubSignal(signal);
+        stubAdvisory(signal, cvss("3.1", "10.0"));
+        stubMatch(signalId, signal,
+                impacted(service("Internal Reporting", BusinessCriticality.LOW, ServiceExposure.ISOLATED)));
+
+        ScoredService scored = scoring.scoreChange(signalId).services().getFirst();
+
+        // 1.0 x 0.4 (ISOLATED) x 0.25 (LOW) = 10.0. Were it CRITICAL it would score 40.0, were it
+        // internet-facing 25.0 — so the business tier, not the exposure, is what keeps it low.
+        assertThat(scored.score()).isEqualTo(10.0);
+        assertThat(scored.factors()).extracting(ScoreFactor::factor).containsExactly(
+                ScoreFactorKind.SEVERITY, ScoreFactorKind.EXPOSURE,
+                ScoreFactorKind.CRITICALITY, ScoreFactorKind.CONFIDENCE);
+        assertThat(scored.factors()).extracting(ScoreFactor::input)
+                .containsExactly("CVSS 3.1 base 10", "ISOLATED", "LOW", "CONFIRMED");
+        assertThat(scored.factors()).extracting(ScoreFactor::headroom).containsExactly(0.0, 15.0, 30.0, 0.0);
+        assertThat(scored.factors()).filteredOn(ScoreFactor::limiting)
+                .extracting(ScoreFactor::factor)
+                .containsExactly(ScoreFactorKind.CRITICALITY);
+        assertThat(scored.explanation())
+                .endsWith("; criticality (LOW) holds it down most, costing 30.0 points");
     }
 
     @Test

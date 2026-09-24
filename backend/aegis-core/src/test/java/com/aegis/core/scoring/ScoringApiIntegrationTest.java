@@ -29,6 +29,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import static org.hamcrest.Matchers.endsWith;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -150,7 +151,26 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.severity.cvssBaseScore").doesNotExist())
                 .andExpect(jsonPath("$.services[0].service.id").value(service.getId().toString()))
                 .andExpect(jsonPath("$.services[0].score").value(33.8))
-                .andExpect(jsonPath("$.services[0].tier").value("MEDIUM"));
+                .andExpect(jsonPath("$.services[0].tier").value("MEDIUM"))
+                // Every contributing factor, in model order, with what it cost the score (CS203-72):
+                // maxing one alone gives severity 45.0, exposure 56.3, criticality 45.0.
+                .andExpect(jsonPath("$.services[0].factors.length()").value(4))
+                .andExpect(jsonPath("$.services[0].factors[0].factor").value("SEVERITY"))
+                .andExpect(jsonPath("$.services[0].factors[0].input").value("severity major"))
+                .andExpect(jsonPath("$.services[0].factors[0].weight").value(0.75))
+                .andExpect(jsonPath("$.services[0].factors[0].headroom").value(11.2))
+                .andExpect(jsonPath("$.services[0].factors[0].setting").value("aegis.scoring.severity-label.major"))
+                .andExpect(jsonPath("$.services[0].factors[1].factor").value("EXPOSURE"))
+                .andExpect(jsonPath("$.services[0].factors[1].input").value("INTERNAL"))
+                .andExpect(jsonPath("$.services[0].factors[1].headroom").value(22.5))
+                .andExpect(jsonPath("$.services[0].factors[1].limiting").value(true))
+                .andExpect(jsonPath("$.services[0].factors[1].setting").value("aegis.scoring.exposure.internal"))
+                .andExpect(jsonPath("$.services[0].factors[2].factor").value("CRITICALITY"))
+                .andExpect(jsonPath("$.services[0].factors[2].limiting").value(false))
+                .andExpect(jsonPath("$.services[0].factors[3].factor").value("CONFIDENCE"))
+                .andExpect(jsonPath("$.services[0].factors[3].headroom").value(0.0))
+                .andExpect(jsonPath("$.services[0].explanation").value(endsWith(
+                        "; exposure (INTERNAL) holds it down most, costing 22.5 points")));
     }
 
     @Test
@@ -245,6 +265,17 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.services[1].topScore").value(10.0))
                 // 0.4 x 0.25 x 0.4 = 4.0, under the threshold, so only one of its two signals is material.
                 .andExpect(jsonPath("$.services[1].materialSignalCount").value(1))
+                // Each headline number carries its own reasons: the hidden service's 10.0 is held
+                // down by its LOW tier (CRITICAL would make it 40.0) more than by its isolation.
+                .andExpect(jsonPath("$.services[1].topFactors.length()").value(4))
+                .andExpect(jsonPath("$.services[1].topFactors[2].factor").value("CRITICALITY"))
+                .andExpect(jsonPath("$.services[1].topFactors[2].headroom").value(30.0))
+                .andExpect(jsonPath("$.services[1].topFactors[2].limiting").value(true))
+                .andExpect(jsonPath("$.services[1].topExplanation").value(
+                        endsWith("; criticality (LOW) holds it down most, costing 30.0 points")))
+                // The worst case has nothing to blame, so no factor is limiting.
+                .andExpect(jsonPath("$.services[0].topFactors[?(@.limiting == true)]").isEmpty())
+                .andExpect(jsonPath("$.owners[0].topExplanation").isNotEmpty())
                 .andExpect(jsonPath("$.owners[0].owner.id").value(owner.getId().toString()))
                 .andExpect(jsonPath("$.owners[0].topScore").value(100.0))
                 .andExpect(jsonPath("$.owners[0].impactedServiceCount").value(2))

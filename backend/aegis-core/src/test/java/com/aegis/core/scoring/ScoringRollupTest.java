@@ -21,6 +21,8 @@ import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.scoring.ScoringDtos.EstateRollupResponse;
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 import com.aegis.core.scoring.ScoringDtos.OwnerRollup;
+import com.aegis.core.scoring.ScoringDtos.ScoreFactor;
+import com.aegis.core.scoring.ScoringDtos.ScoreFactorKind;
 import com.aegis.core.scoring.ScoringDtos.ServiceRollup;
 import com.aegis.core.signals.ChangeSignal;
 import com.aegis.core.signals.ChangeSignal.SignalType;
@@ -104,6 +106,35 @@ class ScoringRollupTest {
         assertThat(data.impactedServiceCount()).isEqualTo(1);
         assertThat(data.signalCount()).isEqualTo(2);
         assertThat(data.topService().name()).isEqualTo("Internal Reporting");
+    }
+
+    @Test
+    void explainsEachRolledUpTopScoreWithTheReasonsOfTheSignalThatEarnedIt() {
+        ChangeSignal severe = vulnerability("CVE-2099-1", "10.0");
+        ChangeSignal mild = vulnerability("CVE-2099-2", "4.0");
+        // The mild signal is scored last, so a "latest wins" bug would surface its reasons instead.
+        stubPage(severe, mild);
+        stubMatch(severe, impacted(REPORTING, DATA));
+        stubMatch(mild, impacted(REPORTING, DATA));
+
+        EstateRollupResponse rollup = scoring.rollUpEstate(ChangeSignalFilter.NONE, null);
+
+        ServiceRollup reporting = rollup.services().getFirst();
+        assertThat(reporting.topSignal().externalId()).isEqualTo("CVE-2099-1");
+        assertThat(reporting.topFactors()).extracting(ScoreFactor::input)
+                .containsExactly("CVSS 3.1 base 10", "ISOLATED", "LOW", "CONFIRMED");
+        // 1.0 x 0.4 x 0.25 = 10.0; CRITICAL would make it 40.0, the most any one factor could add.
+        assertThat(reporting.topFactors()).filteredOn(ScoreFactor::limiting)
+                .extracting(ScoreFactor::factor)
+                .containsExactly(ScoreFactorKind.CRITICALITY);
+        assertThat(reporting.topExplanation())
+                .contains("scores 10.0 (LOW) for Internal Reporting")
+                .endsWith("; criticality (LOW) holds it down most, costing 30.0 points");
+
+        // The owner's headline is the same score, so it carries the same reasons.
+        OwnerRollup data = rollup.owners().getFirst();
+        assertThat(data.topFactors()).isEqualTo(reporting.topFactors());
+        assertThat(data.topExplanation()).isEqualTo(reporting.topExplanation());
     }
 
     @Test

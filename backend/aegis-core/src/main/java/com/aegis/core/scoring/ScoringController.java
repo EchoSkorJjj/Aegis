@@ -32,14 +32,14 @@ public class ScoringController {
 
     @GetMapping("/change-signals/{id}")
     @PreAuthorize(InventoryRoles.READ)
-    @Operation(summary = "Score one change signal per impacted service and owner, with its breakdown")
+    @Operation(summary = "Score one change signal per impacted service and owner, with each score's contributing factors")
     public ChangeImpactResponse scoreChange(@PathVariable UUID id) {
         return scoring.scoreChange(id);
     }
 
     @GetMapping("/rollups")
     @PreAuthorize(InventoryRoles.READ)
-    @Operation(summary = "Roll every scored signal in a window up per service and per owner")
+    @Operation(summary = "Roll every scored signal in a window up per service and per owner, explaining each top score")
     public EstateRollupResponse rollUp(
             @RequestParam(required = false) SignalType type,
             @RequestParam(required = false) String severity,
