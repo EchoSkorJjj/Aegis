@@ -24,6 +24,7 @@ import com.aegis.core.news.NewsItemStore;
 import com.aegis.core.platform.identity.DirectoryUser;
 import com.aegis.core.support.AbstractInventoryIntegrationTest;
 import com.aegis.core.support.TestOwners;
+import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -312,6 +313,78 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
     }
 
     @Test
+    void aTruncatedRollupCoversTheNewestSignalsNotAnArbitrarySubset() throws Exception {
+        // CS203-74: the roll-up promised "the newest are scored" but asked the store for an unsorted
+        // page, so Postgres returned the change_signals view in whatever order it liked. The oldest
+        // signal here is the most severe and is written first — exactly the row an unsorted scan hands
+        // back first — so scoring it would show up as a 100.0.
+        String tag = Long.toHexString(Math.abs(UUID.randomUUID().getMostSignificantBits()));
+        BusinessService service = inventory.createBusinessService(
+                "Newest " + tag, BusinessCriticality.CRITICAL, ServiceExposure.INTERNET_FACING);
+        String packageName = "newest-lib-" + tag;
+        SoftwareComponent vulnerable = inventory.createSoftwareComponent(
+                "maven", "com.acme:" + packageName, "1.0.0");
+        inventory.addServiceComponent(service.getId(), vulnerable.getId());
+        Instant now = Instant.now();
+        advisories.upsert(taggedAdvisory(tag, "1", packageName, new BigDecimal("10.0"), now.minusSeconds(3600)));
+        advisories.upsert(taggedAdvisory(tag, "2", packageName, new BigDecimal("5.0"), now.minusSeconds(60)));
+        advisories.upsert(taggedAdvisory(tag, "3", packageName, new BigDecimal("4.0"), now.minusSeconds(30)));
+
+        mvc.perform(get("/api/scoring/rollups")
+                        .param("search", tag)
+                        .param("from", now.minus(Duration.ofDays(1)).toString())
+                        .param("limit", "2")
+                        .with(role("ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.truncated").value(true))
+                .andExpect(jsonPath("$.signalsConsidered").value(2))
+                .andExpect(jsonPath("$.services[0].signalCount").value(2))
+                // The two newest (5.0 and 4.0) — not the older, more severe 10.0.
+                .andExpect(jsonPath("$.services[0].topScore").value(50.0))
+                .andExpect(jsonPath("$.services[0].topSignal.externalId").value("CVE-2099-" + tag + "2"));
+    }
+
+    @Test
+    void theRollupAgreesWithScoringEachSignalOnItsOwn() throws Exception {
+        // The two endpoints are one model: a service's roll-up headline is exactly the score its top
+        // signal earns against it on GET /change-signals/{id}, reasons included.
+        String tag = Long.toHexString(Math.abs(UUID.randomUUID().getMostSignificantBits()));
+        BusinessService portal = inventory.createBusinessService(
+                "Agree portal " + tag, BusinessCriticality.HIGH, ServiceExposure.INTERNET_FACING);
+        BusinessService batch = inventory.createBusinessService(
+                "Agree batch " + tag, BusinessCriticality.LOW, ServiceExposure.ISOLATED);
+        String packageName = "agree-lib-" + tag;
+        SoftwareComponent vulnerable = inventory.createSoftwareComponent(
+                "maven", "com.acme:" + packageName, "1.0.0");
+        inventory.addServiceComponent(portal.getId(), vulnerable.getId());
+        inventory.addServiceComponent(batch.getId(), vulnerable.getId());
+        Instant now = Instant.now();
+        advisories.upsert(taggedAdvisory(tag, "1", packageName, new BigDecimal("6.1"), now.minusSeconds(120)));
+        Advisory top = advisories.upsert(
+                taggedAdvisory(tag, "2", packageName, new BigDecimal("9.1"), now.minusSeconds(60)));
+
+        String alone = mvc.perform(get("/api/scoring/change-signals/{id}", top.id()).with(role("ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.services[0].service.id").value(portal.getId().toString()))
+                .andReturn().getResponse().getContentAsString();
+        double portalAlone = JsonPath.<Number>read(alone, "$.services[0].score").doubleValue();
+        String portalReason = JsonPath.read(alone, "$.services[0].explanation");
+
+        mvc.perform(get("/api/scoring/rollups")
+                        .param("search", tag)
+                        .param("from", now.minus(Duration.ofDays(1)).toString())
+                        .with(role("ANALYST")))
+                .andExpect(status().isOk())
+                // 0.91 x 1.0 x 0.8 = 72.8 alone, and exactly that as the portal's roll-up headline.
+                .andExpect(jsonPath("$.services[0].service.id").value(portal.getId().toString()))
+                .andExpect(jsonPath("$.services[0].topScore").value(portalAlone))
+                .andExpect(jsonPath("$.services[0].topScore").value(72.8))
+                .andExpect(jsonPath("$.services[0].topSignal.externalId").value("CVE-2099-" + tag + "2"))
+                .andExpect(jsonPath("$.services[0].topExplanation").value(portalReason))
+                .andExpect(jsonPath("$.services[1].service.id").value(batch.getId().toString()));
+    }
+
+    @Test
     void theRollupNeedsADomainReadRoleToo() throws Exception {
         mvc.perform(get("/api/scoring/rollups"))
                 .andExpect(status().isUnauthorized());
@@ -323,8 +396,14 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
 
     private static Advisory taggedAdvisory(
             String tag, String ordinal, String packageName, BigDecimal baseScore) {
+        return taggedAdvisory(tag, ordinal, packageName, baseScore, Instant.now());
+    }
+
+    /** A tagged advisory published at {@code publishedAt} — which is the change signal's occurredAt. */
+    private static Advisory taggedAdvisory(
+            String tag, String ordinal, String packageName, BigDecimal baseScore, Instant publishedAt) {
         return new Advisory(
-                null, "nvd", "CVE-2099-" + tag + ordinal, "rollup advisory", Instant.now(), Instant.now(),
+                null, "nvd", "CVE-2099-" + tag + ordinal, "rollup advisory", publishedAt, publishedAt,
                 new Advisory.Cvss("3.1", null, baseScore, "CRITICAL"),
                 List.of(new AffectedProduct(
                         "cpe:2.3:a:acme:" + packageName + ":*:*:*:*:*:*:*:*",

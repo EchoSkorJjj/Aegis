@@ -559,7 +559,39 @@ which is the question an owner actually opens the app with.
   `signalCount` / `materialSignalCount` say how much else is queued behind it.
 - The work is bounded twice: by the window and by `rollup.max-signals` (a caller's `limit` is clamped
   to it). Each signal costs a match and a graph traversal, so this is a ceiling on what one request
-  can ask for. When the window held more, the newest are scored and the response sets `truncated` —
-  a roll-up that quietly covered an arbitrary subset would be worse than one that admits it.
+  can ask for. When the window held more, the newest are scored (by `occurredAt`, then id) and the
+  response sets `truncated` — a roll-up that quietly covered an arbitrary subset would be worse than one
+  that admits it.
 - Security-news signals are skipped rather than rejected: they carry no package or vendor identity,
-  and one unmatchable article must not fail the whole roll-up.
+  and one unmatchable article must not fail the whole roll-up. Nor does any other single signal whose
+  match fails: it is counted in `signalsSkipped` and the rest still rank.
+
+### Determinism and ranking guarantees (CS203-74)
+
+A score someone acted on must be reproducible later, and a work queue that reshuffles between two page
+loads is not a queue. These are guaranteed, and each is enforced by a named test:
+
+| Guarantee | Enforced by |
+|---|---|
+| A score is the **exact decimal** product of the factors shown, rounded half-up — the hand calculation, never a floating-point neighbour of it (checked for every CVSS score 0.0-10.0 x every service profile) | `ScoringDeterminismTest` |
+| The same signal and estate give the **same response** — on a rerun, and whatever order matching or the database hands things over in | `ScoringDeterminismTest` |
+| **Ties break stably**: equal scores by name (ignoring case), then id; equal CVSS scores across feeds by the newer CVSS version, then feed; a roll-up tie goes to the newest signal | `ScoringDeterminismTest` |
+| A worse input **never ranks lower**: more severe, more exposed, more critical, confirmed over possible, a worse outage word | `ScoringRankingTest` (full input grid) |
+| The **tier never contradicts the score**, and *immaterial* is exactly *NEGLIGIBLE* | `ScoringRankingTest` |
+| Every list is in **score order**; an owner stands exactly where their worst service stands | `ScoringRankingTest` (randomised estates, fixed seed) |
+| The **roll-up agrees** with scoring each signal on its own — same top score, same reasons, same counts | `ScoringRankingTest`, `ScoringApiIntegrationTest` |
+| A truncated roll-up covers the **newest** signals; one failing signal is **skipped**, not fatal | `ScoringApiIntegrationTest`, `ScoringRollupResilienceIntegrationTest` |
+
+Writing these tests found four real defects, each reproduced by a failing test before it was fixed:
+
+- **Floating-point rounding.** Scores were multiplied as doubles, so 0.07 x 0.5 x 0.5 = 1.75 came out as
+  1.7499… and displayed 1.7 — 98 of 2,424 CVSS combinations read a tenth low, and a CVSS 9.8 showed its
+  factor as `0.9800000000000001`. Products are now exact decimals.
+- **Unsorted roll-up page.** The roll-up asked the store for an unsorted page, so "the newest are scored"
+  was not true: Postgres returned the `change_signals` view in scan order, and a truncated roll-up
+  scored the *oldest* signal first (100.0 instead of 50.0 in the integration test).
+- **Feed-order CVSS.** When two feeds published the same base score under different CVSS versions, the
+  version reported — and the explanation sentence — depended on which row the database returned first.
+- **The roll-up's skip never worked.** A signal whose match threw marked the roll-up's shared transaction
+  rollback-only; the roll-up caught it, stepped over the signal, and then failed with a 500 at commit.
+  Each signal now runs in its own transaction.

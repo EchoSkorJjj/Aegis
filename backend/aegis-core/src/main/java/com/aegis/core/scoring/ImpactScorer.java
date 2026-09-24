@@ -51,7 +51,9 @@ public class ImpactScorer {
         if (baseScore == null) {
             return severityFromLabel(null);
         }
-        double factor = clamp(baseScore.doubleValue() / 10.0);
+        // Decimal division, not doubleValue() / 10: 9.8 / 10 in binary floating point is
+        // 0.9800000000000001, which then prints in every breakdown and mis-rounds products (CS203-74).
+        double factor = clamp(baseScore.movePointLeft(1).doubleValue());
         return new SeverityInput(SeveritySource.CVSS, cvssVersion, baseScore, null, factor);
     }
 
@@ -115,13 +117,21 @@ public class ImpactScorer {
                 weights.confidenceFactor(confidence));
     }
 
-    /** The 0-100 score for a breakdown, rounded to one decimal so it is stable to display and compare. */
+    /**
+     * The 0-100 score for a breakdown, rounded half-up to one decimal so it is stable to display and
+     * compare.
+     *
+     * <p>The product is taken in exact decimal arithmetic over the factors as they are displayed
+     * ({@code 0.98 x 0.9 x 0.8}), not in binary floating point. In doubles, 0.07 x 0.5 x 0.5 is
+     * 0.017499999..., so a score that is exactly 1.75 by hand rounded to 1.7 — one in every 25 CVSS
+     * combinations came out a tenth low, and at a tier bound that is a different tier (CS203-74).
+     */
     public double score(ScoreBreakdown breakdown) {
-        double product = breakdown.severityFactor()
-                * breakdown.exposureFactor()
-                * breakdown.criticalityFactor()
-                * breakdown.confidenceFactor();
-        return round(clamp(product) * 100.0);
+        BigDecimal product = BigDecimal.valueOf(clamp(breakdown.severityFactor()))
+                .multiply(BigDecimal.valueOf(clamp(breakdown.exposureFactor())))
+                .multiply(BigDecimal.valueOf(clamp(breakdown.criticalityFactor())))
+                .multiply(BigDecimal.valueOf(clamp(breakdown.confidenceFactor())));
+        return product.movePointRight(2).setScale(1, RoundingMode.HALF_UP).doubleValue();
     }
 
     public ImpactTier tier(double score) {
@@ -155,9 +165,5 @@ public class ImpactScorer {
             return 0;
         }
         return Math.min(value, 1.0);
-    }
-
-    private static double round(double value) {
-        return BigDecimal.valueOf(value).setScale(1, RoundingMode.HALF_UP).doubleValue();
     }
 }
