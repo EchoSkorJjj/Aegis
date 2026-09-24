@@ -41,6 +41,7 @@ import static com.aegis.core.scoring.MockedEstate.advisory;
 import static com.aegis.core.scoring.MockedEstate.impacted;
 import static com.aegis.core.scoring.MockedEstate.owner;
 import static com.aegis.core.scoring.MockedEstate.service;
+import static com.aegis.core.signals.ChangeSignal.SignalType.VULNERABILITY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
@@ -83,7 +84,7 @@ class ScoringDeterminismTest {
                 for (ServiceExposure exposure : ServiceExposure.values()) {
                     for (BusinessCriticality criticality : BusinessCriticality.values()) {
                         for (MatchConfidence confidence : MatchConfidence.values()) {
-                            ScoreBreakdown breakdown = model.breakdown(severity.factor(), exposure, criticality, confidence);
+                            ScoreBreakdown breakdown = model.breakdown(VULNERABILITY, severity.factor(), exposure, criticality, confidence);
                             BigDecimal exact = decimal(severity)
                                     .multiply(BigDecimal.valueOf(breakdown.exposureFactor()))
                                     .multiply(BigDecimal.valueOf(breakdown.criticalityFactor()))

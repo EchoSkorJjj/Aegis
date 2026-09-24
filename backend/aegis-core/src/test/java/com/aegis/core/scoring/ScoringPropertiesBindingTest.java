@@ -19,6 +19,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
 
 import static com.aegis.core.matching.MatchingDtos.MatchConfidence.POSSIBLE;
+import static com.aegis.core.signals.ChangeSignal.SignalType.VULNERABILITY;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -133,7 +134,7 @@ class ScoringPropertiesBindingTest {
 
         List<ScoreFactor> factors(ImpactScorer scorer) {
             SeverityInput severity = scorer.severityFromLabel(severityLabel);
-            ScoreBreakdown breakdown = scorer.breakdown(severity.factor(), exposure, criticality, confidence);
+            ScoreBreakdown breakdown = scorer.breakdown(VULNERABILITY, severity.factor(), exposure, criticality, confidence);
             return new ScoreExplainer(scorer).factors(severity, breakdown);
         }
     }

@@ -7,6 +7,7 @@ import java.util.List;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.matching.MatchingDtos.ChangeRef;
+import com.aegis.core.matching.MatchingDtos.EvidenceChain;
 import com.aegis.core.matching.MatchingDtos.MatchConfidence;
 import com.aegis.core.matching.MatchingDtos.OwnerRef;
 import com.aegis.core.matching.MatchingDtos.ServiceRef;
@@ -20,9 +21,14 @@ public final class ScoringDtos {
     /**
      * One change signal scored against every service it reaches, plus the per-owner roll-up of those
      * scores. Services and owners are both ordered highest score first — this is a work queue.
+     *
+     * <p>The match counts (and each service's {@code evidence}) come from the one match the scores were
+     * computed from, so a client showing the scores needs no second, separately computed match.
      */
     public record ChangeImpactResponse(
             ChangeRef change,
+            int matchedComponentCount,
+            int matchedVendorCount,
             SeverityInput severity,
             List<ScoredService> services,
             List<ScoredOwner> owners) {
@@ -57,7 +63,8 @@ public final class ScoringDtos {
      *
      * <p>{@code breakdown} is the arithmetic (every multiplier, enough to reproduce the score by hand);
      * {@code factors} is the same terms explained — what each was read from, where it is configured,
-     * and which one is holding the score down.
+     * and which one is holding the score down. {@code evidence} is matching's evidence chains for this
+     * service — why the change reaches it at all.
      */
     public record ScoredService(
             ServiceRef service,
@@ -68,7 +75,8 @@ public final class ScoringDtos {
             ScoreBreakdown breakdown,
             List<ScoreFactor> factors,
             String explanation,
-            List<OwnerRef> owners) {
+            List<OwnerRef> owners,
+            List<EvidenceChain> evidence) {
     }
 
     /**

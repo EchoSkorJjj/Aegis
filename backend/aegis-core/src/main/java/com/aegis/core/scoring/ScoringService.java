@@ -105,7 +105,8 @@ public class ScoringService {
                         .thenComparing(scored -> scored.service().id()))
                 .toList();
 
-        return new ChangeImpactResponse(match.change(), severity, services, rollUpByOwner(services, match.change()));
+        return new ChangeImpactResponse(match.change(), match.matchedComponentCount(), match.matchedVendorCount(),
+                severity, services, rollUpByOwner(services, match.change()));
     }
 
 
@@ -223,7 +224,8 @@ public class ScoringService {
                 breakdown,
                 factors,
                 explainer.explain(match.change().title(), service.name(), score, tier, breakdown, factors),
-                impacted.owners());
+                impacted.owners(),
+                impacted.evidence());
     }
 
     /**

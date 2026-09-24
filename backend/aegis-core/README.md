@@ -455,8 +455,9 @@ is weak on any one axis cannot be pushed to the top by the other two. Same read 
 - **criticality** — the service's business tier (`CRITICAL` 1.0 → `LOW` 0.25).
 
 Each scored service carries the full `breakdown` (every multiplier, enough to reproduce the score by
-hand), its contributing `factors` (below), and a deterministic `explanation`, so a ranking can be
-reproduced and argued with. A score is
+hand), its contributing `factors` (below), a deterministic `explanation`, and matching's `evidence`
+chains for it (the response also carries the match counts), so a ranking can be reproduced and argued
+with, and a page showing scores needs no second match request. A score is
 banded into an `ImpactTier` (`CRITICAL` ≥ 90, `HIGH` ≥ 70, `MEDIUM` ≥ 40, `LOW` ≥ 10, else
 `NEGLIGIBLE`) and marked `material` once it clears the materiality threshold (10.0). Immaterial rows
 are still returned with their evidence — this ranks noise down, it does not hide it.

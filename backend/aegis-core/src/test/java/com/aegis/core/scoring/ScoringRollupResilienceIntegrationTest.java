@@ -13,13 +13,11 @@ import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.inventory.domain.SoftwareComponent;
-import com.aegis.core.matching.MatchingService;
 import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.support.AbstractInventoryIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import static org.mockito.Mockito.doThrow;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
@@ -34,7 +32,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * exception thrown there marks a shared transaction rollback-only even when the caller catches it —
  * so the roll-up stepped over the bad signal and then failed with a 500 when it tried to commit.
  *
- * <p>Its own class because spying on {@link MatchingService} gives it its own application context.
+ * <p>The failure is injected through the shared {@code matchingSpy} (declared on
+ * {@code AbstractIntegrationTest}, so this class runs in the suite's one application context): no real
+ * data makes matching throw for a signal the roll-up has just listed, short of a race.
  */
 class ScoringRollupResilienceIntegrationTest extends AbstractInventoryIntegrationTest {
 
@@ -43,9 +43,6 @@ class ScoringRollupResilienceIntegrationTest extends AbstractInventoryIntegratio
 
     @Autowired
     private AdvisoryStore advisories;
-
-    @MockitoSpyBean
-    private MatchingService matching;
 
     @Test
     void aSignalThatFailsToMatchIsSkippedWithoutFailingTheRollup() throws Exception {
@@ -60,7 +57,7 @@ class ScoringRollupResilienceIntegrationTest extends AbstractInventoryIntegratio
         Advisory broken = advisories.upsert(advisory(tag, "2", packageName));
         // The second signal's match blows up inside matching's own transaction — the way a bad row or
         // a mid-window deletion would.
-        doThrow(new ApiExceptions.NotFound("advisory vanished mid-window")).when(matching).matchChange(broken.id());
+        doThrow(new ApiExceptions.NotFound("advisory vanished mid-window")).when(matchingSpy).matchChange(broken.id());
 
         mvc.perform(get("/api/scoring/rollups").param("search", tag)
                         .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ANALYST"))))

@@ -444,6 +444,8 @@ export interface ScoredService {
   factors: ScoreFactor[];
   explanation: string;
   owners: MatchedRef[];
+  /** Matching's evidence chains for this service — why the change reaches it at all. */
+  evidence: EvidenceChain[];
 }
 
 export interface ScoredOwner {
@@ -458,6 +460,9 @@ export interface ScoredOwner {
 /** GET /api/scoring/change-signals/{id} — one signal scored per impacted service, highest first. */
 export interface ChangeImpactResponse {
   change: MatchedChangeRef;
+  /** From the one match the scores were computed from — no separate match request needed. */
+  matchedComponentCount: number;
+  matchedVendorCount: number;
   severity: SeverityInput;
   services: ScoredService[];
   owners: ScoredOwner[];

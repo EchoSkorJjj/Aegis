@@ -12,6 +12,7 @@ import com.aegis.core.scoring.ScoringDtos.SeveritySource;
 import org.junit.jupiter.api.Test;
 
 import static com.aegis.core.matching.MatchingDtos.MatchConfidence.CONFIRMED;
+import static com.aegis.core.signals.ChangeSignal.SignalType.VULNERABILITY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
@@ -21,7 +22,7 @@ class ImpactScorerTest {
 
     @Test
     void multipliesSeverityExposureAndCriticalityOntoAHundredPointScale() {
-        ScoreBreakdown breakdown = scorer.breakdown(
+        ScoreBreakdown breakdown = scorer.breakdown(VULNERABILITY,
                 1.0, ServiceExposure.INTERNET_FACING, BusinessCriticality.CRITICAL, MatchConfidence.CONFIRMED);
 
         assertThat(breakdown.severityFactor()).isEqualTo(1.0);
@@ -37,11 +38,11 @@ class ImpactScorerTest {
         // One CVSS 10.0 vulnerability, three services: only the estate attributes differ.
         double severity = 1.0;
         double publicCritical = scorer.score(
-                scorer.breakdown(severity, ServiceExposure.INTERNET_FACING, BusinessCriticality.CRITICAL, CONFIRMED));
+                scorer.breakdown(VULNERABILITY, severity, ServiceExposure.INTERNET_FACING, BusinessCriticality.CRITICAL, CONFIRMED));
         double internalCritical = scorer.score(
-                scorer.breakdown(severity, ServiceExposure.INTERNAL, BusinessCriticality.CRITICAL, CONFIRMED));
+                scorer.breakdown(VULNERABILITY, severity, ServiceExposure.INTERNAL, BusinessCriticality.CRITICAL, CONFIRMED));
         double isolatedLow = scorer.score(
-                scorer.breakdown(severity, ServiceExposure.ISOLATED, BusinessCriticality.LOW, CONFIRMED));
+                scorer.breakdown(VULNERABILITY, severity, ServiceExposure.ISOLATED, BusinessCriticality.LOW, CONFIRMED));
 
         assertThat(publicCritical).isGreaterThan(internalCritical).isGreaterThan(isolatedLow);
         // Internal costs CVSS's own Adjacent-network discount (0.9), not a band: still CRITICAL.
@@ -92,8 +93,8 @@ class ImpactScorerTest {
 
     @Test
     void appliesTheDefaultExposureWhenAServicePredatesTheAttribute() {
-        ScoreBreakdown declared = scorer.breakdown(1.0, ServiceExposure.INTERNAL, BusinessCriticality.HIGH, CONFIRMED);
-        ScoreBreakdown missing = scorer.breakdown(1.0, null, BusinessCriticality.HIGH, CONFIRMED);
+        ScoreBreakdown declared = scorer.breakdown(VULNERABILITY, 1.0, ServiceExposure.INTERNAL, BusinessCriticality.HIGH, CONFIRMED);
+        ScoreBreakdown missing = scorer.breakdown(VULNERABILITY, 1.0, null, BusinessCriticality.HIGH, CONFIRMED);
 
         assertThat(scorer.score(missing)).isEqualTo(scorer.score(declared));
     }
@@ -119,7 +120,7 @@ class ImpactScorerTest {
 
         // A trivial advisory on an isolated, low-tier service is exactly the noise this suppresses.
         double noise = scorer.score(
-                scorer.breakdown(0.25, ServiceExposure.ISOLATED, BusinessCriticality.LOW, CONFIRMED));
+                scorer.breakdown(VULNERABILITY, 0.25, ServiceExposure.ISOLATED, BusinessCriticality.LOW, CONFIRMED));
         assertThat(noise).isEqualTo(3.1);
         assertThat(scorer.material(noise)).isFalse();
     }
@@ -127,14 +128,14 @@ class ImpactScorerTest {
     @Test
     void roundsToOneDecimalAndStaysWithinTheScale() {
         // 0.3 x 0.9 x 0.25 = 0.0675 -> 6.75 -> 6.8 (half up)
-        assertThat(scorer.score(scorer.breakdown(0.3, ServiceExposure.INTERNAL, BusinessCriticality.LOW, CONFIRMED)))
+        assertThat(scorer.score(scorer.breakdown(VULNERABILITY, 0.3, ServiceExposure.INTERNAL, BusinessCriticality.LOW, CONFIRMED)))
                 .isEqualTo(6.8);
         // Out-of-range severity is clamped, never allowed to push a score past 100 or below 0.
         assertThat(scorer.score(
-                        scorer.breakdown(4.0, ServiceExposure.INTERNET_FACING, BusinessCriticality.CRITICAL, CONFIRMED)))
+                        scorer.breakdown(VULNERABILITY, 4.0, ServiceExposure.INTERNET_FACING, BusinessCriticality.CRITICAL, CONFIRMED)))
                 .isEqualTo(100.0);
         assertThat(scorer.score(
-                        scorer.breakdown(-1.0, ServiceExposure.INTERNET_FACING, BusinessCriticality.CRITICAL, CONFIRMED)))
+                        scorer.breakdown(VULNERABILITY, -1.0, ServiceExposure.INTERNET_FACING, BusinessCriticality.CRITICAL, CONFIRMED)))
                 .isEqualTo(0.0);
     }
 

@@ -71,6 +71,10 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
         mvc.perform(get("/api/scoring/change-signals/{id}", advisory.id()).with(role("ANALYST")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.change.signalType").value("VULNERABILITY"))
+                // The match the scores came from rides along, so the change-impact page needs one request.
+                .andExpect(jsonPath("$.matchedComponentCount").value(1))
+                .andExpect(jsonPath("$.matchedVendorCount").value(0))
+                .andExpect(jsonPath("$.services[0].evidence[0].kind").value("ADVISORY_COMPONENT"))
                 .andExpect(jsonPath("$.severity.source").value("CVSS"))
                 .andExpect(jsonPath("$.severity.cvssVersion").value("3.1"))
                 .andExpect(jsonPath("$.severity.cvssBaseScore").value(10.0))

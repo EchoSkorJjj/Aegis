@@ -6,16 +6,14 @@ import { ArrowLeft, ArrowRight, Info } from "lucide-react";
 
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ApiError, matchApi, scoringApi } from "@/lib/api";
+import { ApiError, scoringApi } from "@/lib/api";
 import { canReadInventory } from "@/lib/roles";
 import type {
   AffectedProductEvidence,
   BusinessCriticality,
   ChangeImpactResponse,
-  ChangeMatchResponse,
   EvidenceChain,
   IdentityMatch,
-  ImpactedServiceMatch,
   ImpactTier,
   MatchConfidence,
   ScoredService,
@@ -78,9 +76,7 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
   const { user, isLoading: authLoading } = useAuth();
   const canRead = canReadInventory(user?.roles ?? []);
 
-  const [data, setData] = useState<ChangeMatchResponse | null>(null);
-  // The score is an enrichment of the match: if it fails, the evidence still renders without it.
-  const [impact, setImpact] = useState<ChangeImpactResponse | null>(null);
+  const [data, setData] = useState<ChangeImpactResponse | null>(null);
   const [status, setStatus] = useState<Status>("loading");
 
   useEffect(() => {
@@ -88,22 +84,22 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setStatus("loading");
-    Promise.allSettled([matchApi.matchChange(signalId), scoringApi.scoreChange(signalId)]).then(
-      ([match, score]) => {
+    // One request: the scored response carries the match it was computed from (evidence and counts),
+    // so the match never runs twice and the scores and evidence can't disagree.
+    scoringApi
+      .scoreChange(signalId)
+      .then((result) => {
         if (cancelled) return;
-        if (match.status === "rejected") {
-          const err = match.reason;
-          if (err instanceof ApiError && err.status === 403) setStatus("forbidden");
-          else if (err instanceof ApiError && err.status === 404) setStatus("notfound");
-          else if (err instanceof ApiError && err.status === 400) setStatus("unmatchable");
-          else setStatus("error");
-          return;
-        }
-        setData(match.value);
-        setImpact(score.status === "fulfilled" ? score.value : null);
+        setData(result);
         setStatus("ok");
-      },
-    );
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 403) setStatus("forbidden");
+        else if (err instanceof ApiError && err.status === 404) setStatus("notfound");
+        else if (err instanceof ApiError && err.status === 400) setStatus("unmatchable");
+        else setStatus("error");
+      });
     return () => {
       cancelled = true;
     };
@@ -153,17 +149,10 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
     );
   }
 
-  const { change, matchedComponentCount, matchedVendorCount } = data;
+  // Scored services arrive highest first — a work queue — so the cards render in that order.
+  const { change, matchedComponentCount, matchedVendorCount, services } = data;
   const type = SIGNAL_TYPE[change.signalType];
-  const needsReview = data.impactedServices.filter((s) => s.confidence === "POSSIBLE").length;
-  // Scored services arrive highest first — a work queue — so order the cards the same way.
-  const scored = impact?.services ?? [];
-  const scoreById = new Map<string, ScoredService>(scored.map((row) => [row.service.id, row]));
-  const rank = new Map<string, number>(scored.map((row, index) => [row.service.id, index]));
-  const unranked = scored.length;
-  const impactedServices = [...data.impactedServices].sort(
-    (a, b) => (rank.get(a.service.id) ?? unranked) - (rank.get(b.service.id) ?? unranked),
-  );
+  const needsReview = services.filter((s) => s.confidence === "POSSIBLE").length;
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6">
@@ -189,7 +178,7 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
           <Stat value={matchedComponentCount} label="component" plural="components" trailing="matched" />
         )}
         <span className="text-muted-foreground/40">·</span>
-        <Stat value={impactedServices.length} label="service" plural="services" trailing="impacted" />
+        <Stat value={services.length} label="service" plural="services" trailing="impacted" />
         {needsReview > 0 && (
           <>
             <span className="text-muted-foreground/40">·</span>
@@ -197,17 +186,13 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
           </>
         )}
         <span className="text-muted-foreground/40">·</span>
-        {impact ? (
-          <span>
-            <span className="text-muted-foreground">Severity</span>{" "}
-            <span className="font-semibold text-foreground">{describeSeverity(impact.severity)}</span>
-          </span>
-        ) : (
-          <span className="text-muted-foreground">Impact scores unavailable</span>
-        )}
+        <span>
+          <span className="text-muted-foreground">Severity</span>{" "}
+          <span className="font-semibold text-foreground">{describeSeverity(data.severity)}</span>
+        </span>
       </div>
 
-      {impactedServices.length === 0 ? (
+      {services.length === 0 ? (
         <StateCard>
           {matchedComponentCount === 0 && matchedVendorCount === 0
             ? "Nothing in your inventory matches this change."
@@ -216,10 +201,10 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
       ) : (
         <div className="space-y-4">
           <h2 className="text-sm font-medium text-muted-foreground">
-            Impacted services ({impactedServices.length})
+            Impacted services ({services.length})
           </h2>
-          {impactedServices.map((match) => (
-            <ServiceCard key={match.service.id} impact={match} scored={scoreById.get(match.service.id)} />
+          {services.map((scored) => (
+            <ServiceCard key={scored.service.id} scored={scored} />
           ))}
         </div>
       )}
@@ -227,30 +212,30 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
   );
 }
 
-function ServiceCard({ impact, scored }: { impact: ImpactedServiceMatch; scored?: ScoredService }) {
-  const confidence = CONFIDENCE[impact.confidence];
+function ServiceCard({ scored }: { scored: ScoredService }) {
+  const confidence = CONFIDENCE[scored.confidence];
   return (
     <div className="rounded-lg border">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3">
-        {scored && <ScoreBadge score={scored.score} tier={scored.tier} />}
-        <span className="font-medium">{impact.service.name}</span>
+        <ScoreBadge score={scored.score} tier={scored.tier} />
+        <span className="font-medium">{scored.service.name}</span>
         <span
-          className={`rounded-full px-2 py-0.5 text-xs font-medium ${CRITICALITY_CLASS[impact.service.criticality]}`}
+          className={`rounded-full px-2 py-0.5 text-xs font-medium ${CRITICALITY_CLASS[scored.service.criticality]}`}
         >
-          {impact.service.criticality}
+          {scored.service.criticality}
         </span>
         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${confidence.className}`}>
           {confidence.label}
         </span>
         <span className="ml-auto text-xs text-muted-foreground">
-          {impact.owners.length > 0
-            ? impact.owners.map((owner) => owner.name).join(", ")
+          {scored.owners.length > 0
+            ? scored.owners.map((owner) => owner.name).join(", ")
             : "No owners assigned"}
         </span>
       </div>
       <div className="space-y-3 p-4">
-        {scored && <WhyThisScore scored={scored} />}
-        {impact.evidence.map((evidence, index) => (
+        <WhyThisScore scored={scored} />
+        {scored.evidence.map((evidence, index) => (
           <Evidence key={index} evidence={evidence} />
         ))}
       </div>

@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import static com.aegis.core.matching.MatchingDtos.MatchConfidence.CONFIRMED;
 import static com.aegis.core.matching.MatchingDtos.MatchConfidence.POSSIBLE;
+import static com.aegis.core.signals.ChangeSignal.SignalType.VULNERABILITY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -62,15 +63,15 @@ class ScoringPropertiesTest {
                 new ScoringProperties(null, null, halved, null, null, null, null, null));
         ImpactScorer shipped = new ImpactScorer(ScoringProperties.defaults());
 
-        double confirmed = strict.score(strict.breakdown(
+        double confirmed = strict.score(strict.breakdown(VULNERABILITY,
                 1.0, ServiceExposure.INTERNET_FACING, BusinessCriticality.CRITICAL, CONFIRMED));
-        double possible = strict.score(strict.breakdown(
+        double possible = strict.score(strict.breakdown(VULNERABILITY,
                 1.0, ServiceExposure.INTERNET_FACING, BusinessCriticality.CRITICAL, POSSIBLE));
 
         assertThat(confirmed).isEqualTo(100.0);
         assertThat(possible).isEqualTo(50.0);
         // The shipped model leaves both alone, so enabling the discount is a deliberate act.
-        assertThat(shipped.score(shipped.breakdown(
+        assertThat(shipped.score(shipped.breakdown(VULNERABILITY,
                         1.0, ServiceExposure.INTERNET_FACING, BusinessCriticality.CRITICAL, POSSIBLE)))
                 .isEqualTo(100.0);
     }

@@ -77,17 +77,9 @@ public class ImpactScorer {
                 : new SeverityInput(SeveritySource.SEVERITY_LABEL, null, null, label, factor);
     }
 
-    /** The breakdown for a vulnerability — the common case, where every term applies. */
-    public ScoreBreakdown breakdown(
-            double severityFactor,
-            ServiceExposure exposure,
-            BusinessCriticality criticality,
-            MatchConfidence confidence) {
-        return breakdown(SignalType.VULNERABILITY, severityFactor, exposure, criticality, confidence);
-    }
-
     /**
-     * The per-service breakdown: every factor and the input it was read from.
+     * The per-service breakdown: every factor and the input it was read from. The signal type is
+     * deliberately required: whether the exposure term applies depends on it.
      *
      * <p>Exposure is inbound attack reach, so it only discounts a vulnerability. A vendor outage is an
      * availability incident — the AWS region is down for an internal service exactly as it is for an

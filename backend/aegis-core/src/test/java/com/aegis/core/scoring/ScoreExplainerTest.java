@@ -21,6 +21,7 @@ import static com.aegis.core.scoring.ScoringDtos.ScoreFactorKind.CONFIDENCE;
 import static com.aegis.core.scoring.ScoringDtos.ScoreFactorKind.CRITICALITY;
 import static com.aegis.core.scoring.ScoringDtos.ScoreFactorKind.EXPOSURE;
 import static com.aegis.core.scoring.ScoringDtos.ScoreFactorKind.SEVERITY;
+import static com.aegis.core.signals.ChangeSignal.SignalType.VULNERABILITY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
@@ -36,7 +37,7 @@ class ScoreExplainerTest {
     @Test
     void listsEveryTermInModelOrderWithItsInputWeightAndWhereTheWeightIsSet() {
         SeverityInput severity = scorer.severityFromCvss("3.1", new BigDecimal("8.0"));
-        ScoreBreakdown breakdown = scorer.breakdown(
+        ScoreBreakdown breakdown = scorer.breakdown(VULNERABILITY,
                 severity.factor(), ServiceExposure.INTERNAL, BusinessCriticality.HIGH, CONFIRMED);
 
         List<ScoreFactor> factors = explainer.factors(severity, breakdown);
@@ -58,7 +59,7 @@ class ScoreExplainerTest {
     @Test
     void headroomIsWhatTheScoreWouldGainIfThatFactorAloneWereAtItsMaximum() {
         SeverityInput severity = scorer.severityFromCvss("3.1", new BigDecimal("8.0"));
-        ScoreBreakdown breakdown = scorer.breakdown(
+        ScoreBreakdown breakdown = scorer.breakdown(VULNERABILITY,
                 severity.factor(), ServiceExposure.ISOLATED, BusinessCriticality.HIGH, CONFIRMED);
 
         // 0.8 x 0.5 x 0.8 = 32.0. Maxing each term alone: severity -> 40.0, exposure -> 64.0,
@@ -87,7 +88,7 @@ class ScoreExplainerTest {
             for (ServiceExposure exposure : ServiceExposure.values()) {
                 for (BusinessCriticality criticality : BusinessCriticality.values()) {
                     for (MatchConfidence confidence : MatchConfidence.values()) {
-                        ScoreBreakdown breakdown = discounting.breakdown(
+                        ScoreBreakdown breakdown = discounting.breakdown(VULNERABILITY,
                                 severity.factor(), exposure, criticality, confidence);
                         double score = discounting.score(breakdown);
 
@@ -113,7 +114,7 @@ class ScoreExplainerTest {
         // 0.75 x 0.9 x 0.5 = 33.75, shown as 33.8. Raw-weight headroom would be 11.25 / 3.75 / 33.75 —
         // none of which adds up to what re-scoring shows, so headroom is taken from the rounded scores.
         SeverityInput severity = scorer.severityFromLabel("high");
-        ScoreBreakdown breakdown = scorer.breakdown(
+        ScoreBreakdown breakdown = scorer.breakdown(VULNERABILITY,
                 severity.factor(), ServiceExposure.INTERNAL, BusinessCriticality.MEDIUM, CONFIRMED);
 
         assertThat(scorer.score(breakdown)).isEqualTo(33.8);
@@ -128,7 +129,7 @@ class ScoreExplainerTest {
     @Test
     void namesNothingAsLimitingWhenTheScoreIsAlreadyTheWorstCase() {
         SeverityInput severity = scorer.severityFromCvss("3.1", new BigDecimal("10.0"));
-        ScoreBreakdown breakdown = scorer.breakdown(
+        ScoreBreakdown breakdown = scorer.breakdown(VULNERABILITY,
                 severity.factor(), ServiceExposure.INTERNET_FACING, BusinessCriticality.CRITICAL, CONFIRMED);
 
         List<ScoreFactor> factors = explainer.factors(severity, breakdown);
@@ -159,7 +160,7 @@ class ScoreExplainerTest {
     void aZeroFactorIsTheOnlyOneWithHeadroom() {
         // CVSS 0.0: nothing about the service can raise the score, so only severity is to blame.
         SeverityInput severity = scorer.severityFromCvss("3.1", new BigDecimal("0.0"));
-        ScoreBreakdown breakdown = scorer.breakdown(
+        ScoreBreakdown breakdown = scorer.breakdown(VULNERABILITY,
                 severity.factor(), ServiceExposure.INTERNAL, BusinessCriticality.HIGH, CONFIRMED);
 
         List<ScoreFactor> factors = explainer.factors(severity, breakdown);
@@ -213,7 +214,7 @@ class ScoreExplainerTest {
                 null, null, Map.of(POSSIBLE, 0.5), null, null, null, null, null));
         ScoreExplainer explaining = new ScoreExplainer(strict);
         SeverityInput severity = strict.severityFromCvss("3.1", new BigDecimal("10.0"));
-        ScoreBreakdown breakdown = strict.breakdown(
+        ScoreBreakdown breakdown = strict.breakdown(VULNERABILITY,
                 severity.factor(), ServiceExposure.INTERNET_FACING, BusinessCriticality.CRITICAL, POSSIBLE);
 
         List<ScoreFactor> factors = explaining.factors(severity, breakdown);
@@ -227,7 +228,7 @@ class ScoreExplainerTest {
     @Test
     void saysSoWhenAServiceDeclaredNoExposureOrCriticality() {
         SeverityInput severity = scorer.severityFromCvss("3.1", new BigDecimal("10.0"));
-        ScoreBreakdown breakdown = scorer.breakdown(severity.factor(), null, null, CONFIRMED);
+        ScoreBreakdown breakdown = scorer.breakdown(VULNERABILITY, severity.factor(), null, null, CONFIRMED);
 
         List<ScoreFactor> factors = explainer.factors(severity, breakdown);
 
@@ -240,7 +241,7 @@ class ScoreExplainerTest {
     }
 
     private ScoreFactor severityFactor(SeverityInput severity) {
-        ScoreBreakdown breakdown = scorer.breakdown(
+        ScoreBreakdown breakdown = scorer.breakdown(VULNERABILITY,
                 severity.factor(), ServiceExposure.INTERNET_FACING, BusinessCriticality.CRITICAL, CONFIRMED);
         return factor(explainer.factors(severity, breakdown), SEVERITY);
     }

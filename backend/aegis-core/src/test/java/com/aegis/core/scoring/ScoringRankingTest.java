@@ -37,6 +37,7 @@ import static com.aegis.core.inventory.domain.ServiceExposure.ISOLATED;
 import static com.aegis.core.scoring.MockedEstate.impacted;
 import static com.aegis.core.scoring.MockedEstate.owner;
 import static com.aegis.core.scoring.MockedEstate.service;
+import static com.aegis.core.signals.ChangeSignal.SignalType.VULNERABILITY;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -110,9 +111,9 @@ class ScoringRankingTest {
             for (ServiceExposure exposure : ServiceExposure.values()) {
                 for (BusinessCriticality criticality : BusinessCriticality.values()) {
                     SeverityInput severity = discounting.severityFromCvss("3.1", new BigDecimal(cvss));
-                    double confirmed = discounting.score(discounting.breakdown(
+                    double confirmed = discounting.score(discounting.breakdown(VULNERABILITY,
                             severity.factor(), exposure, criticality, MatchConfidence.CONFIRMED));
-                    double possible = discounting.score(discounting.breakdown(
+                    double possible = discounting.score(discounting.breakdown(VULNERABILITY,
                             severity.factor(), exposure, criticality, MatchConfidence.POSSIBLE));
                     assertThat(confirmed).as("CVSS %s on %s/%s", cvss, exposure, criticality)
                             .isGreaterThanOrEqualTo(possible);
@@ -305,7 +306,7 @@ class ScoringRankingTest {
 
     private double cvssScore(String cvss, ServiceExposure exposure, BusinessCriticality criticality, MatchConfidence confidence) {
         SeverityInput severity = scorer.severityFromCvss("3.1", new BigDecimal(cvss));
-        return scorer.score(scorer.breakdown(severity.factor(), exposure, criticality, confidence));
+        return scorer.score(scorer.breakdown(VULNERABILITY, severity.factor(), exposure, criticality, confidence));
     }
 
     private static List<ImpactedServiceMatch> randomServices(Random random, List<OwnerRef> people, int count) {
