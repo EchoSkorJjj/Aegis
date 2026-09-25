@@ -29,7 +29,8 @@ import tools.jackson.databind.ObjectMapper;
  * over the checkout, then parsing syft's output into the same {@link CycloneDxBom} an uploaded file
  * produces — so generation is just another way to reach {@link SbomImportService}. Any host on the
  * allow-list works (GitHub, GitLab including nested groups, Bitbucket, a self-hosted server, …), public
- * or — with an access token — private.
+ * or private — with a pasted access token, or a credential from a host integration such as the GitHub App
+ * ({@link RepositoryReadAccess}); {@link SbomGenerationService} decides which.
  *
  * <p><b>Security.</b> Syft is a static cataloguer: it reads lockfiles and manifests and never runs a
  * package manager or the repository's own code. The remaining surface is the clone and the file walk,
@@ -38,11 +39,12 @@ import tools.jackson.databind.ObjectMapper;
  *   <li>the host must be on the allow-list, and the clone URL is <em>reconstructed</em> from validated
  *       path segments (and an optionally validated ref) rather than passing the caller's string to
  *       {@code git} — so no argument or protocol injection is possible;</li>
- *   <li>a private-repo access token is fed to git through {@code GIT_ASKPASS} from the environment —
- *       never in the argument list or {@code .git/config} on disk (only a non-secret username sits in
- *       the URL) — and it is scrubbed from any error surfaced to the caller;</li>
+ *   <li>a credential's secret is fed to git through {@code GIT_ASKPASS} from the environment — never in
+ *       the argument list or {@code .git/config} on disk (only a non-secret username sits in the URL) —
+ *       and it is scrubbed from any error surfaced to the caller;</li>
  *   <li>{@code git} is invoked shallow, single-branch, with file/ext protocols disabled and terminal
- *       credential prompts off (so a wrong/absent token fails fast rather than hanging);</li>
+ *       credential prompts off (so a wrong/absent token fails fast rather than hanging), and gives up on a
+ *       transfer that stalls below 1 KB/s for 30 s instead of waiting out the clone timeout;</li>
  *   <li>the checkout is size-capped before syft walks it, syft's output is size-capped before it is
  *       parsed, and both steps run under hard timeouts, in a fresh temp directory that is always deleted.</li>
  * </ul>
@@ -65,13 +67,11 @@ class RepoSbomGenerator {
     }
 
     /**
-     * Clone {@code repoUrl} (optionally at {@code ref}, optionally authenticated with {@code token} for a
-     * private repo), scan it with syft, and return the CycloneDX BOM.
+     * Clone {@code repo} (at {@code ref}, or its default branch when null) with {@code access}, scan it with
+     * syft, and return the CycloneDX BOM.
      */
-    CycloneDxBom generate(String repoUrl, String ref, String token) {
-        RepositoryUrl repo = RepositoryUrl.parse(repoUrl, properties.allowedHosts());
+    CycloneDxBom generate(RepositoryUrl repo, String ref, CloneAccess access) {
         String branch = RepositoryUrl.normalizeRef(ref);
-        String credential = token == null || token.isBlank() ? null : token.trim();
         Path work;
         try {
             work = Files.createTempDirectory("aegis-sbom-");
@@ -80,7 +80,7 @@ class RepoSbomGenerator {
         }
         try {
             Path checkout = work.resolve("repo");
-            clone(repo, branch, credential, checkout, work);
+            clone(repo, branch, access, checkout, work);
             enforceSizeCap(checkout);
             Path sbom = work.resolve("sbom.cdx.json");
             scan(checkout, sbom, work);
@@ -92,18 +92,22 @@ class RepoSbomGenerator {
 
     // --- steps ------------------------------------------------------------------------------------
 
-    private void clone(RepositoryUrl repo, String branch, String token, Path checkout, Path work) {
-        // With a token, put a NON-secret username in the URL and hand the token to git via GIT_ASKPASS
-        // (read from the environment) — the token never lands in argv or .git/config. The username is the
-        // host's convention (GitHub ignores it; GitLab wants oauth2; Bitbucket wants x-token-auth).
-        String cloneUrl = token == null ? repo.canonical() + ".git"
-                : "https://" + authUsername(repo.host()) + "@" + repo.host() + "/" + repo.path() + ".git";
+    private void clone(RepositoryUrl repo, String branch, CloneAccess access, Path checkout, Path work) {
+        // With a credential, put its NON-secret username in the URL and hand the secret to git via
+        // GIT_ASKPASS (read from the environment) — it never lands in argv or .git/config.
+        CloneCredential credential = access.credential();
+        String token = credential == null ? null : credential.secret();
+        String cloneUrl = credential == null ? repo.canonical() + ".git"
+                : "https://" + credential.username() + "@" + repo.host() + "/" + repo.path() + ".git";
 
         List<String> command = new ArrayList<>(List.of(
                 properties.gitPath(),
                 "-c", "protocol.file.allow=never",
                 "-c", "protocol.ext.allow=never",
                 "-c", "core.symlinks=false",
+                // A stalled connection fails in 30 s rather than holding the request for the whole timeout.
+                "-c", "http.lowSpeedLimit=1000",
+                "-c", "http.lowSpeedTime=30",
                 "clone", "--depth", "1", "--single-branch", "--no-tags"));
         if (branch != null) {
             command.add("--branch");
@@ -124,13 +128,50 @@ class RepoSbomGenerator {
 
         CommandResult result = run(command, work, env, properties.cloneTimeout(), "git");
         if (result.timedOut()) {
-            throw new ApiExceptions.BadRequest("Cloning the repository timed out");
+            throw new ApiExceptions.BadRequest("Cloning " + repo.canonical() + " timed out after "
+                    + properties.cloneTimeout().toSeconds() + " seconds; " + repo.host()
+                    + " may be slow or unreachable, so try again");
         }
         if (!result.succeeded() || !Files.isDirectory(checkout)) {
-            String detail = scrub(errorLines(result.stderr()), token);
-            throw new ApiExceptions.BadRequest("Could not clone the repository (a private repo needs a token "
-                    + "whose scope includes read access to this repository's contents): " + detail);
+            throw cloneFailure(scrub(result.stderr(), token), repo, branch, access);
         }
+    }
+
+    /** Turn git's stderr into what the person importing can act on; the raw detail only when nothing fits. */
+    private static ApiExceptions.BadRequest cloneFailure(String stderr, RepositoryUrl repo, String branch,
+            CloneAccess access) {
+        String lower = stderr == null ? "" : stderr.toLowerCase(Locale.ROOT);
+        if (branch != null && lower.contains("remote branch") && lower.contains("not found")) {
+            return new ApiExceptions.BadRequest("The branch or tag '" + branch + "' doesn't exist in " + repo.canonical());
+        }
+        if (lower.contains("could not resolve host")) {
+            return new ApiExceptions.BadRequest("Could not reach " + repo.host() + "; check the URL, or try again");
+        }
+        if (lower.contains("operation too slow") || lower.contains("timed out") || lower.contains("early eof")) {
+            return new ApiExceptions.BadRequest("The connection to " + repo.host() + " stalled; try again");
+        }
+        if (lower.contains("returned error: 429")) {
+            return new ApiExceptions.BadRequest(repo.host() + " is limiting requests"
+                    + (access.credential() == null ? " without credentials; add an access token, or" : ";")
+                    + " try again later");
+        }
+        boolean refused = lower.contains("could not read username") || lower.contains("authentication failed")
+                || lower.contains("access denied") || lower.contains("invalid credentials")
+                || lower.contains("invalid username or") || lower.contains("not found")
+                || lower.contains("returned error: 401") || lower.contains("returned error: 403")
+                || lower.contains("returned error: 404");
+        if (refused) {
+            return new ApiExceptions.BadRequest(switch (access.source()) {
+                case TOKEN -> "The access token was refused for " + repo.canonical() + ": it needs read access to"
+                        + " the repository's contents, or the repository doesn't exist";
+                case INTEGRATION -> repo.canonical() + " could not be read with " + access.detail()
+                        + "; check it has access to this repository";
+                case ANONYMOUS -> repo.canonical() + " is private or doesn't exist"
+                        + (access.detail() == null ? "" : " (" + access.detail() + ")")
+                        + ". Add a read-only access token to import it";
+            });
+        }
+        return new ApiExceptions.BadRequest("Could not clone the repository: " + errorLines(stderr));
     }
 
     private void enforceSizeCap(Path checkout) {
@@ -211,18 +252,6 @@ class RepoSbomGenerator {
             throw new ApiExceptions.BadRequest("Could not run " + tool
                     + " — SBOM generation may not be available on this server");
         }
-    }
-
-    /** The username each host expects alongside a token: GitHub ignores it, GitLab wants oauth2, Bitbucket x-token-auth. */
-    private static String authUsername(String host) {
-        String lower = host.toLowerCase(Locale.ROOT);
-        if (lower.contains("gitlab")) {
-            return "oauth2";
-        }
-        if (lower.contains("bitbucket")) {
-            return "x-token-auth";
-        }
-        return "x-access-token"; // GitHub and the generic default
     }
 
     /** Never let a token reach an error message shown to the caller or the logs. */

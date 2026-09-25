@@ -24,6 +24,7 @@ class ServiceComponentEntity {
     @Id @Column(name = "business_service_id") private UUID businessServiceId;
     @Id @Column(name = "component_id") private UUID componentId;
     @Column(name = "org_id", nullable = false) private UUID orgId;
+    @Column(name = "manifest_path", length = 400) private String manifestPath;
     @CreationTimestamp(source = SourceType.DB)
     @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
 
@@ -42,6 +43,14 @@ class ServiceComponentEntity {
 
     UUID getComponentId() {
         return componentId;
+    }
+
+    String getManifestPath() {
+        return manifestPath;
+    }
+
+    void setManifestPath(String manifestPath) {
+        this.manifestPath = manifestPath;
     }
 
     static final class Key implements Serializable {

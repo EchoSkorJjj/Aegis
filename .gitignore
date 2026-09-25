@@ -16,6 +16,8 @@ target/
 # Local env overrides
 *.env
 .env
+# Local-only compose overrides (e.g. mounting a GitHub App key); compose merges it automatically
+docker-compose.override.yml
 
 # docs and plans
 docs/

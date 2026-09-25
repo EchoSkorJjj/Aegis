@@ -1,5 +1,6 @@
 package com.aegis.core.inventory.sbom;
 
+import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -16,6 +17,8 @@ import java.util.UUID;
 
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
+import com.aegis.core.inventory.domain.BusinessService;
+import com.aegis.core.inventory.domain.SbomImportSource;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.sbom.CycloneDxBom.Component;
 import com.aegis.core.inventory.sbom.CycloneDxBom.Dependency;
@@ -30,6 +33,8 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>The service is linked only to its top-level components — the SBOM root's direct dependencies
  * plus any component nothing else depends on — so deeper libraries stay reachable transitively
  * through dependency edges, which is what the impact query reports as a transitive hit.
+ *
+ * <p>Each import is recorded on the service — when, and how it got in ({@link SbomImportSource}).
  */
 @Service
 public class SbomImportService {
@@ -46,9 +51,30 @@ public class SbomImportService {
         this.store = store;
     }
 
+    /** A CycloneDX file posted to the API (or the demo seed), recorded as {@link SbomImportSource#UPLOAD}. */
     @Transactional
     public SbomImportResult importSbom(UUID serviceId, CycloneDxBom bom) {
-        inventory.getBusinessService(serviceId);
+        return importSbom(serviceId, bom, SbomImportSource.UPLOAD);
+    }
+
+    @Transactional
+    public SbomImportResult importSbom(UUID serviceId, CycloneDxBom bom, SbomImportSource source) {
+        return importSbom(serviceId, bom, source, Map.of(), List.of());
+    }
+
+    /**
+     * An SBOM generated from the service's repository ({@link RepositoryLayout}): each direct dependency
+     * is linked with the manifest that declares it, and the repository's own packages — which an earlier
+     * import may have linked as components — are unlinked from the service.
+     */
+    @Transactional
+    public SbomImportResult importRepository(UUID serviceId, RepositoryLayout layout, SbomImportSource source) {
+        return importSbom(serviceId, layout.bom(), source, layout.manifestsByRef(), layout.projects());
+    }
+
+    private SbomImportResult importSbom(UUID serviceId, CycloneDxBom bom, SbomImportSource source,
+            Map<String, String> manifestsByRef, List<Component> projects) {
+        BusinessService service = inventory.getBusinessService(serviceId);
         if (bom == null || !"CycloneDX".equals(bom.bomFormat())) {
             throw new ApiExceptions.BadRequest("Expected a CycloneDX JSON SBOM (bomFormat \"CycloneDX\")");
         }
@@ -130,14 +156,35 @@ public class SbomImportService {
 
         Set<UUID> topLevel = new LinkedHashSet<>(rootDependencies);
         idsByCoordinates.values().stream().filter(id -> !dependedOn.contains(id)).forEach(topLevel::add);
+        Map<UUID, String> manifests = new HashMap<>();
+        manifestsByRef.forEach((ref, manifest) -> {
+            UUID id = idsByRef.get(ref);
+            if (id != null) {
+                manifests.putIfAbsent(id, manifest);
+            }
+        });
         int linked = 0;
         for (UUID componentId : topLevel) {
-            if (!store.serviceComponentExists(serviceId, componentId)) {
-                store.addServiceComponent(serviceId, componentId);
+            boolean existing = store.serviceComponentExists(serviceId, componentId);
+            String manifest = manifests.get(componentId);
+            if (!existing || manifest != null) {
+                store.linkServiceComponent(serviceId, componentId, manifest);
+            }
+            if (!existing) {
                 linked++;
             }
         }
+        for (Component project : projects) {
+            Coordinates coordinates = Coordinates.of(project);
+            if (coordinates != null) {
+                store.findSoftwareComponentByCoordinates(coordinates.ecosystem(), coordinates.name(),
+                        coordinates.version()).ifPresent(component -> store.removeServiceComponent(serviceId,
+                        component.getId()));
+            }
+        }
 
+        service.recordSbomImport(source, Instant.now());
+        store.save(service);
         return new SbomImportResult(serviceId, created, matched, skipped, dependenciesCreated, linked);
     }
 
@@ -168,7 +215,8 @@ public class SbomImportService {
             PackageUrl purl = isBlank(component.purl()) ? null : PackageUrl.parse(component.purl());
             String version = !isBlank(component.version()) ? component.version().trim()
                     : purl == null ? null : purl.version();
-            if (version == null) {
+            // syft reports a version it could not resolve (a parent-managed Maven one) as UNKNOWN.
+            if (version == null || version.equalsIgnoreCase("UNKNOWN")) {
                 return null;
             }
             String name;

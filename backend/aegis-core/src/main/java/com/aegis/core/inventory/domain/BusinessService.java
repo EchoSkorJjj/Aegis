@@ -1,5 +1,7 @@
 package com.aegis.core.inventory.domain;
 
+import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
 
 import jakarta.persistence.Column;
@@ -40,6 +42,13 @@ public class BusinessService extends InventoryEntity {
     @Column(name = "repository_branch", length = 200)
     private String repositoryBranch;
 
+    @Column(name = "sbom_imported_at")
+    private Instant sbomImportedAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "sbom_import_source", length = 16)
+    private SbomImportSource sbomImportSource;
+
     protected BusinessService() {
         // Required by JPA.
     }
@@ -71,9 +80,16 @@ public class BusinessService extends InventoryEntity {
         return name;
     }
 
+    /**
+     * Link (or re-link) the repository. Pointing at a different repository or branch forgets the last SBOM
+     * import, which described the old one; saving the same link again keeps it.
+     */
     public void linkRepository(RepositoryUrl url, String branch) {
         String canonical = requireNonNull(url, "repositoryUrl").canonical();
         String normalizedBranch = RepositoryUrl.normalizeRef(branch);
+        if (!canonical.equals(repositoryUrl) || !Objects.equals(normalizedBranch, repositoryBranch)) {
+            forgetSbomImport();
+        }
         this.repositoryUrl = canonical;
         this.repositoryBranch = normalizedBranch;
     }
@@ -81,6 +97,26 @@ public class BusinessService extends InventoryEntity {
     public void unlinkRepository() {
         this.repositoryUrl = null;
         this.repositoryBranch = null;
+        forgetSbomImport();
+    }
+
+    /** A successful SBOM import at {@code at}, and how it got in. */
+    public void recordSbomImport(SbomImportSource source, Instant at) {
+        this.sbomImportSource = requireNonNull(source, "source");
+        this.sbomImportedAt = requireNonNull(at, "at");
+    }
+
+    private void forgetSbomImport() {
+        this.sbomImportSource = null;
+        this.sbomImportedAt = null;
+    }
+
+    public Instant getSbomImportedAt() {
+        return sbomImportedAt;
+    }
+
+    public SbomImportSource getSbomImportSource() {
+        return sbomImportSource;
     }
 
     public String getRepositoryUrl() {

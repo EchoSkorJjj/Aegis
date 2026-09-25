@@ -102,6 +102,15 @@ services:
       # Poll public security news/threat-intel RSS feeds (CISA, press, research blogs). No keys —
       # credential-free feeds only.
       AEGIS_INGESTION_NEWS_ENABLED: "true"
+      # GitHub App that opens approved safe-upgrade draft PRs and reads repositories for SBOM imports (no
+      # personal token needed) — off by default. Set these in the repo-root .env (git-ignored), with each
+      # account bound to its organization (owner-login=<organization id>), and mount the App's PKCS#8 key
+      # read-only at the path below from a local docker-compose.override.yml (also git-ignored). See
+      # backend/aegis-core/GITHUB_APP.md.
+      AEGIS_GITHUB_ENABLED: ${AEGIS_GITHUB_ENABLED:-false}
+      AEGIS_GITHUB_APP_CLIENT_ID: ${AEGIS_GITHUB_APP_CLIENT_ID:-}
+      AEGIS_GITHUB_ALLOWED_ACCOUNTS: ${AEGIS_GITHUB_ALLOWED_ACCOUNTS:-}
+      AEGIS_GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/github-app.pkcs8.pem
     ports:
       - "8082:8082"
     networks: [edge, internal]

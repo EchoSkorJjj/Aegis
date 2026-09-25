@@ -1,20 +1,24 @@
 package com.aegis.core.signals.persistence;
-
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 import jakarta.persistence.criteria.Subquery;
 
 import com.aegis.core.signals.ChangeSignal;
+import com.aegis.core.signals.ChangeSignal.SignalType;
 import com.aegis.core.signals.ChangeSignalFilter;
 import com.aegis.core.signals.ChangeSignalStore;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 /** JPA adapter for {@link ChangeSignalStore}, reading the {@code change_signals} view. */
 @Repository
@@ -31,6 +35,29 @@ class JpaChangeSignalStore implements ChangeSignalStore {
     @Override
     public Optional<ChangeSignal> findById(UUID id) {
         return signals.findById(id).map(JpaChangeSignalStore::toChangeSignal);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<String, UUID> findVulnerabilityIds(Collection<String> canonicalIds) {
+        if (canonicalIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, UUID> ids = new HashMap<>();
+        for (List<String> chunk : chunks(List.copyOf(canonicalIds))) {
+            signals.findBySignalTypeAndTitleIn(SignalType.VULNERABILITY, chunk)
+                    .forEach(signal -> ids.putIfAbsent(signal.getTitle(), signal.getId()));
+        }
+        return ids;
+    }
+
+    /** Keeps an IN list well under the driver's bind-parameter limit however many ids are asked for. */
+    private static List<List<String>> chunks(List<String> values) {
+        List<List<String>> chunks = new ArrayList<>();
+        for (int start = 0; start < values.size(); start += 1_000) {
+            chunks.add(values.subList(start, Math.min(values.size(), start + 1_000)));
+        }
+        return chunks;
     }
 
     @Override

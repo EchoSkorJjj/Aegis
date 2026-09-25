@@ -66,6 +66,8 @@ class SbomImportServiceTest {
         when(store.serviceComponentExists(any(), any()))
                 .thenAnswer(call -> serviceComponents.contains((UUID) call.getArgument(1)));
         doAnswer(call -> serviceComponents.add(call.getArgument(1))).when(store).addServiceComponent(any(), any());
+        doAnswer(call -> serviceComponents.add(call.getArgument(1)))
+                .when(store).linkServiceComponent(any(), any(), any());
     }
 
     @Test

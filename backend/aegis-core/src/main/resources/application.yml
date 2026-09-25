@@ -59,6 +59,8 @@ aegis:
       client-id: ${AEGIS_GITHUB_APP_CLIENT_ID:}
       private-key-path: ${AEGIS_GITHUB_APP_PRIVATE_KEY_PATH:}
       hosts: ${AEGIS_GITHUB_HOSTS:github.com}
+      # login=<organization id> binds a GitHub account to the one Aegis organization that may use the App
+      # on it (repeat per organization); a bare login is usable by every organization (single-org only).
       allowed-accounts: ${AEGIS_GITHUB_ALLOWED_ACCOUNTS:}
   # identity-service's member directory — e.g. to verify that a service's assigned owner is a member of
   # the caller's organization holding the SERVICE_OWNER role. Called with the CALLER's own access token
@@ -71,12 +73,13 @@ aegis:
   inventory:
     # Generate a service's CycloneDX SBOM straight from a Git repo: shallow-clone it and run syft (a
     # STATIC cataloguer — it never runs a package manager or the repo's own code). Needs git + syft on
-    # the image (the Dockerfile installs both). Every axis is bounded; disable to hide the endpoint and
-    # keep only the manual CycloneDX upload.
+    # the image (the Dockerfile installs both). Every axis is bounded; disable to hide the import from a
+    # linked repository (the CycloneDX upload API stays).
     sbom-generation:
       enabled: ${AEGIS_SBOM_GENERATION_ENABLED:true}
-      # Hosts that may be cloned (public or, with a per-request access token, private). Never an
-      # internal or arbitrary host — this is the SSRF boundary. Add a self-hosted GitLab/Gitea host here.
+      # Hosts that may be linked and cloned (public, or private with a per-import access token or the
+      # GitHub App). Never an internal or arbitrary host — this is the SSRF boundary. Add a self-hosted
+      # GitLab/Gitea/Bitbucket host here.
       allowed-hosts: ${AEGIS_SBOM_ALLOWED_HOSTS:github.com,gitlab.com,bitbucket.org}
       git-path: ${AEGIS_SBOM_GIT_PATH:git}
       syft-path: ${AEGIS_SBOM_SYFT_PATH:syft}

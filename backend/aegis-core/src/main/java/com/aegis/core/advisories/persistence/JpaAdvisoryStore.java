@@ -76,6 +76,20 @@ class JpaAdvisoryStore implements AdvisoryStore {
     }
 
     @Override
+    public List<Advisory> findNamingPackage(Collection<String> packageKeys, Collection<String> productKeys) {
+        // An empty IN () is invalid SQL; a key no row can hold keeps each side a no-op instead.
+        List<UUID> ids = affectedProducts.findAdvisoryIdsNaming(
+                packageKeys.isEmpty() ? List.of("") : packageKeys,
+                productKeys.isEmpty() ? List.of("") : productKeys);
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        List<AdvisoryEntity> entities = advisories.findAllById(ids);
+        Map<UUID, List<AffectedProduct>> affected = affectedFor(ids);
+        return entities.stream().map(entity -> toAdvisory(entity, affected.get(entity.getId()))).toList();
+    }
+
+    @Override
     public Page<Advisory> findPage(Pageable pageable) {
         Page<AdvisoryEntity> page = advisories.findAll(pageable);
         Map<UUID, List<AffectedProduct>> affected = affectedFor(

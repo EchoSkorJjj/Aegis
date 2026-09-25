@@ -1,5 +1,6 @@
 package com.aegis.core.support;
 
+import com.aegis.core.inventory.sbom.SbomTestConfig;
 import com.aegis.core.matching.MatchingService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,7 +24,7 @@ import static org.springframework.security.test.web.servlet.setup.SecurityMockMv
  * <p>Plain {@code postgres:16} — the core has no pgvector dependency (RAG lives in the ai-service).
  */
 @SpringBootTest
-@Import(IdentityTestConfig.class)
+@Import({IdentityTestConfig.class, ActionsTestConfig.class, SbomTestConfig.class})
 public abstract class AbstractIntegrationTest {
 
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16");

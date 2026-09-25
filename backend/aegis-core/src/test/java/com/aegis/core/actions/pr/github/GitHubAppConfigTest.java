@@ -6,6 +6,8 @@ import java.nio.file.Path;
 import com.aegis.core.actions.pr.PrProvider;
 import com.aegis.core.actions.pr.PrProviders;
 import com.aegis.core.actions.pr.RepositoryRef;
+import com.aegis.core.inventory.sbom.RepositoryReadAccess;
+import com.aegis.core.platform.tenant.CurrentOrg;
 import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -17,18 +19,20 @@ import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class GitHubPrConfigTest {
+class GitHubAppConfigTest {
     @TempDir Path temporary;
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
-            .withUserConfiguration(GitHubPrConfig.class, PrProviders.class)
+            .withUserConfiguration(GitHubAppConfig.class, PrProviders.class)
+            .withBean(CurrentOrg.class)
             .withBean(ObjectMapper.class, () -> JsonMapper.builder().build())
             .withBean(ObservationRegistry.class, () -> ObservationRegistry.NOOP);
 
     @Test
     void disabledByDefaultWithoutAnyConfiguration() {
         runner.run(context -> {
-            assertThat(context).hasNotFailed().doesNotHaveBean(PrProvider.class).doesNotHaveBean(GitHubProperties.class);
+            assertThat(context).hasNotFailed().doesNotHaveBean(PrProvider.class).doesNotHaveBean(GitHubProperties.class)
+                    .doesNotHaveBean(RepositoryReadAccess.class);
             assertThat(context).hasSingleBean(PrProviders.class);
         });
     }
@@ -41,23 +45,33 @@ class GitHubPrConfigTest {
     }
 
     @Test
-    void enabledBindsPropertiesAndExposesOnlyPortWithoutNetworkCalls() throws Exception {
+    void enabledBindsPropertiesAndExposesBothPortsWithoutNetworkCalls() throws Exception {
         Path key = GitHubAppPrProviderTest.writeKey(temporary, GitHubAppPrProviderTest.generateKey());
         enabled().withPropertyValues("aegis.actions.github.private-key-path=" + key,
                 "aegis.actions.github.api-base-url=https://github.example/api/v3",
                 "aegis.actions.github.hosts=github.example",
-                "aegis.actions.github.allowed-accounts=Sandbox,SECOND").run(context -> {
-                    assertThat(context).hasNotFailed().hasSingleBean(PrProvider.class);
+                "aegis.actions.github.allowed-accounts=Sandbox,SECOND=00000000-0000-0000-0000-00000000a001").run(context -> {
+                    assertThat(context).hasNotFailed().hasSingleBean(PrProvider.class)
+                            .hasSingleBean(RepositoryReadAccess.class);
                     GitHubProperties props = context.getBean(GitHubProperties.class);
                     assertThat(props.enabled()).isTrue();
                     assertThat(props.clientId()).isEqualTo("test-client");
                     assertThat(props.privateKeyPath()).isEqualTo(key);
                     assertThat(props.apiBaseUrl().toString()).isEqualTo("https://github.example/api/v3");
-                    assertThat(props.allowedAccounts()).containsExactlyInAnyOrder("sandbox", "second");
+                    assertThat(props.allowedAccounts())
+                            .containsExactlyInAnyOrder("sandbox", "second=00000000-0000-0000-0000-00000000a001");
                     var repo = new RepositoryRef("github.example", "sandbox/repo");
                     assertThat(context.getBean(PrProviders.class).forRepository(repo).id()).isEqualTo("github");
-                    assertThat(context).doesNotHaveBean(GitHubApi.class).doesNotHaveBean(GitHubInstallationTokens.class);
                 });
+    }
+
+    @Test
+    void anAccountBindingThatIsNotAnOrganizationIdFailsAtStartup() throws Exception {
+        Path key = GitHubAppPrProviderTest.writeKey(temporary, GitHubAppPrProviderTest.generateKey());
+        enabled().withPropertyValues("aegis.actions.github.private-key-path=" + key,
+                "aegis.actions.github.allowed-accounts=sandbox=payments-team").run(context ->
+                assertThat(context).hasFailed().getFailure()
+                        .hasRootCauseMessage("allowed-accounts entry for sandbox must bind it to an organization id (a UUID)"));
     }
 
     @Test

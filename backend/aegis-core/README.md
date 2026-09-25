@@ -39,7 +39,7 @@ and the modules are cycle-free.
 | `inventory`  | Services and their repository links, components, vendors, SBOM dependencies, ownership — the map |
 | `matching`   | Advisory package + version range → components → impacted services/owners + evidence chains |
 | `scoring`    | Deterministic impact score per service and owner, with a "why" breakdown |
-| `actions`    | Validated draft-PR types, provider registry and disabled GitHub App spike; approved execution workflows remain planned |
+| `actions`    | Draft-PR port + provider registry, the disabled-by-default GitHub App adapter, and safe-upgrade proposals a person approves (E8 story 4) |
 | `ai`         | **Port** to the Python ai-service: `AiAssessor` / `AiDrafter` + DTOs + `HttpAiClient` |
 
 ## Service repositories and draft PR providers (E8 Story 2)
@@ -49,12 +49,17 @@ and returns the updated service. `DELETE` on the same path unlinks it (204). Ser
 nullable `repositoryUrl` and `repositoryBranch`; omitting the branch selects the repository default.
 The governance service-update endpoint preserves these fields. Analysts, compliance admins and the
 service's assigned owners can maintain the link; reads and writes remain scoped to the active org.
-The service detail page shows the link and branch and prefills repository SBOM imports from them.
+The service detail page's **Repository** section links the repository and imports its SBOM in one step
+(see [SBOM import](#sbom-import-cyclonedx)), then re-imports it on demand.
 
 `RepositoryUrl` is shared by repository linking and SBOM generation. Both use
-`aegis.inventory.sbom-generation.allowed-hosts`, even when SBOM generation is disabled. Only HTTPS
-URLs are accepted; hosts are lower-cased and `.git`/trailing slash removed. Credentials, query strings,
-fragments, custom ports, invalid path segments and unsafe branch/tag refs are rejected. Credentials
+`aegis.inventory.sbom-generation.allowed-hosts`, even when SBOM generation is disabled. It takes what
+people paste and stores the canonical HTTPS URL: an `https://` URL, an SSH clone URL
+(`git@github.com:owner/repo.git`, `ssh://git@host/…`), a clone URL carrying a username
+(`https://jdoe@bitbucket.org/…`, dropped), or a browser link into a branch or file (GitHub and Bitbucket
+repositories are two segments; GitLab's `/-/` ends the project path on any host). Hosts are lower-cased
+and `.git`/trailing slash removed; query strings and fragments are ignored. Passwords, custom HTTPS
+ports, dot segments anywhere, invalid path segments and unsafe branch/tag refs are rejected. Credentials
 for private SBOM imports remain separate and are never persisted in the link.
 
 Migration **V17** adds the nullable repository columns and branch/link constraint. Coordinate this
@@ -75,10 +80,71 @@ repository default must also check that the resolved base differs from the head.
 The optional `actions.pr.github` adapter implements App JWT authentication, repository-scoped
 installation tokens, branch/file commits and draft PR creation. It ships **disabled**; an empty account
 allow-list refuses every operation. Tests use a local fake GitHub server and temporary RSA keys.
-No real App is registered, and there is no execution endpoint. Production requires verified
-org-scoped installation bindings and a human-approved execution/audit workflow.
-See [GITHUB_APP.md](GITHUB_APP.md) for configuration, permissions, key handling, test evidence and the
-future sandbox smoke procedure.
+Its only caller is the approval step below. Production still requires verified org-scoped installation
+bindings and an audit trail (E10). See [GITHUB_APP.md](GITHUB_APP.md) for configuration (including
+docker compose), permissions, key handling, test evidence and the sandbox smoke procedure.
+
+## Upgrade recommendations (no CVE to look up)
+
+`GET /api/actions/upgrade-recommendations[?serviceId=]` (any domain role) lists every vulnerable dependency
+of the organization's services — or one service — highest impact first, found from the services' side:
+`matching.VulnerableDependencies` walks each service's direct components down the dependency graph, asks
+the advisory store which advisories name any of those packages, and applies matching's own identity and
+version rules, so a dependency is listed exactly when that advisory's impact page would list the service.
+Each item carries the fixed version (`UpgradeTargets`, clearing every advisory with a fix), the impact
+score (`ImpactScorer`: severity x exposure x criticality), the manifest, any proposal already drafted, and
+a readiness: `READY`, `NO_REPOSITORY` (link it), `TRANSITIVE` (another package pulls it in — upgrade that
+one or pin this), `UNSUPPORTED` (an ecosystem Aegis does not edit) or `NO_FIX`, with the reason, plus
+`canDraft` for the caller. Recomputed per request; nothing is drafted until a person clicks. The UI shows
+them on **Review & approve** ("Recommended upgrades", direct dependencies across the estate) and on each
+service's page ("Vulnerable dependencies", including transitive ones).
+
+## Safe-upgrade draft pull requests (E8 Story 4, with an early slice of E9)
+
+For a vulnerability that reaches a service through a component it uses **directly**, Aegis drafts the
+fix as a pull request a person approves. Nothing reaches a repository without that approval, the PR is
+always a **draft** on an `aegis/` branch, and Aegis never merges.
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| POST | `/api/actions/upgrade-proposals` | an analyst, or the service's assigned owners | Draft: `{changeSignalId, serviceId, componentId, manifestPath?}` → 201 `PROPOSED` |
+| GET | `/api/actions/upgrade-proposals?serviceId=&changeSignalId=&status=A,B` | any domain role | Newest first |
+| GET | `/api/actions/upgrade-proposals/{id}` | any domain role | Includes the exact PR title and body |
+| POST | `/api/actions/upgrade-proposals/{id}/approve` | an analyst, or the service's assigned owners — **never the drafter** | Opens the draft PR → `OPENED` (or `FAILED`, with the reason) |
+| POST | `/api/actions/upgrade-proposals/{id}/dismiss` | an analyst, or the service's assigned owners (the drafter included) | `{reason}` → `DISMISSED` |
+
+- **One duty per role, and a second person approves** (ADR §6e). An analyst drafts and decides for any
+  service, a service owner for the services they own. A compliance admin reads all of it — the queue,
+  each proposal with who drafted and who decided, the history — to audit the decisions, and makes none
+  of them. Whoever drafted a proposal never approves it, retrying a failed opening included (403); they
+  may still dismiss it, which opens nothing and leaves the upgrade recommended. The recommendations'
+  `canDraft` follows the same rule.
+
+- **The safe version is deterministic** (`matching.UpgradeTargets`): starting from the installed version,
+  move to the fixed version of whichever affected range still contains it, across **every** advisory
+  Aegis holds for the package, not only the one being remediated (Log4Shell's own fix, 2.15.0, was still
+  vulnerable). A remediated range with no published fix, or a version that cannot be compared, is a
+  refusal; another advisory without a fix is reported in the PR body rather than blocking.
+- **The edit is deterministic and minimal**: Maven `pom.xml` (the dependency's `<version>` or the
+  property it reads), npm `package.json` (keeping `^`/`~`/`>=`; the PR asks the reviewer to refresh the
+  lockfile) and PyPI `requirements.txt` (`==` pins). A transitive dependency, a parent-managed version or
+  an unfamiliar spec is refused with the reason, never approximated.
+- **The repository is the service's own link**, never a caller's input; approval refuses if the link
+  changed after drafting. At approval the manifest is read again, the edit re-applied, and the write
+  pinned to the revision just read, so a manifest edited in between is refused rather than overwritten.
+- **The PR body** states the facts (versions, advisories checked, score, match confidence, evidence) and
+  a reviewer checklist. The ai-service's rationale, when available, is quoted and labelled unverified; an
+  AI outage never blocks a fix. Feed- and model-written text is made inert (no @-mentions,
+  cross-references, remote images or HTML).
+- **Decisions are safe under concurrency**: approval claims the proposal first (optimistic lock), so two
+  people approving at once get one PR and a conflict. A failure is recorded on the proposal, which can be
+  approved again or dismissed. One live proposal per service, change and component.
+- Org-scoped (`upgrade_proposals`, V18, with the RLS backstop); a proposal goes with its service. Every
+  response carries the service's current `serviceName` alongside the stored proposal.
+- **In the UI**: the change-impact page (`/advisories/{id}`) offers **Draft upgrade PR** on a direct
+  evidence chain (or links the proposal already drafted); `/responses/upgrades/{id}` shows the exact PR
+  and takes the decision; `/responses/review` lists what still needs a person (`PROPOSED`, `FAILED`,
+  `OPENING`) and `/responses/history` what was decided (`OPENED`, `DISMISSED`).
 
 ## The AI boundary
 
@@ -195,9 +261,40 @@ Both require the same read role as the rest of the inventory API (`SERVICE_OWNER
 
 ### SBOM import (CycloneDX)
 
-`POST /api/inventory/services/{serviceId}/sbom` (`ANALYST`, `COMPLIANCE_ADMIN`, or the service's assigned
-owner — as is `…/sbom/from-repo`) takes a CycloneDX JSON
-SBOM (`application/json` or `application/vnd.cyclonedx+json`) and merges it into the map:
+**From the linked repository** — what the UI does. `POST /api/inventory/services/{serviceId}/sbom/from-repository`
+(`ANALYST`, `COMPLIANCE_ADMIN`, or the service's assigned owner; 409 until a repository is linked)
+shallow-clones the service's own linked repository at its branch, runs syft over it, and imports the
+result. The body is optional, `{"token": "…", "username": "…"}`. Access, first that applies: a pasted
+read-only **token** (used for this clone only, never stored; the username defaults to the host's
+convention — GitHub ignores it, GitLab `oauth2`, Bitbucket `x-token-auth` for access tokens and
+`x-bitbucket-api-token-auth` for `ATATT…` API tokens); a **host integration** — the GitHub App mints a
+read-only installation token when it is installed on the repository's account and that account is
+bound to the caller's organization ([GITHUB_APP.md](GITHUB_APP.md)); otherwise **none**, which is all a
+public repository needs. A refusal says which it was and what to do. Any host on
+`AEGIS_SBOM_ALLOWED_HOSTS` works: add a self-hosted GitLab, Gitea or Bitbucket Data Center host there.
+git gives up on a transfer slower than 1 KB/s for 30 seconds rather than waiting out the clone timeout.
+
+**A repository's own packages are the repository.** syft scans a directory, so it reports a Maven module
+(found at its own `pom.xml`) or an npm `package-lock.json`'s root project as components, with the libraries
+they declare below them — taken literally, every library would look transitive and nothing could ever be
+upgraded, and two repositories' private `client@0.0.0` would share coordinates. A repository import
+(`inventory.sbom.RepositoryLayout`) removes those project packages, makes what they declare the service's
+direct dependencies, and records on each link the manifest that declares it (`business_service_components.
+manifest_path`, **V20**: `client/package.json`, `backend/aegis-core/pom.xml`; the `package.json` beside a
+pnpm/yarn lockfile). An upgrade pull request edits that manifest by default. A re-import unlinks project
+packages an earlier import linked, and a version syft could not resolve (`UNKNOWN`, a parent-managed Maven
+version) is skipped rather than imported.
+
+Every import is recorded on the service (**V19**): `sbomImportedAt` and `sbomImportSource` — `UPLOAD`,
+`PUBLIC`, `INTEGRATION` or `TOKEN`, never the credential — in every service response, and cleared when the
+repository link points elsewhere or is removed. The service page shows it ("SBOM last imported … · with an
+access token") and, when the last import needed a token, asks for one before importing rather than after
+a failure. In the UI, linking a repository imports straight away; afterwards a single **Import SBOM**
+dialog, pre-filled with the saved repository, imports again, changes the URL or branch first, or unlinks.
+
+**Uploading a file** — for automation such as a CI pipeline; the UI no longer offers it.
+`POST /api/inventory/services/{serviceId}/sbom` (same roles) takes a CycloneDX JSON
+SBOM (`application/json` or `application/vnd.cyclonedx+json`). Either way, the SBOM merges into the map:
 
 - Components are matched by (ecosystem, name, version), case-insensitively, or created. The ecosystem
   is the purl type and the name follows advisory-feed spelling (`group:artifact` for Maven,

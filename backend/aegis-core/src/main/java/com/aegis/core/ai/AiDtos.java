@@ -2,13 +2,13 @@ package com.aegis.core.ai;
 
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 /**
- * The wire contract with the ai-service, mirrored by its OpenAPI schema. Fields are intentionally
- * minimal for the scaffold and will grow with the feature (BUILD_PLAN.md step 7).
- *
- * <p>Note: the ai-service uses snake_case JSON; when {@link HttpAiClient} is implemented, configure
- * the client's {@code ObjectMapper} with {@code SNAKE_CASE} (or annotate these records) so the
- * mapping stays aligned.
+ * The wire contract with the ai-service, mirrored by its OpenAPI schema ({@code schemas.py}). The
+ * ai-service speaks snake_case and rejects unknown request fields, so every request component is named
+ * explicitly; responses tolerate fields added later.
  */
 public final class AiDtos {
 
@@ -16,16 +16,28 @@ public final class AiDtos {
     }
 
     /** "Assess this finding": is it real signal for this service, and why. */
-    public record AssessmentRequest(String findingId, String advisoryText, String serviceContext) {
+    public record AssessmentRequest(
+            @JsonProperty("finding_id") String findingId,
+            @JsonProperty("advisory_text") String advisoryText,
+            @JsonProperty("service_context") String serviceContext) {
     }
 
-    public record Assessment(boolean material, String rationale, String suggestedSeverity, List<String> citations) {
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Assessment(
+            boolean material,
+            String rationale,
+            @JsonProperty("suggested_severity") String suggestedSeverity,
+            List<String> citations) {
     }
 
     /** "Draft a response" of a given type (risk_ticket | upgrade | memo). */
-    public record DraftRequest(String findingId, String draftType, String context) {
+    public record DraftRequest(
+            @JsonProperty("finding_id") String findingId,
+            @JsonProperty("draft_type") String draftType,
+            String context) {
     }
 
-    public record Draft(String draftType, String content, List<String> citations) {
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Draft(@JsonProperty("draft_type") String draftType, String content, List<String> citations) {
     }
 }

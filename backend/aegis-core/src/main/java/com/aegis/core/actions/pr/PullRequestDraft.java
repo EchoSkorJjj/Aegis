@@ -41,7 +41,8 @@ public record PullRequestDraft(
         changes = List.copyOf(changes);
     }
 
-    private static boolean safeBranch(String branch) {
+    /** A branch name that is safe to put in a Git ref and a URL; shared with the providers' reads. */
+    public static boolean safeBranch(String branch) {
         if (branch == null || !branch.matches("[A-Za-z0-9][A-Za-z0-9._/-]{0,199}")
                 || branch.contains("..") || branch.contains("//") || branch.endsWith("/")
                 || branch.endsWith(".")) {

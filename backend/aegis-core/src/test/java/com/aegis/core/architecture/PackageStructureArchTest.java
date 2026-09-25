@@ -125,7 +125,7 @@ class PackageStructureArchTest {
     static final ArchRule github_is_only_reached_through_the_provider_port = noClasses()
             .that().resideOutsideOfPackage("..actions.pr.github..")
             .should().dependOnClassesThat().resideInAPackage("..actions.pr.github..")
-            .because("the GitHub adapter is an optional PrProvider implementation");
+            .because("the GitHub adapter is optional, reached only through its ports (PrProvider, RepositoryReadAccess)");
 
     /**
      * The public web API belongs to the domains. After lifting advisories/incidents/news/signals out

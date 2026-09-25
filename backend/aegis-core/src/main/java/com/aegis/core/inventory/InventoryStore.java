@@ -66,6 +66,12 @@ public interface InventoryStore {
 
     boolean serviceComponentExists(UUID serviceId, UUID componentId);
     void addServiceComponent(UUID serviceId, UUID componentId);
+
+    /**
+     * Link a component to a service as a direct dependency, recording the manifest that declares it; an
+     * existing link keeps its manifest unless a new one is given.
+     */
+    void linkServiceComponent(UUID serviceId, UUID componentId, String manifestPath);
     boolean removeServiceComponent(UUID serviceId, UUID componentId);
     Page<SoftwareComponent> findServiceComponents(UUID serviceId, Pageable pageable);
 
@@ -84,8 +90,15 @@ public interface InventoryStore {
     boolean removeComponentDependency(UUID componentId, UUID dependencyId);
     Page<SoftwareComponent> findComponentDependencies(UUID componentId, Pageable pageable);
 
-    /** A service's direct edge to a component it uses — the traversal unit for component impact. */
-    record ServiceComponentLink(UUID serviceId, UUID componentId) {
+    /**
+     * A service's direct edge to a component it uses — the traversal unit for component impact.
+     * {@code manifestPath} is the repository file declaring it, where known.
+     */
+    record ServiceComponentLink(UUID serviceId, UUID componentId, String manifestPath) {
+
+        public ServiceComponentLink(UUID serviceId, UUID componentId) {
+            this(serviceId, componentId, null);
+        }
     }
 
     /** A direct dependency edge: {@code componentId} depends on {@code dependencyId}. */
@@ -100,6 +113,12 @@ public interface InventoryStore {
 
     /** Every service→component edge for services that use any of {@code componentIds} directly. */
     List<ServiceComponentLink> findServiceComponentLinks(Collection<UUID> componentIds);
+
+    /** Every direct component edge of the given services. */
+    List<ServiceComponentLink> findServiceComponentLinksForServices(Collection<UUID> serviceIds);
+
+    /** Forward graph edges: what each of {@code componentIds} depends on directly (one BFS level). */
+    List<ComponentDependencyLink> findDependenciesOf(Collection<UUID> componentIds);
 
     Map<UUID, BusinessService> findBusinessServicesByIds(Collection<UUID> ids);
     Map<UUID, SoftwareComponent> findSoftwareComponentsByIds(Collection<UUID> ids);

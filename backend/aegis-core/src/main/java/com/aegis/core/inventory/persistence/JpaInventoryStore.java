@@ -311,6 +311,17 @@ public class JpaInventoryStore implements InventoryStore {
     }
 
     @Override
+    public void linkServiceComponent(UUID serviceId, UUID componentId, String manifestPath) {
+        UUID org = scope();
+        ServiceComponentEntity link = serviceComponents.findById(new ServiceComponentEntity.Key(serviceId, componentId))
+                .orElseGet(() -> new ServiceComponentEntity(serviceId, componentId, org));
+        if (manifestPath != null) {
+            link.setManifestPath(manifestPath);
+        }
+        serviceComponents.save(link);
+    }
+
+    @Override
     public boolean removeServiceComponent(UUID serviceId, UUID componentId) {
         scope();
         ServiceComponentEntity.Key key = new ServiceComponentEntity.Key(serviceId, componentId);
@@ -424,7 +435,23 @@ public class JpaInventoryStore implements InventoryStore {
     @Override
     public List<ServiceComponentLink> findServiceComponentLinks(Collection<UUID> componentIds) {
         return serviceComponents.findByComponentIdInAndOrgId(componentIds, scope()).stream()
-                .map(link -> new ServiceComponentLink(link.getBusinessServiceId(), link.getComponentId()))
+                .map(link -> new ServiceComponentLink(
+                        link.getBusinessServiceId(), link.getComponentId(), link.getManifestPath()))
+                .toList();
+    }
+
+    @Override
+    public List<ServiceComponentLink> findServiceComponentLinksForServices(Collection<UUID> serviceIds) {
+        return serviceComponents.findByBusinessServiceIdInAndOrgId(serviceIds, scope()).stream()
+                .map(link -> new ServiceComponentLink(
+                        link.getBusinessServiceId(), link.getComponentId(), link.getManifestPath()))
+                .toList();
+    }
+
+    @Override
+    public List<ComponentDependencyLink> findDependenciesOf(Collection<UUID> componentIds) {
+        return componentDependencies.findByComponentIdInAndOrgId(componentIds, scope()).stream()
+                .map(link -> new ComponentDependencyLink(link.getComponentId(), link.getDependencyId()))
                 .toList();
     }
 

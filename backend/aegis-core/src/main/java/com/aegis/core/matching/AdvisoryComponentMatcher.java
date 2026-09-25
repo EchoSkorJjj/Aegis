@@ -58,13 +58,18 @@ class AdvisoryComponentMatcher {
      * false positives. CPE advisories (NVD) fall back to the vendor/product/namespace heuristic.
      */
     private static IdentityMatch identityMatch(SoftwareComponent component, AffectedProduct affected) {
+        return identityMatch(component.getEcosystem(), component.getName(), affected);
+    }
+
+    /** The same identity rule, for a package known by coordinates rather than as an inventory row. */
+    static IdentityMatch identityMatch(String ecosystem, String packageName, AffectedProduct affected) {
         if (affected.isPackage()) {
-            boolean samePackage = Ecosystems.sameEcosystem(component.getEcosystem(), affected.ecosystem())
-                    && Ecosystems.normalizePackage(affected.ecosystem(), component.getName())
+            boolean samePackage = Ecosystems.sameEcosystem(ecosystem, affected.ecosystem())
+                    && Ecosystems.normalizePackage(affected.ecosystem(), packageName)
                             .equals(Ecosystems.normalizePackage(affected.ecosystem(), affected.packageName()));
             return samePackage ? IdentityMatch.EXACT_PACKAGE : null;
         }
-        return cpeIdentity(component.getName(), affected);
+        return cpeIdentity(packageName, affected);
     }
 
     private static IdentityMatch cpeIdentity(String packageName, AffectedProduct affected) {
@@ -110,7 +115,7 @@ class AdvisoryComponentMatcher {
         return productPrefix && vendorInNamespace ? IdentityMatch.CPE_VENDOR_PRODUCT_ALIAS : null;
     }
 
-    private static String leaf(String value) {
+    static String leaf(String value) {
         int slash = value.lastIndexOf('/');
         int colon = value.lastIndexOf(':');
         return value.substring(Math.max(slash, colon) + 1);
@@ -123,7 +128,7 @@ class AdvisoryComponentMatcher {
         return end < 0 ? "" : value.substring(0, end);
     }
 
-    private static String canonical(String value) {
+    static String canonical(String value) {
         if (value == null) {
             return "";
         }

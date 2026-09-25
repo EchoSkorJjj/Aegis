@@ -105,6 +105,8 @@ interface OwnerJpaRepository
 
 interface ServiceComponentJpaRepository extends JpaRepository<ServiceComponentEntity, ServiceComponentEntity.Key> {
     List<ServiceComponentEntity> findByComponentIdInAndOrgId(Collection<UUID> componentIds, UUID orgId);
+
+    List<ServiceComponentEntity> findByBusinessServiceIdInAndOrgId(Collection<UUID> businessServiceIds, UUID orgId);
 }
 
 interface ServiceVendorJpaRepository extends JpaRepository<ServiceVendorEntity, ServiceVendorEntity.Key> {
@@ -118,4 +120,7 @@ interface ServiceOwnerJpaRepository extends JpaRepository<ServiceOwnerEntity, Se
 interface ComponentDependencyJpaRepository extends JpaRepository<ComponentDependencyEntity, ComponentDependencyEntity.Key> {
     /** Direct dependents (one BFS level): components whose {@code dependencyId} is one of the given components. */
     List<ComponentDependencyEntity> findByDependencyIdInAndOrgId(Collection<UUID> dependencyIds, UUID orgId);
+
+    /** Direct dependencies (one BFS level, forward): edges out of the given components. */
+    List<ComponentDependencyEntity> findByComponentIdInAndOrgId(Collection<UUID> componentIds, UUID orgId);
 }

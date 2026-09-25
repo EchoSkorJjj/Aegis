@@ -11,6 +11,7 @@ import jakarta.validation.constraints.Size;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.Owner;
+import com.aegis.core.inventory.domain.SbomImportSource;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
@@ -32,14 +33,17 @@ public final class InventoryDtos {
             ServiceExposure exposure) {
     }
 
+    /** {@code sbomImportedAt} / {@code sbomImportSource}: when and how its SBOM was last imported, or null. */
     public record BusinessServiceResponse(
             UUID id, String name, BusinessCriticality criticality, ServiceExposure exposure,
             String repositoryUrl, String repositoryBranch,
+            Instant sbomImportedAt, SbomImportSource sbomImportSource,
             Instant createdAt, Instant updatedAt) {
         static BusinessServiceResponse from(BusinessService value) {
             return new BusinessServiceResponse(
                     value.getId(), value.getName(), value.getCriticality(), value.getExposure(),
                     value.getRepositoryUrl(), value.getRepositoryBranch(),
+                    value.getSbomImportedAt(), value.getSbomImportSource(),
                     value.getCreatedAt(), value.getUpdatedAt());
         }
     }

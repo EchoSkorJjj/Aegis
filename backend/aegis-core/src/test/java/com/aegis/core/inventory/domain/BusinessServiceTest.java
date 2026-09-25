@@ -1,5 +1,7 @@
 package com.aegis.core.inventory.domain;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -80,5 +82,27 @@ class BusinessServiceTest {
 
         assertThat(service.getName()).isEqualTo("Payments");
         assertThat(service).isEqualTo(sameIdentity).hasSameHashCodeAs(sameIdentity);
+    }
+
+    @Test
+    void anSbomImportIsForgottenWhenTheLinkPointsElsewhereOrIsRemoved() {
+        BusinessService service = new BusinessService(UUID.randomUUID(), "Imported", BusinessCriticality.HIGH);
+        RepositoryUrl url = RepositoryUrl.parse("https://github.com/a/b", List.of("github.com"));
+        service.linkRepository(url, "main");
+        Instant at = Instant.parse("2026-09-25T10:00:00Z");
+        service.recordSbomImport(SbomImportSource.TOKEN, at);
+
+        service.linkRepository(RepositoryUrl.parse("https://github.com/a/b.git", List.of("github.com")), " main ");
+        assertThat(service.getSbomImportSource()).isEqualTo(SbomImportSource.TOKEN);
+        assertThat(service.getSbomImportedAt()).isEqualTo(at);
+
+        service.linkRepository(url, "develop");
+        assertThat(service.getSbomImportSource()).isNull();
+        assertThat(service.getSbomImportedAt()).isNull();
+
+        service.recordSbomImport(SbomImportSource.PUBLIC, at);
+        service.unlinkRepository();
+        assertThat(service.getSbomImportSource()).isNull();
+        assertThat(service.getSbomImportedAt()).isNull();
     }
 }

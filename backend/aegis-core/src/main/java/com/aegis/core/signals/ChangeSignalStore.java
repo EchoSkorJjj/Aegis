@@ -1,6 +1,8 @@
 package com.aegis.core.signals;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -11,6 +13,12 @@ import org.springframework.data.domain.Pageable;
 public interface ChangeSignalStore {
 
     Optional<ChangeSignal> findById(UUID id);
+
+    /**
+     * The vulnerability signal for each canonical id (a CVE, or a GHSA with none) that has one — the view
+     * keeps one row per vulnerability however many feeds reported it.
+     */
+    Map<String, UUID> findVulnerabilityIds(Collection<String> canonicalIds);
 
     /** A filtered page of signals across every source, most recently occurred first by default. */
     Page<ChangeSignal> findPage(ChangeSignalFilter filter, Pageable pageable);

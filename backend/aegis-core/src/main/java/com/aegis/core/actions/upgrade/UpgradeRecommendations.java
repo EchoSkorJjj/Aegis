@@ -1,0 +1,213 @@
+package com.aegis.core.actions.upgrade;
+
+import java.math.BigDecimal;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+import com.aegis.core.inventory.InventoryFilters.ServiceFilter;
+import com.aegis.core.inventory.InventoryStore;
+import com.aegis.core.inventory.domain.BusinessService;
+import com.aegis.core.matching.MatchingDtos.ComponentRef;
+import com.aegis.core.matching.MatchingDtos.MatchConfidence;
+import com.aegis.core.matching.MatchingDtos.VulnerabilityRef;
+import com.aegis.core.matching.MatchingDtos.VulnerableDependency;
+import com.aegis.core.matching.UpgradeTargets;
+import com.aegis.core.matching.UpgradeTargets.UpgradeTarget;
+import com.aegis.core.matching.VulnerableDependencies;
+import com.aegis.core.platform.common.ApiExceptions;
+import com.aegis.core.scoring.ImpactScorer;
+import com.aegis.core.scoring.ScoringDtos.ImpactTier;
+import com.aegis.core.scoring.ScoringDtos.ScoreBreakdown;
+import com.aegis.core.signals.ChangeSignal.SignalType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.stereotype.Service;
+
+/**
+ * The upgrades Aegis recommends without anyone asking: every vulnerable dependency of the services the
+ * caller can see, with the version that fixes it, how much it matters, and whether Aegis can draft the pull
+ * request — highest impact first. Nobody has to know a CVE to find them; this is E9's queue of material
+ * items, for dependency vulnerabilities. Recomputed per request from matching ({@link VulnerableDependencies},
+ * {@link UpgradeTargets}) and scoring ({@link ImpactScorer}); a proposal is only drafted when a person asks.
+ *
+ * <p>Deliberately not {@code @Transactional}: a dependency with no provable fix makes
+ * {@link UpgradeTargets#resolve} throw, and inside one shared transaction that would mark the whole request
+ * rollback-only even though it is caught here (the estate roll-up's lesson, CS203-74). Each lookup runs in
+ * its own read-only transaction instead.
+ */
+@Service
+public class UpgradeRecommendations {
+
+    private static final Logger log = LoggerFactory.getLogger(UpgradeRecommendations.class);
+
+    /** Proposals that stand for a recommendation: awaiting a decision, opening, open, or failed. */
+    private static final List<UpgradeProposalStatus> CURRENT = List.of(UpgradeProposalStatus.PROPOSED,
+            UpgradeProposalStatus.OPENING, UpgradeProposalStatus.OPENED, UpgradeProposalStatus.FAILED);
+    private static final int MAX_PROPOSALS = 1_000;
+
+    private final InventoryStore inventory;
+    private final VulnerableDependencies vulnerable;
+    private final UpgradeTargets targets;
+    private final ImpactScorer scorer;
+    private final UpgradeProposalStore proposals;
+
+    public UpgradeRecommendations(InventoryStore inventory, VulnerableDependencies vulnerable,
+            UpgradeTargets targets, ImpactScorer scorer, UpgradeProposalStore proposals) {
+        this.inventory = inventory;
+        this.vulnerable = vulnerable;
+        this.targets = targets;
+        this.scorer = scorer;
+        this.proposals = proposals;
+    }
+
+    /** Whether Aegis can draft the pull request now and, if not, what stands in the way. */
+    public enum Readiness {
+        /** A direct dependency with a fixed version, a supported manifest and a linked repository. */
+        READY,
+        /** Everything but the repository: link it and the pull request can be drafted. */
+        NO_REPOSITORY,
+        /** Pulled in by another dependency; upgrading that one, or pinning this one, is a person's call. */
+        TRANSITIVE,
+        /** An ecosystem whose manifest Aegis does not edit yet. */
+        UNSUPPORTED,
+        /** No advisory publishes a version that provably fixes it. */
+        NO_FIX
+    }
+
+    /** The proposal already drafted for this dependency, if any. */
+    public record ProposalRef(UUID id, UpgradeProposalStatus status, String toVersion, String pullRequestUrl) {
+    }
+
+    /**
+     * One recommended upgrade. {@code changeSignalId} is the vulnerability a draft remediates — the most
+     * severe one a fixed version clears — and {@code toVersion} clears every other advisory with a fix too.
+     */
+    public record Recommendation(
+            UUID serviceId,
+            String serviceName,
+            ComponentRef component,
+            ComponentRef via,
+            String manifestPath,
+            MatchConfidence confidence,
+            List<VulnerabilityRef> vulnerabilities,
+            double score,
+            ImpactTier tier,
+            boolean material,
+            String toVersion,
+            UUID changeSignalId,
+            Readiness readiness,
+            String reason,
+            ProposalRef proposal) {
+    }
+
+    /** Every service in the caller's organization, or only {@code serviceId} (404 if it isn't one). */
+    public List<Recommendation> recommend(UUID serviceId) {
+        Map<UUID, BusinessService> services = serviceId == null
+                ? inventory.findBusinessServices(ServiceFilter.NONE, Pageable.unpaged()).stream()
+                        .collect(Collectors.toMap(BusinessService::getId, Function.identity()))
+                : inventory.findBusinessServicesByIds(List.of(serviceId));
+        if (serviceId != null && services.isEmpty()) {
+            throw new ApiExceptions.NotFound("Business service not found: " + serviceId);
+        }
+        Map<String, ProposalRef> current = currentProposals();
+        return vulnerable.forServices(services.keySet()).stream()
+                .map(dependency -> recommendation(dependency, services.get(dependency.serviceId()), current))
+                .sorted(Comparator.comparingDouble(Recommendation::score).reversed()
+                        .thenComparing(Recommendation::readiness)
+                        .thenComparing(Recommendation::serviceName, String.CASE_INSENSITIVE_ORDER)
+                        .thenComparing(recommendation -> recommendation.component().name()))
+                .toList();
+    }
+
+    private Recommendation recommendation(VulnerableDependency dependency, BusinessService service,
+            Map<String, ProposalRef> current) {
+        ComponentRef component = dependency.component();
+        ScoreBreakdown breakdown = scorer.breakdown(SignalType.VULNERABILITY,
+                severityFactor(dependency.vulnerabilities().getFirst()), service.getExposure(),
+                service.getCriticality(), dependency.confidence());
+        double score = scorer.score(breakdown);
+
+        String toVersion = null;
+        UUID remediated = null;
+        String blocked = null;
+        for (VulnerabilityRef vulnerability : dependency.vulnerabilities()) {
+            if (vulnerability.changeSignalId() == null) {
+                continue;
+            }
+            try {
+                UpgradeTarget target = targets.resolve(vulnerability.changeSignalId(), component);
+                toVersion = target.toVersion();
+                remediated = vulnerability.changeSignalId();
+                break;
+            } catch (ApiExceptions.Conflict | ApiExceptions.BadRequest | ApiExceptions.NotFound unresolved) {
+                if (blocked == null) {
+                    blocked = unresolved.getMessage();
+                }
+            } catch (RuntimeException unexpected) {
+                // One dependency's odd data must never take the whole list down with it.
+                log.warn("upgrade recommendation for {} {}: no target ({})", component.name(), component.version(),
+                        unexpected.toString());
+                if (blocked == null) {
+                    blocked = "Aegis could not work out a fixed version";
+                }
+            }
+        }
+
+        Readiness readiness;
+        String reason;
+        if (dependency.via() != null) {
+            readiness = Readiness.TRANSITIVE;
+            reason = component.name() + " comes in through " + dependency.via().name() + "; upgrade "
+                    + dependency.via().name() + ", or pin " + component.name()
+                    + (toVersion == null ? "" : " to " + toVersion) + " by hand";
+        } else if (ManifestEditor.forEcosystem(component.ecosystem()).isEmpty()) {
+            readiness = Readiness.UNSUPPORTED;
+            reason = "Aegis drafts upgrades for Maven, npm and PyPI manifests; upgrade this "
+                    + component.ecosystem() + " package by hand";
+        } else if (toVersion == null) {
+            readiness = Readiness.NO_FIX;
+            reason = blocked != null ? blocked : "No advisory publishes a fixed version to upgrade to";
+        } else if (service.getRepositoryUrl() == null) {
+            readiness = Readiness.NO_REPOSITORY;
+            reason = "Link the service's repository so Aegis can draft the pull request";
+        } else {
+            readiness = Readiness.READY;
+            reason = null;
+        }
+        return new Recommendation(service.getId(), service.getName(), component, dependency.via(),
+                dependency.manifestPath(), dependency.confidence(), dependency.vulnerabilities(), score,
+                scorer.tier(score), scorer.material(score), toVersion, remediated, readiness, reason,
+                current.get(key(service.getId(), component.id())));
+    }
+
+    /** The severity term of the most severe vulnerability: its CVSS score, else its feed's severity word. */
+    private double severityFactor(VulnerabilityRef vulnerability) {
+        BigDecimal baseScore = vulnerability.cvssBaseScore();
+        return baseScore != null
+                ? scorer.severityFromCvss(vulnerability.cvssVersion(), baseScore).factor()
+                : scorer.severityFromLabel(vulnerability.severity()).factor();
+    }
+
+    /** The newest current proposal per service and component. */
+    private Map<String, ProposalRef> currentProposals() {
+        Map<String, ProposalRef> byKey = new HashMap<>();
+        proposals.findPage(null, null, CURRENT,
+                        PageRequest.of(0, MAX_PROPOSALS, Sort.by(Sort.Direction.DESC, "createdAt")))
+                .forEach(proposal -> byKey.putIfAbsent(key(proposal.serviceId(), proposal.componentId()),
+                        new ProposalRef(proposal.id(), proposal.status(), proposal.toVersion(),
+                                proposal.pullRequestUrl())));
+        return byKey;
+    }
+
+    private static String key(UUID serviceId, UUID componentId) {
+        return serviceId + ":" + componentId;
+    }
+}

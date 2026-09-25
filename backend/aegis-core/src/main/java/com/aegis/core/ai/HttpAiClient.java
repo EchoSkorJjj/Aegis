@@ -1,19 +1,23 @@
 package com.aegis.core.ai;
 
+import com.aegis.core.platform.common.ApiExceptions;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 
 /**
- * The single implementation of the AI port: calls the Python ai-service over REST.
+ * The single implementation of the AI port: calls the Python ai-service over REST ({@code aiRestClient}
+ * carries its base URL, the service token and the timeouts).
  *
- * <p><b>Scaffold:</b> the client is fully wired ({@code aiRestClient} carries the base URL and
- * service token), but the two calls are not implemented yet — that is BUILD_PLAN.md step 7. When
- * implemented, each method POSTs to the ai-service (e.g. {@code /v1/assess}) and maps the response.
+ * <p>Every failure — an error status, a timeout, a malformed body — becomes an
+ * {@link ApiExceptions.UpstreamUnavailable} with a fixed message. The ai-service's own error body is
+ * never relayed, and callers treat AI output as an enrichment they can do without.
  */
 @Component
 public class HttpAiClient implements AiAssessor, AiDrafter {
 
-    @SuppressWarnings("unused") // wired now; used once the calls below are implemented (step 7)
     private final RestClient ai;
 
     public HttpAiClient(RestClient aiRestClient) {
@@ -22,13 +26,33 @@ public class HttpAiClient implements AiAssessor, AiDrafter {
 
     @Override
     public AiDtos.Assessment assess(AiDtos.AssessmentRequest request) {
-        // TODO(step 7): return ai.post().uri("/v1/assess").body(request).retrieve().body(AiDtos.Assessment.class);
-        throw new UnsupportedOperationException("ai-service assess not implemented yet (BUILD_PLAN step 7)");
+        return post("/v1/assess", request, AiDtos.Assessment.class);
     }
 
     @Override
     public AiDtos.Draft draft(AiDtos.DraftRequest request) {
-        // TODO(step 7): return ai.post().uri("/v1/draft").body(request).retrieve().body(AiDtos.Draft.class);
-        throw new UnsupportedOperationException("ai-service draft not implemented yet (BUILD_PLAN step 7)");
+        return post("/v1/draft", request, AiDtos.Draft.class);
+    }
+
+    private <T> T post(String path, Object request, Class<T> type) {
+        T response;
+        try {
+            response = ai.post()
+                    .uri(path)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(request)
+                    .retrieve()
+                    .onStatus(HttpStatusCode::isError, (sent, received) -> {
+                        throw new ApiExceptions.UpstreamUnavailable(
+                                "The AI service could not complete the request (HTTP " + received.getStatusCode().value() + ")");
+                    })
+                    .body(type);
+        } catch (RestClientException unreachableOrMalformed) {
+            throw new ApiExceptions.UpstreamUnavailable("The AI service is unreachable or returned an invalid response");
+        }
+        if (response == null) {
+            throw new ApiExceptions.UpstreamUnavailable("The AI service returned an empty response");
+        }
+        return response;
     }
 }

@@ -18,6 +18,7 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -26,7 +27,11 @@ import java.util.concurrent.TimeUnit;
 
 import com.aegis.core.actions.pr.FileChange;
 import com.aegis.core.actions.pr.PullRequestDraft;
+import com.aegis.core.actions.pr.RepositoryFile;
 import com.aegis.core.actions.pr.RepositoryRef;
+import com.aegis.core.actions.pr.github.GitHubInstallationTokens.Access;
+import com.aegis.core.inventory.domain.RepositoryUrl;
+import com.aegis.core.inventory.sbom.RepositoryReadAccess.ReadGrant;
 import com.aegis.core.platform.common.ApiExceptions;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.crypto.RSASSAVerifier;
@@ -53,6 +58,8 @@ class GitHubAppPrProviderTest {
     private static final String SHA = "a".repeat(40);
     private static final String BLOB = "b".repeat(40);
     private static final String TOKEN = "test-installation-secret-";
+    private static final UUID ORG = UUID.fromString("00000000-0000-0000-0000-00000000a001");
+    private static final UUID OTHER_ORG = UUID.fromString("00000000-0000-0000-0000-00000000b002");
     private static final JsonMapper MAPPER = JsonMapper.builder().build();
     @TempDir Path temporary;
     private final MutableClock clock = new MutableClock();
@@ -68,6 +75,7 @@ class GitHubAppPrProviderTest {
     private GitHubAppPrProvider provider;
     private GitHubInstallationTokens tokens;
     private String account = "Sandbox";
+    private UUID organization = ORG;
     private long installationId = 42;
     private volatile int minted;
     private String defaultBranch = "main";
@@ -110,7 +118,7 @@ class GitHubAppPrProviderTest {
         });
         var api = new GitHubApi(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/v3"),
                 MAPPER, observations);
-        tokens = new GitHubInstallationTokens(api, jwt, accounts, clock);
+        tokens = new GitHubInstallationTokens(api, jwt, GitHubAccounts.parse(accounts), () -> organization, clock);
         provider = new GitHubAppPrProvider(api, tokens, Set.of("github.com"));
     }
 
@@ -172,14 +180,14 @@ class GitHubAppPrProviderTest {
 
     @Test
     void cachesByInstallationAndRepositoryAndRefreshesBelowFiveMinutes() {
-        assertThat(tokens.forRepository("sandbox/repo")).isEqualTo(TOKEN + "1");
+        assertThat(tokens.forRepository("sandbox/repo", Access.PULL_REQUEST)).isEqualTo(TOKEN + "1");
         clock.now = clock.now.plusSeconds(55 * 60);
-        assertThat(tokens.forRepository("sandbox/repo")).isEqualTo(TOKEN + "1");
+        assertThat(tokens.forRepository("sandbox/repo", Access.PULL_REQUEST)).isEqualTo(TOKEN + "1");
         clock.now = clock.now.plusSeconds(1);
-        assertThat(tokens.forRepository("sandbox/repo")).isEqualTo(TOKEN + "2");
-        assertThat(tokens.forRepository("sandbox/other")).isEqualTo(TOKEN + "3");
+        assertThat(tokens.forRepository("sandbox/repo", Access.PULL_REQUEST)).isEqualTo(TOKEN + "2");
+        assertThat(tokens.forRepository("sandbox/other", Access.PULL_REQUEST)).isEqualTo(TOKEN + "3");
         installationId = 99;
-        assertThat(tokens.forRepository("sandbox/repo")).isEqualTo(TOKEN + "4");
+        assertThat(tokens.forRepository("sandbox/repo", Access.PULL_REQUEST)).isEqualTo(TOKEN + "4");
         assertThat(minted).isEqualTo(4);
         assertThat(requests).filteredOn(request -> request.uri().getPath().endsWith("/installation")).hasSize(5);
     }
@@ -188,20 +196,20 @@ class GitHubAppPrProviderTest {
     void aSlowLookupForOneRepositoryDoesNotHoldUpTokensForAnother() throws Exception {
         slowArrived = new CountDownLatch(1);
         otherArrived = new CountDownLatch(1);
-        var slow = CompletableFuture.supplyAsync(() -> tokens.forRepository("sandbox/slow"));
+        var slow = CompletableFuture.supplyAsync(() -> tokens.forRepository("sandbox/slow", Access.PULL_REQUEST));
         assertThat(slowArrived.await(5, TimeUnit.SECONDS)).isTrue();
         // The slow lookup is held open by the fake GitHub until this one arrives: under one lock
         // around the network calls it could not, and the slow lookup would give up after 5 s.
-        assertThat(tokens.forRepository("sandbox/other")).startsWith(TOKEN);
+        assertThat(tokens.forRepository("sandbox/other", Access.PULL_REQUEST)).startsWith(TOKEN);
         assertThat(slow.get(10, TimeUnit.SECONDS)).startsWith(TOKEN);
         assertThat(slowReleasedByOther).isTrue();
     }
 
     @Test
     void expiredCacheEntriesAreReplaced() {
-        tokens.forRepository("sandbox/repo");
+        tokens.forRepository("sandbox/repo", Access.PULL_REQUEST);
         clock.now = clock.now.plusSeconds(3601);
-        assertThat(tokens.forRepository("sandbox/repo")).isEqualTo(TOKEN + "2");
+        assertThat(tokens.forRepository("sandbox/repo", Access.PULL_REQUEST)).isEqualTo(TOKEN + "2");
     }
 
     @Test
@@ -223,9 +231,9 @@ class GitHubAppPrProviderTest {
 
     @Test
     void accountIsRecheckedBeforeReusingCachedToken() {
-        tokens.forRepository("sandbox/repo");
+        tokens.forRepository("sandbox/repo", Access.PULL_REQUEST);
         account = "somebody-else";
-        assertThatThrownBy(() -> tokens.forRepository("sandbox/repo")).isInstanceOf(ApiExceptions.Forbidden.class);
+        assertThatThrownBy(() -> tokens.forRepository("sandbox/repo", Access.PULL_REQUEST)).isInstanceOf(ApiExceptions.Forbidden.class);
         assertThat(minted).isEqualTo(1);
     }
 
@@ -286,11 +294,11 @@ class GitHubAppPrProviderTest {
         failurePath = "/access_tokens";
         failureStatus = 201;
         failureBody = "{\"token\":\"" + TOKEN + "1\",\"expires_at\":\"" + TOKEN + "1\"}";
-        assertThatThrownBy(() -> tokens.forRepository("sandbox/repo"))
+        assertThatThrownBy(() -> tokens.forRepository("sandbox/repo", Access.PULL_REQUEST))
                 .isInstanceOf(ApiExceptions.UpstreamUnavailable.class).hasNoCause().hasMessageNotContaining(TOKEN);
         assertObservedErrorsAreSafe();
         failurePath = null;
-        assertThat(tokens.forRepository("sandbox/repo")).isEqualTo(TOKEN + "1");
+        assertThat(tokens.forRepository("sandbox/repo", Access.PULL_REQUEST)).isEqualTo(TOKEN + "1");
     }
 
     @Test
@@ -298,7 +306,7 @@ class GitHubAppPrProviderTest {
         failurePath = "/access_tokens";
         failureStatus = 201;
         failureBody = "{\"token\":\"" + TOKEN + "1\"}";
-        assertThatThrownBy(() -> tokens.forRepository("sandbox/repo"))
+        assertThatThrownBy(() -> tokens.forRepository("sandbox/repo", Access.PULL_REQUEST))
                 .isInstanceOf(ApiExceptions.UpstreamUnavailable.class).hasMessageNotContaining(TOKEN);
     }
 
@@ -308,7 +316,7 @@ class GitHubAppPrProviderTest {
         failureStatus = 201;
         failureBody = "{\"token\":\"" + TOKEN + "\\r\\nInjected: secret\",\"expires_at\":\""
                 + clock.instant().plusSeconds(3600) + "\"}";
-        assertThatThrownBy(() -> tokens.forRepository("sandbox/repo"))
+        assertThatThrownBy(() -> tokens.forRepository("sandbox/repo", Access.PULL_REQUEST))
                 .isInstanceOf(ApiExceptions.UpstreamUnavailable.class).hasNoCause().hasMessageNotContaining(TOKEN);
         assertThat(requests).hasSize(2);
     }
@@ -366,6 +374,90 @@ class GitHubAppPrProviderTest {
     }
 
     @Test
+    void readsAFileAndItsRevisionFromTheRequestedBranch() {
+        String pom = "<project>\n  <version>1.0.0</version>\n</project>\n";
+        serveFile("pom.xml", pom.getBytes(StandardCharsets.UTF_8));
+
+        RepositoryFile file = provider.readFile(repository(), "develop", "pom.xml");
+
+        assertThat(file.content()).isEqualTo(pom);
+        assertThat(file.revision()).isEqualTo(BLOB);
+        assertThat(requests).extracting(request -> request.method() + " " + request.uri().getRawPath()).containsExactly(
+                "GET /api/v3/repos/sandbox/repo/installation",
+                "POST /api/v3/app/installations/42/access_tokens",
+                "GET /api/v3/repos/sandbox/repo/contents/pom.xml");
+        assertThat(requests.getLast().uri().getQuery()).isEqualTo("ref=develop");
+    }
+
+    @Test
+    void readingWithoutABranchUsesTheRepositoryDefault() {
+        serveFile("pom.xml", "<project/>".getBytes(StandardCharsets.UTF_8));
+        provider.readFile(repository(), null, "pom.xml");
+        assertThat(requests.getLast().uri().getQuery()).isNull();
+    }
+
+    @Test
+    void readingRefusesWhatCannotBeEditedSafely() {
+        failurePath = "/contents/pom.xml";
+        failureMethod = "GET";
+        failureStatus = 200;
+        failureBody = "{\"type\":\"file\",\"sha\":\"" + BLOB + "\",\"encoding\":\"none\",\"content\":\"\"}";
+        assertThatThrownBy(() -> provider.readFile(repository(), null, "pom.xml"))
+                .isInstanceOf(ApiExceptions.Conflict.class).hasMessageContaining("too large");
+
+        serveFile("pom.xml", new byte[] {(byte) 0xff, (byte) 0xfe, 'x'});
+        assertThatThrownBy(() -> provider.readFile(repository(), null, "pom.xml"))
+                .isInstanceOf(ApiExceptions.Conflict.class).hasMessageContaining("not UTF-8");
+
+        failureBody = "[{\"type\":\"file\",\"name\":\"a.xml\"}]";
+        assertThatThrownBy(() -> provider.readFile(repository(), null, "pom.xml"))
+                .isInstanceOf(ApiExceptions.Conflict.class).hasMessageContaining("not a regular file");
+
+        failureStatus = 404;
+        failureBody = "{\"message\":\"Not Found\"}";
+        assertThatThrownBy(() -> provider.readFile(repository(), null, "pom.xml"))
+                .isInstanceOf(ApiExceptions.NotFound.class).hasMessage("pom.xml was not found in the repository");
+    }
+
+    @Test
+    void anExpectedRevisionIsWrittenAsTheBlobShaWithoutReReadingTheFile() {
+        var draft = new PullRequestDraft(repository(), "main", "aegis/upgrade", "Upgrade", "Reviewed", "Upgrade dependency",
+                List.of(new FileChange("pom.xml", "<project/>", BLOB)));
+
+        provider.openDraftPullRequest(draft);
+
+        assertThat(requests).extracting(request -> request.method() + " " + request.uri().getRawPath()).containsExactly(
+                "GET /api/v3/repos/sandbox/repo/installation",
+                "POST /api/v3/app/installations/42/access_tokens",
+                "GET /api/v3/repos/sandbox/repo/git/ref/heads/main",
+                "POST /api/v3/repos/sandbox/repo/git/refs",
+                "PUT /api/v3/repos/sandbox/repo/contents/pom.xml",
+                "POST /api/v3/repos/sandbox/repo/pulls");
+        assertThat(requests.get(4).json().path("sha").asText()).isEqualTo(BLOB);
+    }
+
+    @Test
+    void aFileThatChangedSinceItWasReadFailsAndCleansUp() {
+        failurePath = "/contents/pom.xml";
+        failureMethod = "PUT";
+        failureStatus = 409;
+        var draft = new PullRequestDraft(repository(), "main", "aegis/upgrade", "Upgrade", "Reviewed", "Upgrade dependency",
+                List.of(new FileChange("pom.xml", "<project/>", BLOB)));
+
+        assertThatThrownBy(() -> provider.openDraftPullRequest(draft)).isInstanceOf(ApiExceptions.Conflict.class);
+        assertThat(requests.getLast().method()).isEqualTo("DELETE");
+    }
+
+    @Test
+    void aRevisionThatIsNotABlobShaIsRefusedBeforeAnyCall() {
+        var draft = new PullRequestDraft(repository(), "main", "aegis/upgrade", "Upgrade", "Reviewed", "Upgrade dependency",
+                List.of(new FileChange("pom.xml", "<project/>", "v1")));
+
+        assertThatThrownBy(() -> provider.openDraftPullRequest(draft)).isInstanceOf(ApiExceptions.BadRequest.class);
+        assertThat(requests).isEmpty();
+    }
+
+    @Test
     void directoryTargetIsAConflictNotAnUpstreamFailure() {
         // GitHub lists a directory as a JSON array rather than describing one file.
         failurePath = "/contents/pom.xml";
@@ -394,6 +486,100 @@ class GitHubAppPrProviderTest {
                 "Test", "", "Test", List.of(new FileChange("pom.xml", "test")))))
                 .isInstanceOf(ApiExceptions.Conflict.class);
         assertThat(requests).isEmpty();
+    }
+
+    private static RepositoryRef repository() {
+        return new RepositoryRef("github.com", "sandbox/repo");
+    }
+
+    /** Answer the Contents GET for {@code path} the way GitHub does: base64 in 60-column lines. */
+    @Test
+    void readAccessMintsAReadOnlyTokenScopedToTheOneRepository() throws Exception {
+        ReadGrant grant = readAccess().grant(github("https://github.com/sandbox/repo"));
+
+        assertThat(grant.credential().username()).isEqualTo("x-access-token");
+        assertThat(grant.credential().secret()).isEqualTo(TOKEN + "1");
+        assertThat(grant.via()).isEqualTo("the Aegis GitHub App");
+        assertThat(requests.get(1).json()).isEqualTo(MAPPER.readTree(
+                "{\"repositories\":[\"repo\"],\"permissions\":{\"contents\":\"read\"}}"));
+    }
+
+    @Test
+    void readAndPullRequestTokensAreMintedAndCachedSeparately() {
+        assertThat(tokens.forRepository("sandbox/repo", Access.PULL_REQUEST)).isEqualTo(TOKEN + "1");
+        assertThat(tokens.forRepository("sandbox/repo", Access.READ)).isEqualTo(TOKEN + "2");
+        assertThat(tokens.forRepository("sandbox/repo", Access.READ)).isEqualTo(TOKEN + "2");
+        assertThat(tokens.forRepository("sandbox/repo", Access.PULL_REQUEST)).isEqualTo(TOKEN + "1");
+        assertThat(minted).isEqualTo(2);
+    }
+
+    @Test
+    void readAccessExplainsWhyItCannotHelpInsteadOfFailingTheImport() throws Exception {
+        failurePath = "/installation";
+        failureStatus = 404;
+        assertThat(readAccess().grant(github("https://github.com/sandbox/repo")).unavailable())
+                .isEqualTo("the Aegis GitHub App is not installed on sandbox or can't reach this repository");
+
+        failurePath = null;
+        account = "somebody-else";
+        assertThat(readAccess().grant(github("https://github.com/sandbox/repo")).unavailable())
+                .isEqualTo("the Aegis GitHub App is not enabled for sandbox in this organization");
+
+        failurePath = "/installation";
+        failureStatus = 500;
+        assertThat(readAccess().grant(github("https://github.com/sandbox/repo")).unavailable())
+                .isEqualTo("GitHub could not be reached to use the Aegis GitHub App");
+        assertThat(minted).isZero();
+    }
+
+    @Test
+    void readAccessLeavesOtherHostsAndPathsAlone() {
+        ReadGrant gitlab = readAccess().grant(RepositoryUrl.parse("https://gitlab.com/group/sub/repo", List.of("gitlab.com")));
+        assertThat(gitlab).isEqualTo(ReadGrant.notCovered());
+        assertThat(requests).isEmpty();
+    }
+
+    @Test
+    void anAccountBoundToOneOrganizationIsRefusedToAnother() throws Exception {
+        configure(Set.of("sandbox=" + ORG));
+        assertThat(tokens.forRepository("sandbox/repo", Access.READ)).isEqualTo(TOKEN + "1");
+
+        organization = OTHER_ORG;
+        assertThatThrownBy(() -> tokens.forRepository("sandbox/repo", Access.READ))
+                .isInstanceOf(ApiExceptions.Forbidden.class).hasMessageContaining("not enabled for this organization");
+        assertThatThrownBy(() -> provider.openDraftPullRequest(draft(null)))
+                .isInstanceOf(ApiExceptions.Forbidden.class).hasMessageContaining("not enabled for this organization");
+        assertThat(readAccess().grant(github("https://github.com/sandbox/repo")).credential()).isNull();
+        assertThat(minted).isEqualTo(1);
+    }
+
+    @Test
+    void anAccountCanBeBoundToSeveralOrganizationsAndABindingMustBeAnId() {
+        var accounts = GitHubAccounts.parse(Set.of("Sandbox=" + ORG, "sandbox=" + OTHER_ORG, "open"));
+        assertThat(accounts.unbound()).containsExactly("open");
+        accounts.requireAllowed("SANDBOX", () -> OTHER_ORG);
+        accounts.requireAllowed("open", () -> OTHER_ORG);
+        assertThatThrownBy(() -> accounts.requireAllowed("sandbox", () -> UUID.randomUUID()))
+                .isInstanceOf(ApiExceptions.Forbidden.class);
+        assertThatThrownBy(() -> GitHubAccounts.parse(Set.of("sandbox=not-an-id")))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("organization id");
+    }
+
+    private GitHubRepositoryReadAccess readAccess() {
+        return new GitHubRepositoryReadAccess(tokens, Set.of("github.com"));
+    }
+
+    private static RepositoryUrl github(String url) {
+        return RepositoryUrl.parse(url, List.of("github.com"));
+    }
+
+    private void serveFile(String path, byte[] bytes) {
+        failurePath = "/contents/" + path;
+        failureMethod = "GET";
+        failureStatus = 200;
+        // A JSON-escaped newline every 60 characters, as GitHub sends it.
+        String wrapped = String.join("\\n", Base64.getEncoder().encodeToString(bytes).split("(?<=\\G.{60})"));
+        failureBody = "{\"type\":\"file\",\"sha\":\"" + BLOB + "\",\"encoding\":\"base64\",\"content\":\"" + wrapped + "\"}";
     }
 
     private PullRequestDraft draft(String base) {
