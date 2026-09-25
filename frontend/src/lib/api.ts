@@ -21,6 +21,7 @@ import type {
   Owner,
   Page,
   Passkey,
+  ProposeUpgradeInput,
   RecoveryCodes,
   RegisterInput,
   ResetPasswordInput,
@@ -32,6 +33,9 @@ import type {
   ThirdPartyVendor,
   TotpInit,
   UpdateProfileInput,
+  UpgradeProposal,
+  UpgradeProposalStatus,
+  UpgradeRecommendation,
   UserProfile,
   VendorImpact,
   VerifyOtpInput,
@@ -372,28 +376,16 @@ export const inventoryApi = {
   },
 
   /**
-   * Import a service's components and dependency edges from a CycloneDX JSON SBOM. `cyclonedxJson`
-   * is the raw file text; the backend parses it, is additive + idempotent, and returns a summary.
+   * Generate the service's SBOM from its linked repository (the backend shallow-clones it and runs syft)
+   * and import it. `token` is only for a private repository no host integration (the GitHub App) covers —
+   * used for this clone, never stored — and `username` only where the host wants a particular one with it.
    */
-  importSbom(serviceId: string, cyclonedxJson: string) {
-    return bffFetch<SbomImportResult>(`/api/inventory/services/${serviceId}/sbom`, {
-      method: "POST",
-      body: cyclonedxJson,
-    });
-  },
-
-  /**
-   * Generate a CycloneDX SBOM from a Git repository (the backend shallow-clones it and runs syft) and
-   * import it into the service. `ref` is an optional branch/tag; `token` is an optional access token for
-   * a private repository (used transiently for the clone, never stored).
-   */
-  generateSbomFromRepo(serviceId: string, repoUrl: string, ref?: string, token?: string) {
-    return bffFetch<SbomImportResult>(`/api/inventory/services/${serviceId}/sbom/from-repo`, {
+  importSbomFromRepository(serviceId: string, credentials: { token?: string; username?: string } = {}) {
+    return bffFetch<SbomImportResult>(`/api/inventory/services/${serviceId}/sbom/from-repository`, {
       method: "POST",
       body: JSON.stringify({
-        repoUrl,
-        ref: ref?.trim() || undefined,
-        token: token?.trim() || undefined,
+        token: credentials.token?.trim() || undefined,
+        username: credentials.username?.trim() || undefined,
       }),
     });
   },
@@ -435,6 +427,51 @@ export const matchApi = {
 export const scoringApi = {
   scoreChange(signalId: string) {
     return bffFetch<ChangeImpactResponse>(`/api/scoring/change-signals/${signalId}`);
+  },
+};
+
+/**
+ * Safe-upgrade proposals (E8 story 4): drafting one writes nothing outside Aegis; only a person's
+ * approval opens the draft pull request, and a dismissal records why. Org-scoped server-side; the
+ * backend enforces who may draft and decide (governance, or the service's assigned owners).
+ */
+export const upgradeApi = {
+  list(
+    params: {
+      serviceId?: string;
+      changeSignalId?: string;
+      status?: UpgradeProposalStatus[];
+      page?: number;
+      size?: number;
+    } = {},
+  ) {
+    const { status, ...rest } = params;
+    return bffFetch<Page<UpgradeProposal>>(
+      `/api/actions/upgrade-proposals${qs({ ...rest, status: status?.join(",") })}`,
+    );
+  },
+  get(id: string) {
+    return bffFetch<UpgradeProposal>(`/api/actions/upgrade-proposals/${id}`);
+  },
+  /** The upgrades Aegis recommends for every service — or one — with no CVE to look up. */
+  recommendations(params: { serviceId?: string } = {}) {
+    return bffFetch<UpgradeRecommendation[]>(`/api/actions/upgrade-recommendations${qs(params)}`);
+  },
+  propose(input: ProposeUpgradeInput) {
+    return bffFetch<UpgradeProposal>("/api/actions/upgrade-proposals", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  /** Open the draft pull request. Aegis never merges it. */
+  approve(id: string) {
+    return bffFetch<UpgradeProposal>(`/api/actions/upgrade-proposals/${id}/approve`, { method: "POST" });
+  },
+  dismiss(id: string, reason: string) {
+    return bffFetch<UpgradeProposal>(`/api/actions/upgrade-proposals/${id}/dismiss`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
   },
 };
 

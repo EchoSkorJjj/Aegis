@@ -4,10 +4,16 @@ import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, Info } from "lucide-react";
 
+import {
+  UpgradeAction,
+  upgradeCandidates,
+  upgradeKey,
+  useUpgradeProposals,
+} from "@/components/app/responses/upgrade-action";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ApiError, scoringApi } from "@/lib/api";
-import { canReadInventory } from "@/lib/roles";
+import { canReadInventory, canRespondForService } from "@/lib/roles";
 import type {
   AffectedProductEvidence,
   BusinessCriticality,
@@ -21,6 +27,7 @@ import type {
   ScoreFactorKind,
   SeverityInput,
   SignalType,
+  UpgradeProposal,
   VersionMatchState,
 } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
@@ -104,6 +111,10 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
       cancelled = true;
     };
   }, [authLoading, canRead, user?.orgId, signalId]);
+
+  // A vulnerability can be remediated by an upgrade: link what is already drafted, offer to draft the rest.
+  const isVulnerability = status === "ok" && data?.change.signalType === "VULNERABILITY";
+  const upgrades = useUpgradeProposals(signalId, isVulnerability);
 
   const backLink = (
     <Link
@@ -204,7 +215,22 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
             Impacted services ({services.length})
           </h2>
           {services.map((scored) => (
-            <ServiceCard key={scored.service.id} scored={scored} />
+            <ServiceCard
+              key={scored.service.id}
+              scored={scored}
+              upgrade={
+                isVulnerability
+                  ? {
+                      signalId,
+                      proposals: upgrades,
+                      canDraft: canRespondForService(
+                        user?.roles ?? [],
+                        scored.owners.some((owner) => owner.userId === user?.id),
+                      ),
+                    }
+                  : null
+              }
+            />
           ))}
         </div>
       )}
@@ -212,8 +238,19 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
   );
 }
 
-function ServiceCard({ scored }: { scored: ScoredService }) {
+/**
+ * What a service card needs to offer upgrades: the change, the proposals already drafted for it (null
+ * while loading), and whether the caller may draft one for this service.
+ */
+type UpgradeContext = {
+  signalId: string;
+  proposals: Map<string, UpgradeProposal> | null;
+  canDraft: boolean;
+};
+
+function ServiceCard({ scored, upgrade }: { scored: ScoredService; upgrade: UpgradeContext | null }) {
   const confidence = CONFIDENCE[scored.confidence];
+  const candidates = upgrade ? upgradeCandidates(scored.evidence) : [];
   return (
     <div className="rounded-lg border">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3">
@@ -235,9 +272,26 @@ function ServiceCard({ scored }: { scored: ScoredService }) {
       </div>
       <div className="space-y-3 p-4">
         <WhyThisScore scored={scored} />
-        {scored.evidence.map((evidence, index) => (
-          <Evidence key={index} evidence={evidence} />
-        ))}
+        {scored.evidence.map((evidence, index) => {
+          const candidate = candidates[index];
+          return (
+            <Evidence
+              key={index}
+              evidence={evidence}
+              action={
+                upgrade?.proposals && candidate ? (
+                  <UpgradeAction
+                    changeSignalId={upgrade.signalId}
+                    serviceId={scored.service.id}
+                    candidate={candidate}
+                    existing={upgrade.proposals.get(upgradeKey(scored.service.id, candidate.component.id))}
+                    canDraft={upgrade.canDraft}
+                  />
+                ) : null
+              }
+            />
+          );
+        })}
       </div>
     </div>
   );
@@ -395,7 +449,7 @@ function describeSeverity(severity: SeverityInput) {
   return severity.label ? `unrecognised (“${severity.label}”)` : "not published";
 }
 
-function Evidence({ evidence }: { evidence: EvidenceChain }) {
+function Evidence({ evidence, action }: { evidence: EvidenceChain; action?: React.ReactNode }) {
   return (
     <div className="rounded-md border bg-muted/20 p-3">
       {evidence.kind === "VENDOR_DEPENDENCY" && evidence.vendor ? (
@@ -422,6 +476,7 @@ function Evidence({ evidence }: { evidence: EvidenceChain }) {
         </>
       )}
       <p className="mt-2 text-xs text-muted-foreground">{evidence.explanation}</p>
+      {action}
     </div>
   );
 }

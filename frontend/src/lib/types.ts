@@ -179,6 +179,13 @@ export type BusinessCriticality = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 /** How reachable a service is from outside its own application. Mirrors aegis-core ServiceExposure. */
 export type ServiceExposure = "ISOLATED" | "INTERNAL" | "INTERNET_FACING";
 
+/**
+ * How a service's SBOM was last imported — never the credential: an uploaded file (the API, e.g. CI), or its
+ * linked repository read without credentials, through a host integration (the GitHub App), or with a
+ * pasted access token. Mirrors aegis-core's SbomImportSource.
+ */
+export type SbomImportSource = "UPLOAD" | "PUBLIC" | "INTEGRATION" | "TOKEN";
+
 export interface BusinessService {
   id: string;
   name: string;
@@ -186,6 +193,9 @@ export interface BusinessService {
   exposure: ServiceExposure;
   repositoryUrl: string | null;
   repositoryBranch: string | null;
+  /** When and how its SBOM was last imported; null until then, and again once the repository link changes. */
+  sbomImportedAt: string | null;
+  sbomImportSource: SbomImportSource | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -351,6 +361,11 @@ export interface MatchedRef {
   name: string;
 }
 
+/** An impacted service's owner: `id` is the inventory owner row, `userId` the person's identity id. */
+export interface OwnerRef extends MatchedRef {
+  userId: string;
+}
+
 /** The affected-product record (from the advisory's CPE) an advisory match came from. */
 export interface AffectedProductEvidence {
   cpe: string | null;
@@ -377,7 +392,7 @@ export interface EvidenceChain {
 export interface ImpactedServiceMatch {
   service: MatchedServiceRef;
   confidence: MatchConfidence;
-  owners: MatchedRef[];
+  owners: OwnerRef[];
   evidence: EvidenceChain[];
 }
 
@@ -445,13 +460,13 @@ export interface ScoredService {
   breakdown: ScoreBreakdown;
   factors: ScoreFactor[];
   explanation: string;
-  owners: MatchedRef[];
+  owners: OwnerRef[];
   /** Matching's evidence chains for this service — why the change reaches it at all. */
   evidence: EvidenceChain[];
 }
 
 export interface ScoredOwner {
-  owner: MatchedRef;
+  owner: OwnerRef;
   score: number;
   tier: ImpactTier;
   impactedServiceCount: number;
@@ -468,4 +483,103 @@ export interface ChangeImpactResponse {
   severity: SeverityInput;
   services: ScoredService[];
   owners: ScoredOwner[];
+}
+
+// ---- aegis-core responses (E8): drafted actions a person approves or dismisses ------------------
+
+/**
+ * Where a safe-upgrade proposal is. PROPOSED awaits a decision; OPENING is an approval in flight;
+ * OPENED has a draft pull request; FAILED may be approved again or dismissed; DISMISSED is declined.
+ */
+export type UpgradeProposalStatus = "PROPOSED" | "OPENING" | "OPENED" | "FAILED" | "DISMISSED";
+
+/** GET /api/actions/upgrade-proposals/{id} — the proposal as stored, plus its service's current name. */
+export interface UpgradeProposal {
+  id: string;
+  serviceId: string;
+  /** The service's current name; null only if it was deleted mid-request (its proposals go with it). */
+  serviceName: string | null;
+  changeSignalId: string;
+  vulnerabilityId: string;
+  componentId: string;
+  ecosystem: string;
+  packageName: string;
+  fromVersion: string;
+  toVersion: string;
+  manifestPath: string;
+  repositoryUrl: string;
+  baseBranch: string | null;
+  headBranch: string;
+  matchConfidence: MatchConfidence;
+  /** The exact pull-request title and (Markdown) body, as they will be opened. */
+  title: string;
+  body: string;
+  status: UpgradeProposalStatus;
+  createdBy: string;
+  createdAt: string;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  dismissReason: string | null;
+  pullRequestUrl: string | null;
+  pullRequestNumber: string | null;
+  failureMessage: string | null;
+  version: number;
+}
+
+export interface ProposeUpgradeInput {
+  changeSignalId: string;
+  serviceId: string;
+  /** The vulnerable component (the first entry of a direct evidence chain's component path). */
+  componentId: string;
+  /** Defaults to the ecosystem's manifest at the repository root (pom.xml, package.json, requirements.txt). */
+  manifestPath?: string;
+}
+
+/**
+ * Whether Aegis can draft an upgrade's pull request now: READY, or what stands in the way — the service's
+ * repository isn't linked, the package comes in through another dependency, its ecosystem's manifest isn't
+ * one Aegis edits, or no advisory publishes a version that fixes it.
+ */
+export type UpgradeReadiness = "READY" | "NO_REPOSITORY" | "TRANSITIVE" | "UNSUPPORTED" | "NO_FIX";
+
+/** A vulnerability affecting a dependency, with the feeds' own severity. */
+export interface VulnerabilityRef {
+  /** Its canonical id — a CVE, or a GHSA with none. */
+  id: string;
+  changeSignalId: string | null;
+  confidence: MatchConfidence;
+  cvssVersion: string | null;
+  cvssBaseScore: number | null;
+  severity: string | null;
+}
+
+/**
+ * GET /api/actions/upgrade-recommendations — a vulnerable dependency of a service and the upgrade that
+ * fixes it, found by Aegis with no CVE to look up. Highest impact first.
+ */
+export interface UpgradeRecommendation {
+  serviceId: string;
+  serviceName: string;
+  component: MatchedComponentRef;
+  /** The direct dependency that pulls it in; null when the service uses it directly. */
+  via: MatchedComponentRef | null;
+  /** The manifest declaring the direct dependency (client/package.json), when the import recorded it. */
+  manifestPath: string | null;
+  confidence: MatchConfidence;
+  /** Most severe first. */
+  vulnerabilities: VulnerabilityRef[];
+  score: number;
+  tier: ImpactTier;
+  material: boolean;
+  /** The lowest version that clears every advisory with a fix; null when none can be proven. */
+  toVersion: string | null;
+  /** The vulnerability a draft remediates. */
+  changeSignalId: string | null;
+  readiness: UpgradeReadiness;
+  /** Why it isn't READY. */
+  reason: string | null;
+  /** The upgrade already drafted for it, if any. */
+  proposal: { id: string; status: UpgradeProposalStatus; toVersion: string; pullRequestUrl: string | null } | null;
+  /** Whether you may draft it: governance, or one of the service's owners. */
+  canDraft: boolean;
 }

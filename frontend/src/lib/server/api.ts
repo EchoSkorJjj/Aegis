@@ -52,10 +52,23 @@ export async function authedBackendFetch(
 export type CatchAllRouteContext = { params: Promise<{ path?: string[] }> };
 
 /**
+ * The gateway path for `{prefix}/{...path}`, or null when it would leave `prefix`. The router can hand
+ * over a segment still percent-encoded (`%2e%2e`) or decoded into a path (`../users` from `..%2Fusers`),
+ * and `fetch` resolves either as a dot segment — so the check runs on the path as `fetch` resolves it,
+ * not on the raw segments.
+ */
+function gatewayPath(prefix: string, path: string[]): string | null {
+  if (path.some((segment) => segment === "." || segment === "..")) return null;
+  const joined = path.length > 0 ? `${prefix}/${path.join("/")}` : prefix;
+  const resolved = new URL(joined, "http://gateway.invalid").pathname;
+  return resolved === prefix || resolved.startsWith(`${prefix}/`) ? joined : null;
+}
+
+/**
  * The catch-all proxy shared by the BFF's GET-only domain routes (change signals, matching, scoring):
  * forwards `{prefix}/{...path}?{query}` to the gateway as the signed-in user and passes the backend's
- * status and body straight through (a 403 stays a 403). Dot segments are refused, so a crafted path
- * can't climb out of `prefix` on the gateway.
+ * status and body straight through (a 403 stays a 403). A path that would climb out of `prefix` on the
+ * gateway is refused.
  */
 export async function proxyReadOnlyGet(
   prefix: string,
@@ -63,11 +76,40 @@ export async function proxyReadOnlyGet(
   ctx: CatchAllRouteContext,
 ): Promise<NextResponse> {
   const { path = [] } = await ctx.params;
-  if (path.some((segment) => segment === "." || segment === "..")) {
+  const target = gatewayPath(prefix, path);
+  if (!target) {
     return NextResponse.json({ message: "Invalid path" }, { status: 400 });
   }
   const query = new URL(request.url).search;
-  const suffix = path.length > 0 ? `/${path.join("/")}` : "";
-  const result = await authedBackendFetch(`${prefix}${suffix}${query}`, { method: "GET" });
+  const result = await authedBackendFetch(`${target}${query}`, { method: "GET" });
+  return NextResponse.json(result.data ?? {}, { status: result.status });
+}
+
+/**
+ * The catch-all proxy for the BFF's write-capable domain routes (inventory, actions): forwards
+ * `{prefix}/{...path}?{query}` with the request's method — and its body, for POST/PUT/PATCH — to the
+ * gateway as the signed-in user, passing the backend's status and body straight through (204 stays
+ * empty). A path that would climb out of `prefix` on the gateway is refused.
+ */
+export async function proxyToGateway(
+  prefix: string,
+  request: Request,
+  ctx: CatchAllRouteContext,
+  method: string,
+): Promise<NextResponse> {
+  const { path = [] } = await ctx.params;
+  const target = gatewayPath(prefix, path);
+  if (!target) {
+    return NextResponse.json({ message: "Invalid path" }, { status: 400 });
+  }
+  const query = new URL(request.url).search;
+  const withBody = method === "POST" || method === "PUT" || method === "PATCH";
+  const result = await authedBackendFetch(`${target}${query}`, {
+    method,
+    ...(withBody ? { body: await request.text() } : {}),
+  });
+  if (result.status === 204 || (result.ok && result.data == null)) {
+    return new NextResponse(null, { status: result.ok ? 204 : result.status });
+  }
   return NextResponse.json(result.data ?? {}, { status: result.status });
 }

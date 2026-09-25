@@ -6,21 +6,12 @@ import { usePathname } from "next/navigation";
 import {
   BadgeCheck,
   Bell,
-  Boxes,
   Check,
   ChevronRight,
   ChevronsUpDown,
-  FileText,
-  GitPullRequest,
   Hexagon,
-  LayoutDashboard,
   LogOut,
-  type LucideIcon,
   Plus,
-  Rss,
-  Settings,
-  ShieldAlert,
-  ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -50,60 +41,16 @@ import {
   SidebarMenuSubItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import {
+  accountNav,
+  adminNav,
+  baseNav,
+  domainNav,
+  type NavGroup,
+  type NavItem,
+} from "@/components/app/navigation";
 import { canReadInventory } from "@/lib/roles";
 import { useAuth } from "@/providers/auth-provider";
-
-type NavLink = { title: string; href: string; icon: LucideIcon };
-type NavGroup = { title: string; icon: LucideIcon; items: { title: string; href: string }[] };
-type NavItem = NavLink | NavGroup;
-
-// Always available — the landing page for every signed-in user.
-const baseNav: NavItem[] = [{ title: "Dashboard", href: "/dashboard", icon: LayoutDashboard }];
-
-// Aegis domain data. Shown only to users with a domain read role (SERVICE_OWNER / ANALYST /
-// COMPLIANCE_ADMIN), mirroring aegis-core's read gate — a pure ORG_ADMIN is 403 on these APIs.
-const domainNav: NavItem[] = [
-  {
-    title: "Inventory",
-    icon: Boxes,
-    items: [
-      { title: "Services", href: "/inventory/services" },
-      { title: "Components", href: "/inventory/components" },
-      { title: "Vendors", href: "/inventory/vendors" },
-      { title: "Owners", href: "/inventory/owners" },
-      { title: "Dependency map", href: "/inventory/map" },
-    ],
-  },
-  { title: "Advisories", href: "/advisories", icon: Rss },
-  {
-    title: "Findings",
-    icon: ShieldAlert,
-    items: [
-      { title: "Triage queue", href: "/findings" },
-      { title: "My services", href: "/findings/mine" },
-    ],
-  },
-  {
-    title: "Responses",
-    icon: GitPullRequest,
-    items: [
-      { title: "Review & approve", href: "/responses/review" },
-      { title: "History", href: "/responses/history" },
-    ],
-  },
-  {
-    title: "Reports",
-    icon: FileText,
-    items: [
-      { title: "Evidence", href: "/reports/evidence" },
-      { title: "Audit log", href: "/reports/audit" },
-    ],
-  },
-];
-
-const accountNav = [{ title: "Settings", href: "/settings", icon: Settings }];
-
-const adminNav = [{ title: "Users", href: "/admin/users", icon: ShieldCheck }];
 
 export function AppSidebar() {
   const { isMobile, state, setOpen } = useSidebar();

@@ -1,15 +1,10 @@
 "use client";
 
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, GitBranch, Info, Loader2, Upload } from "lucide-react";
-import { toast } from "sonner";
+import { ArrowLeft } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   RelationshipSection,
   type RelationshipConfig,
@@ -21,13 +16,13 @@ import type {
   BusinessService,
   DirectoryMember,
   Owner,
-  SbomImportResult,
   ServiceExposure,
   SoftwareComponent,
   ThirdPartyVendor,
 } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
 import { ServiceRepository } from "@/components/app/inventory/service-repository";
+import { RecommendedUpgrades } from "@/components/app/responses/upgrade-recommendations";
 
 const CRITICALITY_CLASS: Record<BusinessCriticality, string> = {
   LOW: "bg-muted text-muted-foreground",
@@ -47,16 +42,6 @@ const EXPOSURE_LABEL: Record<ServiceExposure, string> = {
   INTERNAL: "Internal",
   INTERNET_FACING: "Internet-facing",
 };
-
-/** One toast summary shared by both SBOM import paths (file upload and repo generation). */
-function importedSummary(result: SbomImportResult): string {
-  return (
-    `SBOM imported — ${result.componentsCreated} new, ${result.componentsMatched} matched, ` +
-    `${result.serviceComponentsLinked} linked, ${result.dependenciesCreated} dependencies` +
-    (result.componentsSkipped ? `, ${result.componentsSkipped} skipped (no version)` : "") +
-    "."
-  );
-}
 
 // Module-level configs → stable identities, safe as effect deps in RelationshipSection. Each pairs
 // its loaders with its renderers, casting the erased `{ id }` row back to the concrete type.
@@ -154,13 +139,6 @@ export function ServiceDetailView({ serviceId }: { serviceId: string }) {
   const [service, setService] = useState<BusinessService | null>(null);
   const [status, setStatus] = useState<Status>("loading");
   const [componentsRefresh, setComponentsRefresh] = useState(0);
-  const [importing, setImporting] = useState(false);
-  const [repoOpen, setRepoOpen] = useState(false);
-  const [repoUrl, setRepoUrl] = useState("");
-  const [repoRef, setRepoRef] = useState("");
-  const [repoToken, setRepoToken] = useState("");
-  const [repoImporting, setRepoImporting] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (authLoading) return;
@@ -199,60 +177,6 @@ export function ServiceDetailView({ serviceId }: { serviceId: string }) {
       });
     return () => controller.abort();
   }, [authLoading, user, canGovern, serviceId]);
-
-  async function onFileSelected(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    // Clear the input so re-selecting the same file fires onChange again.
-    if (fileRef.current) fileRef.current.value = "";
-    if (!file) return;
-
-    let text: string;
-    try {
-      text = await file.text();
-    } catch {
-      toast.error("Could not read that file.");
-      return;
-    }
-    try {
-      JSON.parse(text);
-    } catch {
-      toast.error("That file isn't valid JSON.");
-      return;
-    }
-
-    setImporting(true);
-    try {
-      const result = await inventoryApi.importSbom(serviceId, text);
-      toast.success(importedSummary(result));
-      setComponentsRefresh((n) => n + 1);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "SBOM import failed — please try again.");
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  async function importFromRepo(event: FormEvent) {
-    event.preventDefault();
-    const url = repoUrl.trim();
-    if (!url) return;
-    setRepoImporting(true);
-    try {
-      const result = await inventoryApi.generateSbomFromRepo(serviceId, url, repoRef, repoToken);
-      toast.success(importedSummary(result));
-      setComponentsRefresh((n) => n + 1);
-      setRepoOpen(false);
-      setRepoUrl("");
-      setRepoRef("");
-      setRepoToken("");
-    } catch (err) {
-      toast.error(
-        err instanceof ApiError ? err.message : "Couldn't generate an SBOM from that repository.",
-      );
-    } finally {
-      setRepoImporting(false);
-    }
-  }
 
   const backLink = (
     <Link
@@ -325,164 +249,15 @@ export function ServiceDetailView({ serviceId }: { serviceId: string }) {
         service={service}
         canCompose={canCompose}
         onChange={setService}
+        onImported={() => setComponentsRefresh((n) => n + 1)}
       />
 
-      {canCompose && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4">
-          <div className="min-w-0">
-            <p className="text-sm font-medium">Import from SBOM</p>
-            <p className="text-xs text-muted-foreground">
-              Upload a CycloneDX JSON, or generate one straight from a Git repository. Import is
-              additive and idempotent.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button disabled={importing} onClick={() => fileRef.current?.click()}>
-              <Upload />
-              {importing ? "Importing…" : "Upload CycloneDX JSON"}
-            </Button>
-            <Popover open={repoOpen} onOpenChange={(open) => {
-              if (open) {
-                setRepoUrl(service.repositoryUrl ?? "");
-                setRepoRef(service.repositoryBranch ?? "");
-              }
-              setRepoOpen(open);
-            }}>
-              <PopoverTrigger
-                render={
-                  <Button variant="outline">
-                    <GitBranch />
-                    Import from GitHub
-                  </Button>
-                }
-              />
-              <PopoverContent align="end" className="w-80">
-                <form className="space-y-3" onSubmit={importFromRepo}>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium">Generate from a repository</p>
-                    <p className="text-xs text-muted-foreground">
-                      GitHub, GitLab, or Bitbucket. We shallow-clone the repo and run syft (static — it
-                      never runs your code) to build a CycloneDX SBOM, then import it.
-                    </p>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-muted-foreground">Repository URL</label>
-                    <Input
-                      value={repoUrl}
-                      onChange={(event) => setRepoUrl(event.target.value)}
-                      placeholder="https://github.com/owner/repo"
-                      autoFocus
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      Branch or tag (optional)
-                    </label>
-                    <Input
-                      value={repoRef}
-                      onChange={(event) => setRepoRef(event.target.value)}
-                      placeholder="main"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-1">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        Access token (private repos)
-                      </label>
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <button
-                                type="button"
-                                aria-label="How to create a read-only access token"
-                                className="inline-flex text-muted-foreground hover:text-foreground"
-                              >
-                                <Info className="size-3.5" />
-                              </button>
-                            }
-                          />
-                          <TooltipContent side="top" align="start" className="max-w-sm">
-                            <div className="space-y-1.5 text-left">
-                              <p className="font-medium">Create a read-only token for a private repo</p>
-                              <p>
-                                <span className="font-medium">GitHub</span> — Settings → Developer settings →
-                                Personal access tokens. Fine-grained: set <em>Resource owner</em> to the repo&apos;s
-                                owner, select the repo, grant <em>Contents: Read</em>. Or a classic token with the{" "}
-                                <code className="rounded bg-background/15 px-1 font-mono">repo</code> scope.
-                              </p>
-                              <p>
-                                <span className="font-medium">GitLab</span> — Settings → Access tokens → scope{" "}
-                                <code className="rounded bg-background/15 px-1 font-mono">read_repository</code>.
-                              </p>
-                              <p>
-                                <span className="font-medium">Bitbucket</span> — Repo/Workspace settings → Access
-                                tokens → <em>Repositories: Read</em>.
-                              </p>
-                              <p className="opacity-80">Paste it below — used only for this clone, never stored.</p>
-                            </div>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </div>
-                    <Input
-                      type="password"
-                      autoComplete="off"
-                      value={repoToken}
-                      onChange={(event) => setRepoToken(event.target.value)}
-                      placeholder="Only for a private repository"
-                    />
-                    <p className="text-[11px] text-muted-foreground">
-                      A read-only token. Used only for this clone — never stored.
-                    </p>
-                  </div>
-                  <Button type="submit" className="w-full" disabled={repoImporting || !repoUrl.trim()}>
-                    {repoImporting ? (
-                      <>
-                        <Loader2 className="animate-spin" />
-                        Generating…
-                      </>
-                    ) : (
-                      "Generate & import"
-                    )}
-                  </Button>
-                </form>
-              </PopoverContent>
-            </Popover>
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button variant="ghost" size="icon-sm" aria-label="How to generate an SBOM yourself">
-                      <Info />
-                    </Button>
-                  }
-                />
-                <TooltipContent side="bottom" align="end" className="max-w-sm">
-                  <div className="space-y-1.5 text-left">
-                    <p className="font-medium">Generate a CycloneDX JSON yourself:</p>
-                    <code className="block rounded bg-background/15 px-1.5 py-1 font-mono text-[11px]">
-                      syft scan dir:. -o cyclonedx-json &gt; sbom.json
-                    </code>
-                    <p className="opacity-80">or, without installing anything:</p>
-                    <code className="block rounded bg-background/15 px-1.5 py-1 font-mono text-[11px]">
-                      npx @cyclonedx/cdxgen@latest -o sbom.json
-                    </code>
-                    <p className="opacity-80">Then use “Upload CycloneDX JSON”.</p>
-                  </div>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".json,application/json,application/vnd.cyclonedx+json"
-            hidden
-            onChange={onFileSelected}
-          />
-        </div>
-      )}
+      <RecommendedUpgrades
+        serviceId={service.id}
+        enabled
+        orgId={user?.orgId ?? null}
+        refreshSignal={componentsRefresh}
+      />
 
       <RelationshipSection
         serviceId={serviceId}
