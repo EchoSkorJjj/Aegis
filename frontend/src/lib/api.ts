@@ -277,6 +277,15 @@ export const inventoryApi = {
   deleteService(id: string) {
     return bffFetch<void>(`/api/inventory/services/${id}`, { method: "DELETE" });
   },
+  linkServiceRepository(serviceId: string, url: string, branch?: string) {
+    return bffFetch<BusinessService>(`/api/inventory/services/${serviceId}/repository`, {
+      method: "PUT",
+      body: JSON.stringify({ url, branch: branch || null }),
+    });
+  },
+  unlinkServiceRepository(serviceId: string) {
+    return bffFetch<void>(`/api/inventory/services/${serviceId}/repository`, { method: "DELETE" });
+  },
 
   listComponents(params: ListParams & { ecosystem?: string; excludeLinkedToService?: string } = {}) {
     return bffFetch<Page<SoftwareComponent>>(`/api/inventory/components${qs(params)}`);

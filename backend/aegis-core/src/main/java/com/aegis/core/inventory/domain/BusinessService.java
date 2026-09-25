@@ -34,6 +34,12 @@ public class BusinessService extends InventoryEntity {
     @Column(name = "exposure", nullable = false, length = 32)
     private ServiceExposure exposure;
 
+    @Column(name = "repository_url", length = 400)
+    private String repositoryUrl;
+
+    @Column(name = "repository_branch", length = 200)
+    private String repositoryBranch;
+
     protected BusinessService() {
         // Required by JPA.
     }
@@ -63,6 +69,26 @@ public class BusinessService extends InventoryEntity {
 
     public String getName() {
         return name;
+    }
+
+    public void linkRepository(RepositoryUrl url, String branch) {
+        String canonical = requireNonNull(url, "repositoryUrl").canonical();
+        String normalizedBranch = RepositoryUrl.normalizeRef(branch);
+        this.repositoryUrl = canonical;
+        this.repositoryBranch = normalizedBranch;
+    }
+
+    public void unlinkRepository() {
+        this.repositoryUrl = null;
+        this.repositoryBranch = null;
+    }
+
+    public String getRepositoryUrl() {
+        return repositoryUrl;
+    }
+
+    public String getRepositoryBranch() {
+        return repositoryBranch;
     }
 
     public BusinessCriticality getCriticality() {

@@ -184,6 +184,8 @@ export interface BusinessService {
   name: string;
   criticality: BusinessCriticality;
   exposure: ServiceExposure;
+  repositoryUrl: string | null;
+  repositoryBranch: string | null;
   createdAt: string;
   updatedAt: string;
 }
