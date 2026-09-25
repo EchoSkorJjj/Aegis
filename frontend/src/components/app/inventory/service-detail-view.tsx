@@ -27,6 +27,7 @@ import type {
   ThirdPartyVendor,
 } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
+import { ServiceRepository } from "@/components/app/inventory/service-repository";
 
 const CRITICALITY_CLASS: Record<BusinessCriticality, string> = {
   LOW: "bg-muted text-muted-foreground",
@@ -319,6 +320,13 @@ export function ServiceDetailView({ serviceId }: { serviceId: string }) {
         )}
       </div>
 
+      <ServiceRepository
+        key={`${service.id}:${user?.orgId}`}
+        service={service}
+        canCompose={canCompose}
+        onChange={setService}
+      />
+
       {canCompose && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4">
           <div className="min-w-0">
@@ -333,7 +341,13 @@ export function ServiceDetailView({ serviceId }: { serviceId: string }) {
               <Upload />
               {importing ? "Importing…" : "Upload CycloneDX JSON"}
             </Button>
-            <Popover open={repoOpen} onOpenChange={setRepoOpen}>
+            <Popover open={repoOpen} onOpenChange={(open) => {
+              if (open) {
+                setRepoUrl(service.repositoryUrl ?? "");
+                setRepoRef(service.repositoryBranch ?? "");
+              }
+              setRepoOpen(open);
+            }}>
               <PopoverTrigger
                 render={
                   <Button variant="outline">

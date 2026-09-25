@@ -1,0 +1,62 @@
+name: ai-service-ci
+
+on:
+  push:
+    paths:
+      - "backend/ai-service/**"
+      - ".github/workflows/ai-service-ci.yml"
+  pull_request:
+    paths:
+      - "backend/ai-service/**"
+      - ".github/workflows/ai-service-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/ai-service
+    env:
+      LLM_PROVIDER: stub
+      GROQ_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/ai-service/pyproject.toml
+
+      - name: Install development dependencies
+        run: python -m pip install -e '.[dev]'
+
+      - name: Lint
+        run: ruff check .
+
+      # Provider tests use httpx.MockTransport; no key or live LLM request is needed.
+      - name: Run tests
+        run: pytest -q
+
+      - name: Check prompts in the installed wheel
+        run: |
+          python -m pip wheel --no-deps . --wheel-dir "$RUNNER_TEMP/ai-service-wheel"
+          python -m venv --system-site-packages "$RUNNER_TEMP/ai-service-installed"
+          "$RUNNER_TEMP/ai-service-installed/bin/python" -m pip install --no-deps --force-reinstall "$RUNNER_TEMP"/ai-service-wheel/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/ai-service-installed/bin/python" - <<'PY'
+          from importlib.resources import files
+          from pathlib import Path
+          import sys
+
+          import ai_service
+
+          assert Path(ai_service.__file__).is_relative_to(Path(sys.prefix))
+          prompts = files("ai_service").joinpath("prompts")
+          for name in ("assess.system.md", "assess.user.md", "draft.system.md", "draft.user.md"):
+              assert prompts.joinpath(name).read_text(encoding="utf-8").strip(), name
+          PY

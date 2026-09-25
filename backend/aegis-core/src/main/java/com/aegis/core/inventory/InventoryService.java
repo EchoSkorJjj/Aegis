@@ -22,6 +22,7 @@ import com.aegis.core.inventory.InventoryStore.ServiceComponentLink;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.Owner;
+import com.aegis.core.inventory.domain.RepositoryUrl;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
@@ -96,6 +97,20 @@ public class InventoryService {
         store.deleteBusinessService(id);
         // Its owner links go with it (DB cascade); anyone who owned only this service is no longer an owner.
         store.deleteOrphanedOwners();
+    }
+
+    @Transactional
+    public BusinessService linkServiceRepository(UUID serviceId, RepositoryUrl url, String branch) {
+        BusinessService value = getBusinessService(serviceId);
+        value.linkRepository(url, branch);
+        return store.save(value);
+    }
+
+    @Transactional
+    public void unlinkServiceRepository(UUID serviceId) {
+        BusinessService value = getBusinessService(serviceId);
+        value.unlinkRepository();
+        store.save(value);
     }
 
     @Transactional

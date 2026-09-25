@@ -36,11 +36,49 @@ and the modules are cycle-free.
 | `incidents`  | Normalised vendor incidents (status pages) + read API |
 | `news`       | Security-news articles with extracted CVE references + read API |
 | `signals`    | The unified read-only `change_signals` view over advisories, incidents, and news |
-| `inventory`  | Services, components, vendors, SBOM dependencies, ownership — the map |
+| `inventory`  | Services and their repository links, components, vendors, SBOM dependencies, ownership — the map |
 | `matching`   | Advisory package + version range → components → impacted services/owners + evidence chains |
 | `scoring`    | Deterministic impact score per service and owner, with a "why" breakdown |
-| `actions`    | Execute human-approved responses (PR / ticket / memo), audited |
+| `actions`    | Validated draft-PR types, provider registry and disabled GitHub App spike; approved execution workflows remain planned |
 | `ai`         | **Port** to the Python ai-service: `AiAssessor` / `AiDrafter` + DTOs + `HttpAiClient` |
+
+## Service repositories and draft PR providers (E8 Story 2)
+
+`PUT /api/inventory/services/{serviceId}/repository` accepts `{"url":"https://github.com/acme/payments","branch":"develop"}`
+and returns the updated service. `DELETE` on the same path unlinks it (204). Service responses include
+nullable `repositoryUrl` and `repositoryBranch`; omitting the branch selects the repository default.
+The governance service-update endpoint preserves these fields. Analysts, compliance admins and the
+service's assigned owners can maintain the link; reads and writes remain scoped to the active org.
+The service detail page shows the link and branch and prefills repository SBOM imports from them.
+
+`RepositoryUrl` is shared by repository linking and SBOM generation. Both use
+`aegis.inventory.sbom-generation.allowed-hosts`, even when SBOM generation is disabled. Only HTTPS
+URLs are accepted; hosts are lower-cased and `.git`/trailing slash removed. Credentials, query strings,
+fragments, custom ports, invalid path segments and unsafe branch/tag refs are rejected. Credentials
+for private SBOM imports remain separate and are never persisted in the link.
+
+Migration **V17** adds the nullable repository columns and branch/link constraint. Coordinate this
+number with other branches before merging; never renumber a migration already applied to a shared DB.
+
+`actions.pr.PrProvider` exposes only provider selection and opening a **draft** PR. `PrProviders`
+discovers optional adapters; the default application has none and reports a conflict for unsupported
+hosts. There is no execution endpoint or scheduler. The future approval flow must authorize the action
+and target repository before calling the port; the validated draft is not proof of approval.
+
+Drafts require a safe `aegis/` head distinct from an explicit base, a title up to 256 characters, a body
+up to 60,000 characters, and 1–20 distinct file changes of at most 1 MiB UTF-8 each. Paths must be relative
+and normalized; changes under `.github/workflows/` are refused. A provider resolving a null base to the
+repository default must also check that the resolved base differs from the head.
+
+## GitHub App spike (E8 Story 3)
+
+The optional `actions.pr.github` adapter implements App JWT authentication, repository-scoped
+installation tokens, branch/file commits and draft PR creation. It ships **disabled**; an empty account
+allow-list refuses every operation. Tests use a local fake GitHub server and temporary RSA keys.
+No real App is registered, and there is no execution endpoint. Production requires verified
+org-scoped installation bindings and a human-approved execution/audit workflow.
+See [GITHUB_APP.md](GITHUB_APP.md) for configuration, permissions, key handling, test evidence and the
+future sandbox smoke procedure.
 
 ## The AI boundary
 

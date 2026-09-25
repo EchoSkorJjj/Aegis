@@ -111,8 +111,21 @@ class PackageStructureArchTest {
                     "com.aegis.core.matching..",
                     "com.aegis.core.scoring..",
                     "com.aegis.core.ingestion..",
+                    "com.aegis.core.actions..",
                     "com.aegis.core.ai..")
             .because("platform underpins the features (errors, security, tenancy); it must not depend on them");
+
+    @ArchTest
+    static final ArchRule domains_do_not_depend_on_actions = noClasses()
+            .that().resideInAnyPackage(DOMAIN_PACKAGES)
+            .should().dependOnClassesThat().resideInAPackage("com.aegis.core.actions..")
+            .because("actions is the end of the pipeline; domains must not invoke execution");
+
+    @ArchTest
+    static final ArchRule github_is_only_reached_through_the_provider_port = noClasses()
+            .that().resideOutsideOfPackage("..actions.pr.github..")
+            .should().dependOnClassesThat().resideInAPackage("..actions.pr.github..")
+            .because("the GitHub adapter is an optional PrProvider implementation");
 
     /**
      * The public web API belongs to the domains. After lifting advisories/incidents/news/signals out

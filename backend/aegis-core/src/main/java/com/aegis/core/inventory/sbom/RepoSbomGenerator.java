@@ -1,13 +1,11 @@
 package com.aegis.core.inventory.sbom;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -15,9 +13,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import com.aegis.core.inventory.domain.RepositoryUrl;
 import com.aegis.core.inventory.sbom.CommandRunner.CommandResult;
 import com.aegis.core.platform.common.ApiExceptions;
 import org.slf4j.Logger;
@@ -55,11 +53,6 @@ class RepoSbomGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(RepoSbomGenerator.class);
 
-    // A repository path segment: starts alphanumeric, then a bounded run of the characters hosts allow.
-    private static final Pattern SEGMENT = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,99}");
-    // A branch/tag/ref: starts alphanumeric (never '-', which would look like a flag) then a bounded run.
-    private static final Pattern REF = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._/-]{0,199}");
-
     private final SbomGenerationProperties properties;
     private final CommandRunner commands;
     // Jackson 3 reads the com.fasterxml annotations on CycloneDxBom; a plain mapper is all this needs
@@ -76,8 +69,8 @@ class RepoSbomGenerator {
      * private repo), scan it with syft, and return the CycloneDX BOM.
      */
     CycloneDxBom generate(String repoUrl, String ref, String token) {
-        Repo repo = parseRepo(repoUrl);
-        String branch = normalizeRef(ref);
+        RepositoryUrl repo = RepositoryUrl.parse(repoUrl, properties.allowedHosts());
+        String branch = RepositoryUrl.normalizeRef(ref);
         String credential = token == null || token.isBlank() ? null : token.trim();
         Path work;
         try {
@@ -97,63 +90,14 @@ class RepoSbomGenerator {
         }
     }
 
-    // --- validation -------------------------------------------------------------------------------
-
-    private Repo parseRepo(String repoUrl) {
-        if (repoUrl == null || repoUrl.isBlank()) {
-            throw new ApiExceptions.BadRequest("A repository URL is required");
-        }
-        URI uri;
-        try {
-            uri = URI.create(repoUrl.trim());
-        } catch (IllegalArgumentException ex) {
-            throw new ApiExceptions.BadRequest("That is not a valid repository URL");
-        }
-        if (!"https".equalsIgnoreCase(uri.getScheme())) {
-            throw new ApiExceptions.BadRequest("Only https:// repository URLs are supported");
-        }
-        String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
-        if (properties.allowedHosts().stream().noneMatch(allowed -> allowed.equalsIgnoreCase(host))) {
-            throw new ApiExceptions.BadRequest("This host is not allowed. Allowed hosts: " + properties.allowedHosts());
-        }
-        // Path is owner(/subgroup...)/repo — GitLab nests groups, so keep everything up to the last segment.
-        String[] segments = Arrays.stream((uri.getPath() == null ? "" : uri.getPath()).split("/"))
-                .filter(part -> !part.isBlank())
-                .toArray(String[]::new);
-        if (segments.length < 2) {
-            throw new ApiExceptions.BadRequest("Expected a URL like https://" + host + "/owner/repository");
-        }
-        segments[segments.length - 1] = stripSuffix(segments[segments.length - 1]);
-        for (String segment : segments) {
-            if (!SEGMENT.matcher(segment).matches()) {
-                throw new ApiExceptions.BadRequest("The repository path contains unsupported characters");
-            }
-        }
-        return new Repo(host, String.join("/", segments));
-    }
-
-    private static String stripSuffix(String repo) {
-        return repo.endsWith(".git") ? repo.substring(0, repo.length() - 4) : repo;
-    }
-
-    private String normalizeRef(String ref) {
-        if (ref == null || ref.isBlank()) {
-            return null;
-        }
-        String trimmed = ref.trim();
-        if (!REF.matcher(trimmed).matches()) {
-            throw new ApiExceptions.BadRequest("That branch or tag name is not allowed");
-        }
-        return trimmed;
-    }
-
     // --- steps ------------------------------------------------------------------------------------
 
-    private void clone(Repo repo, String branch, String token, Path checkout, Path work) {
+    private void clone(RepositoryUrl repo, String branch, String token, Path checkout, Path work) {
         // With a token, put a NON-secret username in the URL and hand the token to git via GIT_ASKPASS
         // (read from the environment) — the token never lands in argv or .git/config. The username is the
         // host's convention (GitHub ignores it; GitLab wants oauth2; Bitbucket wants x-token-auth).
-        String cloneUrl = token == null ? repo.cloneUrl() : repo.cloneUrl(authUsername(repo.host()));
+        String cloneUrl = token == null ? repo.canonical() + ".git"
+                : "https://" + authUsername(repo.host()) + "@" + repo.host() + "/" + repo.path() + ".git";
 
         List<String> command = new ArrayList<>(List.of(
                 properties.gitPath(),
@@ -321,14 +265,4 @@ class RepoSbomGenerator {
         }
     }
 
-    private record Repo(String host, String repoPath) {
-        String cloneUrl() {
-            return "https://" + host + "/" + repoPath + ".git";
-        }
-
-        /** Clone URL carrying a non-secret username; the password (token) is supplied via GIT_ASKPASS. */
-        String cloneUrl(String username) {
-            return "https://" + username + "@" + host + "/" + repoPath + ".git";
-        }
-    }
 }

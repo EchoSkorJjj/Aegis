@@ -10,6 +10,6 @@ COPY src ./src
 RUN pip install .
 
 EXPOSE 8083
-# Stateless: no migrations. (Add `.[llm]` to the install and set LLM_PROVIDER=anthropic to enable
-# real drafting once the prompts are implemented.)
+# Stateless: no migrations. Defaults to the offline stub; set LLM_PROVIDER=groq and GROQ_API_KEY
+# for real assessment/drafting. The base install includes the HTTP client and packaged prompts.
 CMD ["sh", "-c", "uvicorn ai_service.main:app --host 0.0.0.0 --port ${SERVER_PORT:-8083}"]

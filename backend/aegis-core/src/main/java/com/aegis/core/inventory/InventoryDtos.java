@@ -34,12 +34,19 @@ public final class InventoryDtos {
 
     public record BusinessServiceResponse(
             UUID id, String name, BusinessCriticality criticality, ServiceExposure exposure,
+            String repositoryUrl, String repositoryBranch,
             Instant createdAt, Instant updatedAt) {
         static BusinessServiceResponse from(BusinessService value) {
             return new BusinessServiceResponse(
                     value.getId(), value.getName(), value.getCriticality(), value.getExposure(),
+                    value.getRepositoryUrl(), value.getRepositoryBranch(),
                     value.getCreatedAt(), value.getUpdatedAt());
         }
+    }
+
+    public record ServiceRepositoryRequest(
+            @NotBlank @Size(max = 400) String url,
+            @Size(max = 200) String branch) {
     }
 
     public record SoftwareComponentRequest(

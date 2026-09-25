@@ -7,13 +7,17 @@ the shared token later without changing callers.)
 
 import hmac
 
-from fastapi import Header
+from fastapi import Header, Request
 
-from ai_service.core.config import settings
 from ai_service.core.errors import Unauthorized
 
 
-def require_service_token(x_service_token: str | None = Header(default=None, alias="X-Service-Token")) -> None:
+def require_service_token(
+    request: Request,
+    x_service_token: str | None = Header(default=None, alias="X-Service-Token"),
+) -> None:
     # Constant-time comparison to avoid leaking the token via timing.
-    if not x_service_token or not hmac.compare_digest(x_service_token, settings.service_token):
+    if not x_service_token or not hmac.compare_digest(
+        x_service_token, request.app.state.settings.service_token,
+    ):
         raise Unauthorized("Missing or invalid service token")
