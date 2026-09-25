@@ -91,7 +91,14 @@ class StructuredGenerator:
         )
         status_retries, validation_retries = 0, 0
         while True:
-            reservation = self.limiter.reserve(estimate)
+            try:
+                reservation = self.limiter.reserve(estimate)
+            except ServiceUnavailable:
+                if validation_retries:
+                    # The first answer was invalid and its tokens were really spent, leaving no room
+                    # to retry: report the invalid output, not a rate limit.
+                    raise BadGateway("LLM provider returned invalid output; no budget left to retry") from None
+                raise
             ATTEMPTS.labels(self.client.provider, self.client.model, capability).inc()
             try:
                 result = await self.client.generate_json(
@@ -108,6 +115,10 @@ class StructuredGenerator:
                     validate(parsed)
                 return parsed
             except RetryableProviderError as exc:
+                if exc.rate_limited:
+                    # A 429 is a rejection that spent no tokens, so release the estimate: otherwise it
+                    # plus the retry's own estimate overflow the per-minute cap and the retry never runs.
+                    self.limiter.reconcile(reservation, 0)
                 if status_retries == 2:
                     raise ServiceUnavailable("LLM provider remains unavailable or rate-limited") from None
                 delay = max(0.25 * 2 ** status_retries, exc.retry_after or 0)

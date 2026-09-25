@@ -63,7 +63,10 @@ class GroqLlmClient:
         except httpx.HTTPError:
             raise ServiceUnavailable("LLM provider connection failed or timed out") from None
         if response.status_code == 429 or 500 <= response.status_code <= 599:
-            raise RetryableProviderError(retry_after_seconds(response.headers.get("retry-after")))
+            raise RetryableProviderError(
+                retry_after_seconds(response.headers.get("retry-after")),
+                rate_limited=response.status_code == 429,
+            )
         if not response.is_success:
             # Includes redirects: never relay an Authorization header to another location.
             raise ServiceUnavailable("LLM provider rejected the request; check provider configuration")

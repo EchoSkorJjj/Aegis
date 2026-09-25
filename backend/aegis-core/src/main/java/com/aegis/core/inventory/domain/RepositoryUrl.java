@@ -1,6 +1,7 @@
 package com.aegis.core.inventory.domain;
 
 import java.net.URI;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
@@ -41,30 +42,27 @@ public final class RepositoryUrl {
         if (allowedHosts == null || allowedHosts.stream().noneMatch(host::equalsIgnoreCase)) {
             throw new ApiExceptions.BadRequest("This host is not allowed. Allowed hosts: " + allowedHosts);
         }
-        if (uri.getRawUserInfo() != null || uri.getRawQuery() != null || uri.getRawFragment() != null
-                || (uri.getPort() != -1 && uri.getPort() != 443)) {
-            throw new ApiExceptions.BadRequest("Repository URLs must not contain credentials, query, fragment or a custom port");
+        if (uri.getRawUserInfo() != null || (uri.getPort() != -1 && uri.getPort() != 443)) {
+            throw new ApiExceptions.BadRequest("Repository URLs must not contain credentials or a custom port");
         }
-        String path = uri.getRawPath() == null ? "" : uri.getRawPath();
-        if (path.startsWith("/")) {
-            path = path.substring(1);
-        }
-        if (path.endsWith("/")) {
-            path = path.substring(0, path.length() - 1);
-        }
-        if (path.endsWith(".git")) {
-            path = path.substring(0, path.length() - 4);
-        }
-        String[] segments = path.split("/", -1);
+        // Accept what a browser's address bar shows: a query or fragment (?tab=readme-ov-file, #readme)
+        // and empty segments are ignored, as the SBOM importer always did. The canonical form carries none.
+        String[] segments = Arrays.stream((uri.getRawPath() == null ? "" : uri.getRawPath()).split("/"))
+                .filter(segment -> !segment.isEmpty())
+                .toArray(String[]::new);
         if (segments.length < 2) {
             throw new ApiExceptions.BadRequest("Expected a URL like https://" + host + "/owner/repository");
+        }
+        String last = segments[segments.length - 1];
+        if (last.endsWith(".git")) {
+            segments[segments.length - 1] = last.substring(0, last.length() - 4);
         }
         for (String segment : segments) {
             if (!SEGMENT.matcher(segment).matches()) {
                 throw new ApiExceptions.BadRequest("The repository path contains unsupported characters");
             }
         }
-        return new RepositoryUrl(host, path);
+        return new RepositoryUrl(host, String.join("/", segments));
     }
 
     /** Null/blank selects the repository default; otherwise accept a safe Git branch or tag. */

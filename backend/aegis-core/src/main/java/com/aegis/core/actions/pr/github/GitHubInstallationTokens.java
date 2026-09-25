@@ -2,11 +2,11 @@ package com.aegis.core.actions.pr.github;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.aegis.core.platform.common.ApiExceptions;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -18,7 +18,7 @@ final class GitHubInstallationTokens {
     private final GitHubAppJwt jwt;
     private final Set<String> allowedAccounts;
     private final Clock clock;
-    private final Map<CacheKey, Token> cache = new HashMap<>();
+    private final Map<CacheKey, Token> cache = new ConcurrentHashMap<>();
 
     GitHubInstallationTokens(GitHubApi api, GitHubAppJwt jwt, Set<String> allowedAccounts, Clock clock) {
         this.api = api;
@@ -27,7 +27,13 @@ final class GitHubInstallationTokens {
         this.clock = clock;
     }
 
-    synchronized String forRepository(String repository) {
+    /**
+     * Not synchronized: the installation lookup and the token mint are network calls, and one lock held
+     * across them would queue every GitHub operation behind the slowest. Only the cache is shared, and
+     * it is a concurrent map. Two concurrent misses for one repository may both mint a token; that is
+     * harmless, since both are valid and the last one stored is reused.
+     */
+    String forRepository(String repository) {
         if (allowedAccounts.isEmpty()) {
             throw new ApiExceptions.Forbidden("GitHub operations are disabled until allowed-accounts is configured");
         }

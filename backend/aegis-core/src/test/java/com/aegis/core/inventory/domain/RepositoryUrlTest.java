@@ -33,12 +33,21 @@ class RepositoryUrlTest {
         " ", "not a URL", "http://github.com/a/b", "git@github.com:a/b.git",
         "https://evil.example/a/b", "https://github.com.evil.example/a/b",
         "https://github.com/owner", "https://github.com/a/../b", "https://github.com/a/%2e%2e/b",
-        "https://github.com/a/repo%2fname", "https://github.com/a//b", "https://github.com/a/b//",
-        "https://github.com/a/-repo", "https://github.com/a/.git", "https://github.com/a/b?token=secret",
-        "https://user:secret@github.com/a/b", "https://github.com:8443/a/b", "https://github.com/a/b#main"
+        "https://github.com/a/repo%2fname", "https://github.com/a/-repo", "https://github.com/a/.git",
+        "https://user:secret@github.com/a/b", "https://github.com:8443/a/b"
     })
     void refusesUnsupportedOrAmbiguousLocations(String raw) {
         assertThatThrownBy(() -> RepositoryUrl.parse(raw, HOSTS)).isInstanceOf(ApiExceptions.BadRequest.class);
+    }
+
+    /** What a browser's address bar adds is ignored, as the SBOM importer always did — never stored. */
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "https://github.com/a/b?tab=readme-ov-file", "https://github.com/a/b#readme",
+        "https://github.com/a/b?token=secret", "https://github.com/a//b", "https://github.com/a/b//"
+    })
+    void dropsQueryFragmentAndEmptySegments(String raw) {
+        assertThat(RepositoryUrl.parse(raw, HOSTS).canonical()).isEqualTo("https://github.com/a/b");
     }
 
     @Test

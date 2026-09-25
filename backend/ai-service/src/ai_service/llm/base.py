@@ -16,9 +16,11 @@ class LlmResult:
 class RetryableProviderError(Exception):
     """Safe metadata only; never retain provider bodies, prompts, or credentials."""
 
-    def __init__(self, retry_after: float | None = None):
+    def __init__(self, retry_after: float | None = None, *, rate_limited: bool = False):
         super().__init__("LLM provider temporarily unavailable")
         self.retry_after = retry_after
+        # An explicit rate-limit rejection (HTTP 429): the provider processed no tokens.
+        self.rate_limited = rate_limited
 
 
 class InvalidProviderOutput(Exception):

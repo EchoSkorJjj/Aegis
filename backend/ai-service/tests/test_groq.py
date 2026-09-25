@@ -274,6 +274,32 @@ def test_retry_is_admitted_through_request_limiter(make_client, retry_delays):
     assert len(calls) == 1
 
 
+def test_rate_limited_attempt_releases_its_tokens_so_the_retry_runs(make_client, retry_delays):
+    # One attempt's estimate (~1.5K tokens) fits the cap, two do not. The 429 spent no tokens, so the
+    # retry must still be admitted rather than refused by the local limiter.
+    responses = iter([httpx.Response(429, headers={"Retry-After": "1"}), completion()])
+    client, _ = make_client(lambda request: next(responses), llm_max_tokens_per_minute=2500)
+    assert client.post("/v1/assess", headers=TOKEN, json=PAYLOAD).status_code == 200
+    assert retry_delays == [1]
+
+
+def test_invalid_output_without_budget_for_a_retry_returns_502(make_client):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        # Invalid output that really spent 5K tokens, leaving no room for a retry under a 6K cap.
+        return httpx.Response(200, json={
+            "choices": [{"finish_reason": "stop", "message": {"content": "not-json"}}],
+            "usage": {"prompt_tokens": 5000, "completion_tokens": 0},
+        })
+
+    client, _ = make_client(handler, llm_max_tokens_per_minute=6000)
+    response = client.post("/v1/assess", headers=TOKEN, json=PAYLOAD)
+    assert_error(response, 502)
+    assert len(calls) == 1
+
+
 @pytest.mark.parametrize("value,expected", [
     (None, None), ("", None), ("nonsense", None), ("nan", None), ("inf", None),
     ("-5", 0), ("1.5", 1.5),

@@ -65,28 +65,52 @@ final class GitHubAppPrProvider implements PrProvider {
         }
         api.post(root + "/git/refs", token,
                 Map.of("ref", "refs/heads/" + draft.headBranch(), "sha", ref.object().sha()), Void.class);
-        for (var change : draft.changes()) {
-            String path = root + "/contents/" + change.path();
-            var existing = api.call(HttpMethod.GET, api.uri(path, draft.headBranch()), token, null,
-                    Content.class, true, "GitHub file not found");
-            var body = new HashMap<String, Object>();
-            body.put("message", draft.commitMessage());
-            body.put("content", Base64.getEncoder().encodeToString(change.content().getBytes(StandardCharsets.UTF_8)));
-            body.put("branch", draft.headBranch());
-            if (existing != null) {
-                if (!"file".equals(existing.type()) || !validSha(existing.sha())) {
-                    throw new ApiExceptions.Conflict("GitHub target must be a regular file with a valid blob SHA");
+        // The head branch now exists and is this call's own. If anything below fails, delete it so the
+        // same draft can be retried rather than hitting "reference already exists" forever.
+        try {
+            for (var change : draft.changes()) {
+                String path = root + "/contents/" + change.path();
+                // Untyped on purpose: a directory answers with a JSON array, which is a wrong target
+                // (Conflict below), not a malformed GitHub response.
+                Object existing = api.call(HttpMethod.GET, api.uri(path, draft.headBranch()), token, null,
+                        Object.class, true, "GitHub file not found");
+                var body = new HashMap<String, Object>();
+                body.put("message", draft.commitMessage());
+                body.put("content", Base64.getEncoder().encodeToString(change.content().getBytes(StandardCharsets.UTF_8)));
+                body.put("branch", draft.headBranch());
+                if (existing != null) {
+                    if (!(existing instanceof Map<?, ?> file) || !"file".equals(file.get("type"))
+                            || !(file.get("sha") instanceof String sha) || !validSha(sha)) {
+                        throw new ApiExceptions.Conflict("GitHub target must be a regular file with a valid blob SHA");
+                    }
+                    body.put("sha", sha);
                 }
-                body.put("sha", existing.sha());
+                api.call(HttpMethod.PUT, api.uri(path, null), token, body, Void.class, false, "GitHub repository not found");
             }
-            api.call(HttpMethod.PUT, api.uri(path, null), token, body, Void.class, false, "GitHub repository not found");
+            var pr = api.post(root + "/pulls", token, Map.of("title", draft.title(), "head", draft.headBranch(),
+                    "base", base, "body", draft.body(), "draft", true), PullRequest.class);
+            if (!validPullRequestUrl(pr, draft.repository())) {
+                throw GitHubApi.invalidResponse();
+            }
+            return new PullRequestRef(id(), pr.htmlUrl(), Long.toString(pr.number()), draft.headBranch());
+        } catch (RuntimeException failure) {
+            deleteHeadBranch(root, token, draft.headBranch(), failure);
+            throw failure;
         }
-        var pr = api.post(root + "/pulls", token, Map.of("title", draft.title(), "head", draft.headBranch(),
-                "base", base, "body", draft.body(), "draft", true), PullRequest.class);
-        if (!validPullRequestUrl(pr, draft.repository())) {
-            throw GitHubApi.invalidResponse();
+    }
+
+    /**
+     * Best-effort removal of the head branch this call created. A pull request that was opened but
+     * whose response was then lost or rejected is closed by GitHub along with its branch. A cleanup
+     * failure never replaces the original error.
+     */
+    private void deleteHeadBranch(String root, String token, String headBranch, RuntimeException failure) {
+        try {
+            api.call(HttpMethod.DELETE, api.uri(root + "/git/refs/heads/" + headBranch, null), token, null,
+                    Void.class, true, "GitHub branch not found");
+        } catch (RuntimeException cleanup) {
+            failure.addSuppressed(cleanup);
         }
-        return new PullRequestRef(id(), pr.htmlUrl(), Long.toString(pr.number()), draft.headBranch());
     }
 
     private static boolean validSha(String sha) {
@@ -117,9 +141,6 @@ final class GitHubAppPrProvider implements PrProvider {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record GitObject(String sha) { }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private record Content(String sha, String type) { }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record PullRequest(@JsonProperty("html_url") String htmlUrl, long number) { }

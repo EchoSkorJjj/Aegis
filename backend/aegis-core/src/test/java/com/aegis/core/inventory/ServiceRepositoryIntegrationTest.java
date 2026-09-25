@@ -95,7 +95,7 @@ class ServiceRepositoryIntegrationTest extends AbstractInventoryIntegrationTest 
         BusinessService service = service();
         mvc.perform(link(service.getId(), URL, "develop").with(role("ANALYST"))).andExpect(status().isOk());
         for (String bad : List.of("", "http://github.com/a/b", "https://evil.example/a/b", "https://github.com/a",
-                "https://github.com/a/../b", "https://github.com/a/%2e%2e/b", "https://github.com/a/b?token=x",
+                "https://github.com/a/../b", "https://github.com/a/%2e%2e/b", "https://user:x@github.com/a/b",
                 "https://github.com/a/" + "b".repeat(401))) {
             mvc.perform(link(service.getId(), bad, null).with(role("ANALYST")))
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.status").value(400));

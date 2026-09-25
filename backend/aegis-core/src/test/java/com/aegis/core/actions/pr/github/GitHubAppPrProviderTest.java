@@ -18,6 +18,11 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import com.aegis.core.actions.pr.FileChange;
 import com.aegis.core.actions.pr.PullRequestDraft;
@@ -53,13 +58,18 @@ class GitHubAppPrProviderTest {
     private final MutableClock clock = new MutableClock();
     private final List<Request> requests = Collections.synchronizedList(new ArrayList<>());
     private final List<Throwable> observedErrors = new ArrayList<>();
+    // Concurrent request handling, so one held-open request cannot block the fake GitHub itself.
+    private final ExecutorService handlers = Executors.newCachedThreadPool();
+    private volatile CountDownLatch slowArrived;
+    private volatile CountDownLatch otherArrived;
+    private volatile boolean slowReleasedByOther;
     private HttpServer server;
     private KeyPair keys;
     private GitHubAppPrProvider provider;
     private GitHubInstallationTokens tokens;
     private String account = "Sandbox";
     private long installationId = 42;
-    private int minted;
+    private volatile int minted;
     private String defaultBranch = "main";
     private String failurePath;
     private String failureMethod;
@@ -72,6 +82,7 @@ class GitHubAppPrProviderTest {
         keys = generateKey();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", this::respond);
+        server.setExecutor(handlers);
         server.start();
         configure(Set.of("sandbox"));
     }
@@ -79,6 +90,7 @@ class GitHubAppPrProviderTest {
     @AfterEach
     void tearDown() {
         server.stop(0);
+        handlers.shutdownNow();
     }
 
     private void configure(Set<String> accounts) throws Exception {
@@ -173,6 +185,19 @@ class GitHubAppPrProviderTest {
     }
 
     @Test
+    void aSlowLookupForOneRepositoryDoesNotHoldUpTokensForAnother() throws Exception {
+        slowArrived = new CountDownLatch(1);
+        otherArrived = new CountDownLatch(1);
+        var slow = CompletableFuture.supplyAsync(() -> tokens.forRepository("sandbox/slow"));
+        assertThat(slowArrived.await(5, TimeUnit.SECONDS)).isTrue();
+        // The slow lookup is held open by the fake GitHub until this one arrives: under one lock
+        // around the network calls it could not, and the slow lookup would give up after 5 s.
+        assertThat(tokens.forRepository("sandbox/other")).startsWith(TOKEN);
+        assertThat(slow.get(10, TimeUnit.SECONDS)).startsWith(TOKEN);
+        assertThat(slowReleasedByOther).isTrue();
+    }
+
+    @Test
     void expiredCacheEntriesAreReplaced() {
         tokens.forRepository("sandbox/repo");
         clock.now = clock.now.plusSeconds(3601);
@@ -221,6 +246,8 @@ class GitHubAppPrProviderTest {
         assertThatThrownBy(() -> provider.openDraftPullRequest(draft(null)))
                 .isInstanceOf(ApiExceptions.Conflict.class).hasMessageContaining("branch may already exist");
         assertThat(requests).hasSize(5);
+        // Not this call's branch, so it is never cleaned up.
+        assertThat(requests).noneMatch(request -> request.method().equals("DELETE"));
     }
 
     @Test
@@ -310,9 +337,13 @@ class GitHubAppPrProviderTest {
         failureStatus = 403;
         assertThatThrownBy(() -> provider.openDraftPullRequest(draft(null)))
                 .isInstanceOf(ApiExceptions.UpstreamUnavailable.class);
-        assertThat(requests).hasSize(7);
-        assertThat(requests.getLast().method()).isEqualTo("PUT");
-        assertThat(requests.getLast().uri().getPath()).endsWith("/contents/pom.xml");
+        assertThat(requests).hasSize(8);
+        assertThat(requests.get(6).method()).isEqualTo("PUT");
+        assertThat(requests.get(6).uri().getPath()).endsWith("/contents/pom.xml");
+        // The branch this call created is deleted, so the same draft can be retried.
+        assertThat(requests.getLast().method() + " " + requests.getLast().uri().getRawPath())
+                .isEqualTo("DELETE /api/v3/repos/sandbox/repo/git/refs/heads/aegis/upgrade");
+        assertThat(requests.getLast().authorization()).isEqualTo("Bearer " + TOKEN + "1");
     }
 
     @Test
@@ -330,7 +361,20 @@ class GitHubAppPrProviderTest {
         contentType = type;
         assertThatThrownBy(() -> provider.openDraftPullRequest(draft(null)))
                 .isInstanceOf(ApiExceptions.Conflict.class).hasMessageContaining("regular file");
-        assertThat(requests).hasSize(6);
+        assertThat(requests).hasSize(7);
+        assertThat(requests.getLast().method()).isEqualTo("DELETE");
+    }
+
+    @Test
+    void directoryTargetIsAConflictNotAnUpstreamFailure() {
+        // GitHub lists a directory as a JSON array rather than describing one file.
+        failurePath = "/contents/pom.xml";
+        failureMethod = "GET";
+        failureStatus = 200;
+        failureBody = "[{\"type\":\"file\",\"name\":\"a.xml\",\"sha\":\"" + BLOB + "\"}]";
+        assertThatThrownBy(() -> provider.openDraftPullRequest(draft(null)))
+                .isInstanceOf(ApiExceptions.Conflict.class).hasMessageContaining("regular file");
+        assertThat(requests.getLast().method()).isEqualTo("DELETE");
     }
 
     @Test
@@ -381,6 +425,7 @@ class GitHubAppPrProviderTest {
                 exchange.getResponseHeaders().set("Location", "http://127.0.0.1:" + server.getAddress().getPort() + "/stolen");
             }
         } else if (path.endsWith("/installation")) {
+            holdSlowLookupUntilAnotherArrives(path);
             body = "{\"id\":" + installationId + ",\"account\":{\"login\":\"" + account + "\"},\"extra\":true}";
         } else if (path.endsWith("/access_tokens")) {
             minted++;
@@ -409,6 +454,23 @@ class GitHubAppPrProviderTest {
         exchange.sendResponseHeaders(status, bytes.length);
         try (var output = exchange.getResponseBody()) {
             output.write(bytes);
+        }
+    }
+
+    /** When armed, the sandbox/slow lookup waits (up to 5 s) for a lookup of another repository. */
+    private void holdSlowLookupUntilAnotherArrives(String path) {
+        if (otherArrived == null) {
+            return;
+        }
+        if (path.contains("/sandbox/slow/")) {
+            slowArrived.countDown();
+            try {
+                slowReleasedByOther = otherArrived.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+        } else {
+            otherArrived.countDown();
         }
     }
 
