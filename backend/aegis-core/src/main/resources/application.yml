@@ -51,6 +51,15 @@ aegis:
   ai:
     base-url: ${AI_SERVICE_URI:http://localhost:8083}
     service-token: ${AI_SERVICE_TOKEN:dev-internal-token-change-me}
+  # GitHub App spike: no execution endpoint. Requires a future human-approval workflow.
+  actions:
+    github:
+      enabled: ${AEGIS_GITHUB_ENABLED:false}
+      api-base-url: ${AEGIS_GITHUB_API_URL:https://api.github.com}
+      client-id: ${AEGIS_GITHUB_APP_CLIENT_ID:}
+      private-key-path: ${AEGIS_GITHUB_APP_PRIVATE_KEY_PATH:}
+      hosts: ${AEGIS_GITHUB_HOSTS:github.com}
+      allowed-accounts: ${AEGIS_GITHUB_ALLOWED_ACCOUNTS:}
   # identity-service's member directory — e.g. to verify that a service's assigned owner is a member of
   # the caller's organization holding the SERVICE_OWNER role. Called with the CALLER's own access token
   # (token relay), so identity-service applies the caller's org scope; never with a service credential.
