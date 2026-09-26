@@ -26,6 +26,9 @@ public interface AdvisoryStore {
      */
     List<Advisory> findByCanonicalId(String canonicalId);
 
+    /** {@link #findByCanonicalId} for many vulnerabilities in a few queries, however many are asked for. */
+    List<Advisory> findByCanonicalIds(Collection<String> canonicalIds);
+
     /**
      * Every advisory with an affected product that could name one package: a purl whose package name,
      * lower-cased with each run of {@code - _ .} folded to {@code -}, is one of {@code packageKeys}, or a

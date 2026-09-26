@@ -19,6 +19,7 @@ import com.aegis.core.matching.MatchingDtos.VulnerableDependency;
 import com.aegis.core.matching.UpgradeTargets;
 import com.aegis.core.matching.UpgradeTargets.UpgradeTarget;
 import com.aegis.core.matching.VulnerableDependencies;
+import com.aegis.core.matching.VulnerableDependencies.Found;
 import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.scoring.ImpactScorer;
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
@@ -38,10 +39,10 @@ import org.springframework.stereotype.Service;
  * items, for dependency vulnerabilities. Recomputed per request from matching ({@link VulnerableDependencies},
  * {@link UpgradeTargets}) and scoring ({@link ImpactScorer}); a proposal is only drafted when a person asks.
  *
- * <p>Deliberately not {@code @Transactional}: a dependency with no provable fix makes
- * {@link UpgradeTargets#resolve} throw, and inside one shared transaction that would mark the whole request
- * rollback-only even though it is caught here (the estate roll-up's lesson, CS203-74). Each lookup runs in
- * its own read-only transaction instead.
+ * <p>Every lookup happens up front, in a fixed number of batched queries however many services and
+ * dependencies there are ({@link VulnerableDependencies#find}); each target is then worked out in memory from
+ * the advisories that search loaded — the same answer drafting it would give, without a lookup per
+ * vulnerability.
  */
 @Service
 public class UpgradeRecommendations {
@@ -55,15 +56,13 @@ public class UpgradeRecommendations {
 
     private final InventoryStore inventory;
     private final VulnerableDependencies vulnerable;
-    private final UpgradeTargets targets;
     private final ImpactScorer scorer;
     private final UpgradeProposalStore proposals;
 
-    public UpgradeRecommendations(InventoryStore inventory, VulnerableDependencies vulnerable,
-            UpgradeTargets targets, ImpactScorer scorer, UpgradeProposalStore proposals) {
+    public UpgradeRecommendations(InventoryStore inventory, VulnerableDependencies vulnerable, ImpactScorer scorer,
+            UpgradeProposalStore proposals) {
         this.inventory = inventory;
         this.vulnerable = vulnerable;
-        this.targets = targets;
         this.scorer = scorer;
         this.proposals = proposals;
     }
@@ -118,8 +117,9 @@ public class UpgradeRecommendations {
             throw new ApiExceptions.NotFound("Business service not found: " + serviceId);
         }
         Map<String, ProposalRef> current = currentProposals();
-        return vulnerable.forServices(services.keySet()).stream()
-                .map(dependency -> recommendation(dependency, services.get(dependency.serviceId()), current))
+        Found found = vulnerable.find(services.keySet());
+        return found.dependencies().stream()
+                .map(dependency -> recommendation(dependency, services.get(dependency.serviceId()), current, found))
                 .sorted(Comparator.comparingDouble(Recommendation::score).reversed()
                         .thenComparing(Recommendation::readiness)
                         .thenComparing(Recommendation::serviceName, String.CASE_INSENSITIVE_ORDER)
@@ -128,7 +128,7 @@ public class UpgradeRecommendations {
     }
 
     private Recommendation recommendation(VulnerableDependency dependency, BusinessService service,
-            Map<String, ProposalRef> current) {
+            Map<String, ProposalRef> current, Found found) {
         ComponentRef component = dependency.component();
         ScoreBreakdown breakdown = scorer.breakdown(SignalType.VULNERABILITY,
                 severityFactor(dependency.vulnerabilities().getFirst()), service.getExposure(),
@@ -143,11 +143,12 @@ public class UpgradeRecommendations {
                 continue;
             }
             try {
-                UpgradeTarget target = targets.resolve(vulnerability.changeSignalId(), component);
+                UpgradeTarget target = UpgradeTargets.resolve(vulnerability.id(), component,
+                        found.known(component, vulnerability.id()));
                 toVersion = target.toVersion();
                 remediated = vulnerability.changeSignalId();
                 break;
-            } catch (ApiExceptions.Conflict | ApiExceptions.BadRequest | ApiExceptions.NotFound unresolved) {
+            } catch (ApiExceptions.Conflict unresolved) {
                 if (blocked == null) {
                     blocked = unresolved.getMessage();
                 }

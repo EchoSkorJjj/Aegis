@@ -14,6 +14,8 @@ interface AdvisoryJpaRepository extends JpaRepository<AdvisoryEntity, UUID> {
     Optional<AdvisoryEntity> findBySourceIdAndExternalId(String sourceId, String externalId);
 
     List<AdvisoryEntity> findByCanonicalId(String canonicalId);
+
+    List<AdvisoryEntity> findByCanonicalIdIn(Collection<String> canonicalIds);
 }
 
 interface AffectedProductJpaRepository extends JpaRepository<AffectedProductEntity, UUID> {

@@ -59,14 +59,72 @@ public class VulnerableDependencies {
         this.matcher = matcher;
     }
 
+    /**
+     * What {@link #find} found: the vulnerable dependencies, and the advisories behind them — every advisory
+     * naming one of the packages, and every advisory of each vulnerability found — so working out an upgrade
+     * target for each ({@link UpgradeTargets#resolve(String, ComponentRef, Collection)}) needs no lookup.
+     */
+    public static final class Found {
+
+        static final Found NONE = new Found(List.of(), List.of(), List.of());
+
+        private final List<VulnerableDependency> dependencies;
+        // Keyed exactly as the advisory store's prefilter compares them (UpgradeTargets#packageKeys/productKeys).
+        private final Map<String, List<Advisory>> byPackageKey = new HashMap<>();
+        private final Map<String, List<Advisory>> byProductKey = new HashMap<>();
+        private final Map<String, List<Advisory>> byVulnerability = new HashMap<>();
+
+        Found(List<VulnerableDependency> dependencies, Collection<Advisory> namingPackages,
+                Collection<Advisory> ofVulnerabilities) {
+            this.dependencies = List.copyOf(dependencies);
+            for (Advisory advisory : namingPackages) {
+                for (AffectedProduct product : advisory.affected()) {
+                    if (product.packageName() != null) {
+                        UpgradeTargets.packageKeys(product.packageName()).forEach(key ->
+                                byPackageKey.computeIfAbsent(key, k -> new ArrayList<>()).add(advisory));
+                    }
+                    if (product.product() != null) {
+                        byProductKey.computeIfAbsent(AdvisoryComponentMatcher.canonical(product.product()),
+                                k -> new ArrayList<>()).add(advisory);
+                    }
+                }
+            }
+            ofVulnerabilities.forEach(advisory ->
+                    byVulnerability.computeIfAbsent(advisory.canonicalId(), id -> new ArrayList<>()).add(advisory));
+        }
+
+        public List<VulnerableDependency> dependencies() {
+            return dependencies;
+        }
+
+        /**
+         * What {@link UpgradeTargets#resolve(UUID, ComponentRef)} would load for this component and
+         * vulnerability: the vulnerability's own advisories, then every advisory naming the package.
+         */
+        public List<Advisory> known(ComponentRef component, String vulnerabilityId) {
+            Map<UUID, Advisory> known = new LinkedHashMap<>();
+            byVulnerability.getOrDefault(vulnerabilityId, List.of())
+                    .forEach(advisory -> known.putIfAbsent(advisory.id(), advisory));
+            UpgradeTargets.packageKeys(component.name()).forEach(key -> byPackageKey.getOrDefault(key, List.of())
+                    .forEach(advisory -> known.putIfAbsent(advisory.id(), advisory)));
+            UpgradeTargets.productKeys(component.name()).forEach(key -> byProductKey.getOrDefault(key, List.of())
+                    .forEach(advisory -> known.putIfAbsent(advisory.id(), advisory)));
+            return List.copyOf(known.values());
+        }
+    }
+
+    /**
+     * Every vulnerable dependency of these services, in a fixed number of batched lookups however many
+     * services, dependencies and vulnerabilities there are.
+     */
     @Transactional(readOnly = true)
-    public List<VulnerableDependency> forServices(Collection<UUID> serviceIds) {
+    public Found find(Collection<UUID> serviceIds) {
         if (serviceIds.isEmpty()) {
-            return List.of();
+            return Found.NONE;
         }
         List<ServiceComponentLink> direct = inventory.findServiceComponentLinksForServices(serviceIds);
         if (direct.isEmpty()) {
-            return List.of();
+            return Found.NONE;
         }
         Map<UUID, List<UUID>> dependsOn = dependencyGraph(direct);
         Set<UUID> reachable = new LinkedHashSet<>();
@@ -74,9 +132,10 @@ public class VulnerableDependencies {
         dependsOn.values().forEach(reachable::addAll);
         Map<UUID, SoftwareComponent> components = inventory.findSoftwareComponentsByIds(reachable);
 
-        Map<UUID, List<VulnerabilityRef>> vulnerable = vulnerabilities(components.values());
+        Matched matched = vulnerabilities(components.values());
+        Map<UUID, List<VulnerabilityRef>> vulnerable = matched.byComponent();
         if (vulnerable.isEmpty()) {
-            return List.of();
+            return Found.NONE;
         }
 
         List<VulnerableDependency> found = new ArrayList<>();
@@ -112,7 +171,13 @@ public class VulnerableDependencies {
                 }
             }
         }
-        return List.copyOf(found);
+        Set<String> vulnerabilityIds = new HashSet<>();
+        found.forEach(dependency -> dependency.vulnerabilities().forEach(ref -> vulnerabilityIds.add(ref.id())));
+        return new Found(found, matched.naming(), advisories.findByCanonicalIds(vulnerabilityIds));
+    }
+
+    /** The vulnerabilities affecting each component, and every advisory the prefilter loaded to find them. */
+    private record Matched(Map<UUID, List<VulnerabilityRef>> byComponent, List<Advisory> naming) {
     }
 
     private static VulnerableDependency dependency(ServiceComponentLink link, SoftwareComponent component,
@@ -166,7 +231,7 @@ public class VulnerableDependencies {
      * The vulnerabilities affecting each component, most severe first: every advisory naming one of the
      * packages, grouped by vulnerability (its canonical id, across feeds), matched under matching's rules.
      */
-    private Map<UUID, List<VulnerabilityRef>> vulnerabilities(Collection<SoftwareComponent> components) {
+    private Matched vulnerabilities(Collection<SoftwareComponent> components) {
         Map<String, List<SoftwareComponent>> byPackageKey = new HashMap<>();
         Map<String, List<SoftwareComponent>> byProductKey = new HashMap<>();
         for (SoftwareComponent component : components) {
@@ -179,6 +244,7 @@ public class VulnerableDependencies {
         Map<String, List<Advisory>> byVulnerability = new LinkedHashMap<>();
         List<String> names = components.stream().map(SoftwareComponent::getName).distinct().toList();
         Set<UUID> seenAdvisories = new HashSet<>();
+        List<Advisory> naming = new ArrayList<>();
         for (int start = 0; start < names.size(); start += NAMES_PER_QUERY) {
             Set<String> packageKeys = new HashSet<>();
             Set<String> productKeys = new HashSet<>();
@@ -188,6 +254,7 @@ public class VulnerableDependencies {
             }
             for (Advisory advisory : advisories.findNamingPackage(packageKeys, productKeys)) {
                 if (advisory.canonicalId() != null && seenAdvisories.add(advisory.id())) {
+                    naming.add(advisory);
                     byVulnerability.computeIfAbsent(advisory.canonicalId(), id -> new ArrayList<>()).add(advisory);
                 }
             }
@@ -217,7 +284,7 @@ public class VulnerableDependencies {
             }
         }
         if (matched.isEmpty()) {
-            return Map.of();
+            return new Matched(Map.of(), naming);
         }
 
         Set<String> ids = new HashSet<>();
@@ -229,7 +296,7 @@ public class VulnerableDependencies {
                         byVulnerability.get(entry.getKey())))
                 .sorted(MOST_SEVERE_FIRST)
                 .toList()));
-        return result;
+        return new Matched(result, naming);
     }
 
     /** The feeds' own severity: the highest CVSS base score any of them published, else a severity word. */

@@ -1,6 +1,7 @@
 package com.aegis.core.matching;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -82,6 +83,16 @@ public class UpgradeTargets {
         // The remediated vulnerability's own feeds, plus every other advisory that could name the package.
         List<Advisory> known = new ArrayList<>(advisories.findByCanonicalId(vulnerability));
         known.addAll(advisories.findNamingPackage(packageKeys(component.name()), productKeys(component.name())));
+        return resolve(vulnerability, component, known);
+    }
+
+    /**
+     * {@link #resolve(UUID, ComponentRef)} from advisories already in hand, with no lookups — for working out
+     * many targets at once ({@link VulnerableDependencies.Found#known}). {@code known} must hold what that
+     * method loads: every advisory of {@code vulnerabilityId}, and every advisory the store's prefilter says
+     * could name the package. Extra advisories are harmless; matching's identity rule drops them.
+     */
+    public static UpgradeTarget resolve(String vulnerabilityId, ComponentRef component, Collection<Advisory> known) {
         List<Range> ranges = known.stream()
                 .flatMap(advisory -> advisory.affected().stream()
                         .filter(affected -> affected.part() == null || affected.part().equalsIgnoreCase("a"))
@@ -89,7 +100,7 @@ public class UpgradeTargets {
                 .filter(range -> range != null)
                 .distinct()
                 .toList();
-        return target(vulnerability, component, ranges);
+        return target(vulnerabilityId, component, ranges);
     }
 
     static UpgradeTarget target(String vulnerability, ComponentRef component, List<Range> ranges) {
