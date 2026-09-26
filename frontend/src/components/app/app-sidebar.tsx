@@ -46,6 +46,7 @@ import {
   adminNav,
   baseNav,
   domainNav,
+  orgAdminNav,
   type NavGroup,
   type NavItem,
 } from "@/components/app/navigation";
@@ -59,6 +60,8 @@ export function AppSidebar() {
   // Anyone with a role beyond the USER baseline can open the member directory (read-only for the
   // domain roles, full management for admins). The Users page itself gates what each can do.
   const canSeeMembers = !!user?.roles.some((r) => r !== "USER");
+  // The organization's integrations (GitHub) are its admin's to connect.
+  const organizationNav = user?.roles.includes("ORG_ADMIN") ? [...adminNav, ...orgAdminNav] : adminNav;
   // Domain data (inventory, advisories, and the rest of the estate features) needs a domain read role.
   const platformNav: NavItem[] = canReadInventory(user?.roles ?? [])
     ? [...baseNav, ...domainNav]
@@ -208,7 +211,7 @@ export function AppSidebar() {
             <SidebarGroupLabel>Organization</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {adminNav.map((item) => (
+                {organizationNav.map((item) => (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton
                       isActive={pathname === item.href}

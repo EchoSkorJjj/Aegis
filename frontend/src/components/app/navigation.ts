@@ -4,6 +4,7 @@ import {
   GitPullRequest,
   LayoutDashboard,
   type LucideIcon,
+  Plug,
   Rss,
   Settings,
   ShieldAlert,
@@ -62,6 +63,9 @@ export const accountNav: NavLink[] = [{ title: "Settings", href: "/settings", ic
 
 export const adminNav: NavLink[] = [{ title: "Users", href: "/admin/users", icon: ShieldCheck }];
 
+// The organization's own settings, which only its admin (ORG_ADMIN) may change.
+export const orgAdminNav: NavLink[] = [{ title: "Integrations", href: "/admin/integrations", icon: Plug }];
+
 /** Pages reached from inside a section rather than from the sidebar. */
 const unlistedPages = [
   { href: "/responses/upgrades", title: "Responses / Upgrade proposal" },
@@ -78,7 +82,7 @@ function isWithin(pathname: string, href: string): boolean {
  * name of the list it belongs to (a service is under "Inventory / Services"); the longest match wins.
  */
 export function pageTitle(pathname: string): string {
-  const pages = [...baseNav, ...domainNav, ...accountNav, ...adminNav].flatMap((item) =>
+  const pages = [...baseNav, ...domainNav, ...accountNav, ...adminNav, ...orgAdminNav].flatMap((item) =>
     "items" in item
       ? item.items.map((sub) => ({ href: sub.href, title: `${item.title} / ${sub.title}` }))
       : [{ href: item.href, title: item.title }],

@@ -11,6 +11,8 @@ import type {
   ComponentImpact,
   CreateOrgInput,
   ForgotPasswordInput,
+  GitHubConnectResult,
+  GitHubIntegration,
   InviteUserInput,
   LoginInput,
   LoginResponse,
@@ -527,5 +529,29 @@ export const mfaApi = {
     return bffFetch<void>(`/api/auth/mfa/webauthn/credentials/${id}`, {
       method: "DELETE",
     });
+  },
+};
+
+/**
+ * Connect GitHub (aegis-core): which GitHub App installations this organization may act through. Everyone
+ * with a role can see them; only the organization admin connects or disconnects.
+ */
+export const integrationsApi = {
+  github() {
+    return bffFetch<GitHubIntegration>("/api/integrations/github");
+  },
+  /** Where to send the organization admin to sign in to GitHub. */
+  startGitHub() {
+    return bffFetch<{ authorizeUrl: string }>("/api/integrations/github/authorizations", { method: "POST" });
+  },
+  /** Finish with what GitHub sent back: connects every installation the admin controls. */
+  finishGitHub(code: string, state: string) {
+    return bffFetch<GitHubConnectResult>("/api/integrations/github/connections", {
+      method: "POST",
+      body: JSON.stringify({ code, state }),
+    });
+  },
+  disconnectGitHub(installationId: number) {
+    return bffFetch<void>(`/api/integrations/github/connections/${installationId}`, { method: "DELETE" });
   },
 };

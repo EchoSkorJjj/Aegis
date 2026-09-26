@@ -580,6 +580,30 @@ export interface UpgradeRecommendation {
   reason: string | null;
   /** The upgrade already drafted for it, if any. */
   proposal: { id: string; status: UpgradeProposalStatus; toVersion: string; pullRequestUrl: string | null } | null;
-  /** Whether you may draft it: governance, or one of the service's owners. */
+  /** Whether you may draft it: an analyst, or one of the service's owners. */
   canDraft: boolean;
+}
+
+/** A GitHub App installation the organization has connected (aegis-core V22): Aegis may act on its repositories. */
+export interface GitHubConnection {
+  installationId: number;
+  accountLogin: string;
+  accountId: number;
+  accountType: "User" | "Organization";
+  /** The organization admin who connected it (a user id). */
+  connectedBy: string;
+  connectedAt: string;
+}
+
+/** Whether GitHub is enabled on this deployment, where to install the App, and what this organization connected. */
+export interface GitHubIntegration {
+  enabled: boolean;
+  installUrl: string | null;
+  connections: GitHubConnection[];
+}
+
+/** What connecting did: the installations connected, and those seen but not the admin's to connect, with why. */
+export interface GitHubConnectResult {
+  connected: GitHubConnection[];
+  skipped: { accountLogin: string; reason: string }[];
 }
