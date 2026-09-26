@@ -51,17 +51,20 @@ aegis:
   ai:
     base-url: ${AI_SERVICE_URI:http://localhost:8083}
     service-token: ${AI_SERVICE_TOKEN:dev-internal-token-change-me}
-  # GitHub App spike: no execution endpoint. Requires a future human-approval workflow.
+  # The GitHub App (GITHUB_APP.md): draft pull requests and SBOM clones, only through installations an
+  # organization admin has connected under Organization > Integrations (V22).
   actions:
     github:
       enabled: ${AEGIS_GITHUB_ENABLED:false}
       api-base-url: ${AEGIS_GITHUB_API_URL:https://api.github.com}
+      web-base-url: ${AEGIS_GITHUB_WEB_URL:https://github.com}
       client-id: ${AEGIS_GITHUB_APP_CLIENT_ID:}
+      # Only for the admin's GitHub sign-in when connecting; never logged.
+      client-secret: ${AEGIS_GITHUB_APP_CLIENT_SECRET:}
       private-key-path: ${AEGIS_GITHUB_APP_PRIVATE_KEY_PATH:}
+      # Must equal the App's registered callback URL: the frontend page GitHub sends the admin back to.
+      callback-url: ${AEGIS_GITHUB_CALLBACK_URL:http://localhost:3000/admin/integrations/github/callback}
       hosts: ${AEGIS_GITHUB_HOSTS:github.com}
-      # login=<organization id> binds a GitHub account to the one Aegis organization that may use the App
-      # on it (repeat per organization); a bare login is usable by every organization (single-org only).
-      allowed-accounts: ${AEGIS_GITHUB_ALLOWED_ACCOUNTS:}
   # identity-service's member directory — e.g. to verify that a service's assigned owner is a member of
   # the caller's organization holding the SERVICE_OWNER role. Called with the CALLER's own access token
   # (token relay), so identity-service applies the caller's org scope; never with a service credential.

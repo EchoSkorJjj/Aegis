@@ -78,11 +78,31 @@ repository default must also check that the resolved base differs from the head.
 ## GitHub App spike (E8 Story 3)
 
 The optional `actions.pr.github` adapter implements App JWT authentication, repository-scoped
-installation tokens, branch/file commits and draft PR creation. It ships **disabled**; an empty account
-allow-list refuses every operation. Tests use a local fake GitHub server and temporary RSA keys.
-Its only caller is the approval step below. Production still requires verified org-scoped installation
-bindings and an audit trail (E10). See [GITHUB_APP.md](GITHUB_APP.md) for configuration (including
-docker compose), permissions, key handling, test evidence and the sandbox smoke procedure.
+installation tokens, branch/file commits and draft PR creation. It ships **disabled**, and even when
+enabled it mints a token only for an installation the caller's organization has **connected**.
+Tests use a local fake GitHub server and temporary RSA keys. Its callers are the approval step below and
+the SBOM import's clone. An audit trail (E10) is still to come. See [GITHUB_APP.md](GITHUB_APP.md) for
+configuration (including docker compose), permissions, key handling, test evidence and the sandbox smoke
+procedure.
+
+### Connect GitHub (per organization)
+
+GitHub knows that the App is installed on an account, never which Aegis organization it is for, so each
+organization's admin connects its installations (`github_connections`, V22, org-scoped with RLS):
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | `/api/integrations/github` | any role in the organization | `{enabled, installUrl, connections}` |
+| POST | `/api/integrations/github/authorizations` | `ORG_ADMIN` | → `{authorizeUrl}`: the GitHub sign-in, carrying a one-time state bound to the admin |
+| POST | `/api/integrations/github/connections` | `ORG_ADMIN` | `{code, state}` from GitHub's redirect → `{connected, skipped}` |
+| DELETE | `/api/integrations/github/connections/{installationId}` | `ORG_ADMIN` | Disconnect (the App stays installed on GitHub) |
+
+Completing a connection exchanges the code for a short-lived user token, lists the App installations that
+person can see, and connects only those they **control** — their own account, or a GitHub organization
+they administer — reporting the rest with the reason. The state is single-use, expires after ten minutes
+and must come back to the person and organization that started it; the user token is revoked and never
+stored. With the App disabled, the status says so and every change is a 409. The frontend page is
+**Organization → Integrations** (`/admin/integrations`); GitHub returns to `/admin/integrations/github/callback`.
 
 ## Upgrade recommendations (no CVE to look up)
 
@@ -95,7 +115,10 @@ Each item carries the fixed version (`UpgradeTargets`, clearing every advisory w
 score (`ImpactScorer`: severity x exposure x criticality), the manifest, any proposal already drafted, and
 a readiness: `READY`, `NO_REPOSITORY` (link it), `TRANSITIVE` (another package pulls it in — upgrade that
 one or pin this), `UNSUPPORTED` (an ecosystem Aegis does not edit) or `NO_FIX`, with the reason, plus
-`canDraft` for the caller. Recomputed per request; nothing is drafted until a person clicks. The UI shows
+`canDraft` for the caller. Recomputed per request, in a fixed number of batched lookups however many
+services there are: `VulnerableDependencies.find` loads every advisory naming the packages, and each target
+is worked out in memory from them (`UpgradeTargets.resolve(vulnerability, component, known)` — the same
+answer drafting gets, which a test pins). Nothing is drafted until a person clicks. The UI shows
 them on **Review & approve** ("Recommended upgrades", direct dependencies across the estate) and on each
 service's page ("Vulnerable dependencies", including transitive ones).
 
@@ -465,7 +488,10 @@ Advisories, vendor incidents, and news items are each written by their own conne
 scoring, and the frontend need to treat "a real-world change" uniformly. `change_signals` is a
 read-only database view (`V10__change_signals_view.sql`) that `union all`s the three normalised
 tables into one shape — it owns no data of its own; each source's connector remains the sole writer
-of its own idempotently-upserted table.
+of its own idempotently-upserted table. A vulnerability reported by several feeds (NVD, OSV) appears once,
+as its most recently revised advisory: V21 records that row as the advisory's `representative`, kept right
+by a trigger on every write, so a lookup by id or CVE is an index hit rather than a de-duplication of every
+advisory (about 100 ms → 0.1 ms per lookup at 46k advisories).
 
 - `GET /api/change-signals` — every signal from every source, most recently occurred first
   (`occurredAt` is each row's revision/update/publish timestamp, coalesced down to when it was first

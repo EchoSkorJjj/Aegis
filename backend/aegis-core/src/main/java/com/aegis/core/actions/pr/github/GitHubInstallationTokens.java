@@ -5,9 +5,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Supplier;
+import java.util.function.BooleanSupplier;
+import java.util.function.LongPredicate;
 
 import com.aegis.core.platform.common.ApiExceptions;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -16,7 +16,8 @@ import org.springframework.http.HttpMethod;
 
 /**
  * Installation access tokens, each narrowed to one repository and one {@link Access}: a draft pull
- * request's write access is never handed to a read, and a read never gets more than the contents.
+ * request's write access is never handed to a read, and a read never gets more than the contents. Only an
+ * installation the caller's organization has connected ({@link GitHubConnections}) is used at all.
  */
 final class GitHubInstallationTokens {
 
@@ -34,19 +35,25 @@ final class GitHubInstallationTokens {
         }
     }
 
+    static final String CONNECT_HINT = "an organization admin can connect it under Organization → Integrations";
+
     private final GitHubApi api;
     private final GitHubAppJwt jwt;
-    private final GitHubAccounts accounts;
-    private final Supplier<UUID> organization;
+    private final BooleanSupplier anyConnected;
+    private final LongPredicate connected;
     private final Clock clock;
     private final Map<CacheKey, Token> cache = new ConcurrentHashMap<>();
 
-    GitHubInstallationTokens(GitHubApi api, GitHubAppJwt jwt, GitHubAccounts accounts, Supplier<UUID> organization,
+    /**
+     * @param anyConnected whether the caller's organization has connected any installation
+     * @param connected    whether it has connected this installation
+     */
+    GitHubInstallationTokens(GitHubApi api, GitHubAppJwt jwt, BooleanSupplier anyConnected, LongPredicate connected,
             Clock clock) {
         this.api = api;
         this.jwt = jwt;
-        this.accounts = accounts;
-        this.organization = organization;
+        this.anyConnected = anyConnected;
+        this.connected = connected;
         this.clock = clock;
     }
 
@@ -57,8 +64,8 @@ final class GitHubInstallationTokens {
      * harmless, since both are valid and the last one stored is reused.
      */
     String forRepository(String repository, Access access) {
-        if (accounts.isEmpty()) {
-            throw new ApiExceptions.Forbidden("GitHub operations are disabled until allowed-accounts is configured");
+        if (!anyConnected.getAsBoolean()) {
+            throw new ApiExceptions.Forbidden("GitHub isn't connected to this organization; " + CONNECT_HINT);
         }
         String appJwt = jwt.create();
         var installation = api.call(HttpMethod.GET, api.uri("repos/" + repository + "/installation", null),
@@ -67,8 +74,11 @@ final class GitHubInstallationTokens {
         if (installation.id() <= 0 || installation.account() == null || installation.account().login() == null) {
             throw GitHubApi.invalidResponse();
         }
-        accounts.requireAllowed(installation.account().login(), organization);
-        // Lookup and account validation occur even on cache hits (installation access can change).
+        if (!connected.test(installation.id())) {
+            throw new ApiExceptions.Forbidden("The Aegis GitHub App on " + installation.account().login()
+                    + " isn't connected to this organization; " + CONNECT_HINT);
+        }
+        // Lookup and connection check occur even on cache hits (installation access can change).
         var now = clock.instant();
         cache.values().removeIf(value -> !value.expiresAt().isAfter(now));
         String repo = repository.split("/")[1];

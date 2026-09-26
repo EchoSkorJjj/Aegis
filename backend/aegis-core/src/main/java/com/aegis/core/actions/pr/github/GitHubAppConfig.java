@@ -4,10 +4,7 @@ import java.time.Clock;
 
 import com.aegis.core.actions.pr.PrProvider;
 import com.aegis.core.inventory.sbom.RepositoryReadAccess;
-import com.aegis.core.platform.tenant.CurrentOrg;
 import io.micrometer.observation.ObservationRegistry;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -17,14 +14,13 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * The GitHub App, when enabled: one installation-token source behind both the draft-pull-request provider
  * ({@code actions.upgrade}) and the inventory's read access for SBOM imports, each token narrowed to one
- * repository and one purpose.
+ * repository and one purpose — and usable only for installations the caller's organization has connected
+ * ({@link GitHubConnections}).
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "aegis.actions.github", name = "enabled", havingValue = "true")
 @EnableConfigurationProperties(GitHubProperties.class)
 class GitHubAppConfig {
-
-    private static final Logger log = LoggerFactory.getLogger(GitHubAppConfig.class);
 
     @Bean
     GitHubApi githubApi(GitHubProperties properties, ObjectMapper mapper, ObservationRegistry observations) {
@@ -33,14 +29,25 @@ class GitHubAppConfig {
     }
 
     @Bean
-    GitHubInstallationTokens githubInstallationTokens(GitHubProperties properties, GitHubApi api, CurrentOrg currentOrg) {
-        GitHubAccounts accounts = GitHubAccounts.parse(properties.allowedAccounts());
-        accounts.unbound().forEach(login -> log.warn("GitHub account '{}' is not bound to an organization, so every "
-                + "organization in this deployment can use the GitHub App on it; bind it as {}=<organization id> "
-                + "when more than one organization shares the deployment", login, login));
-        Clock clock = Clock.systemUTC();
-        var jwt = new GitHubAppJwt(properties.privateKeyPath(), properties.clientId(), clock);
-        return new GitHubInstallationTokens(api, jwt, accounts, currentOrg::require, clock);
+    GitHubAppJwt githubAppJwt(GitHubProperties properties) {
+        return new GitHubAppJwt(properties.privateKeyPath(), properties.clientId(), Clock.systemUTC());
+    }
+
+    @Bean
+    GitHubInstallationTokens githubInstallationTokens(GitHubApi api, GitHubAppJwt jwt, GitHubConnectionStore connections) {
+        return new GitHubInstallationTokens(api, jwt, connections::hasAny, connections::isConnected, Clock.systemUTC());
+    }
+
+    @Bean
+    GitHubUserAuthorization githubUserAuthorization(GitHubProperties properties, GitHubApi api, ObjectMapper mapper,
+            ObservationRegistry observations) {
+        return new GitHubUserAuthorization(properties, api, mapper, observations);
+    }
+
+    @Bean
+    GitHubConnections githubConnections(GitHubProperties properties, GitHubApi api, GitHubAppJwt jwt,
+            GitHubUserAuthorization users, GitHubConnectionStore connections) {
+        return new GitHubConnections(properties, api, jwt, users, connections, Clock.systemUTC());
     }
 
     @Bean

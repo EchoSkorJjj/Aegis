@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.Mockito;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -25,6 +26,7 @@ class GitHubAppConfigTest {
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withUserConfiguration(GitHubAppConfig.class, PrProviders.class)
             .withBean(CurrentOrg.class)
+            .withBean(GitHubConnectionStore.class, () -> Mockito.mock(GitHubConnectionStore.class))
             .withBean(ObjectMapper.class, () -> JsonMapper.builder().build())
             .withBean(ObservationRegistry.class, () -> ObservationRegistry.NOOP);
 
@@ -49,41 +51,52 @@ class GitHubAppConfigTest {
         Path key = GitHubAppPrProviderTest.writeKey(temporary, GitHubAppPrProviderTest.generateKey());
         enabled().withPropertyValues("aegis.actions.github.private-key-path=" + key,
                 "aegis.actions.github.api-base-url=https://github.example/api/v3",
-                "aegis.actions.github.hosts=github.example",
-                "aegis.actions.github.allowed-accounts=Sandbox,SECOND=00000000-0000-0000-0000-00000000a001").run(context -> {
+                "aegis.actions.github.web-base-url=https://github.example",
+                "aegis.actions.github.callback-url=https://aegis.example/admin/integrations/github/callback",
+                "aegis.actions.github.hosts=github.example").run(context -> {
                     assertThat(context).hasNotFailed().hasSingleBean(PrProvider.class)
-                            .hasSingleBean(RepositoryReadAccess.class);
+                            .hasSingleBean(RepositoryReadAccess.class).hasSingleBean(GitHubConnections.class);
                     GitHubProperties props = context.getBean(GitHubProperties.class);
                     assertThat(props.enabled()).isTrue();
                     assertThat(props.clientId()).isEqualTo("test-client");
+                    assertThat(props.clientSecret()).isEqualTo("test-client-secret");
                     assertThat(props.privateKeyPath()).isEqualTo(key);
                     assertThat(props.apiBaseUrl().toString()).isEqualTo("https://github.example/api/v3");
-                    assertThat(props.allowedAccounts())
-                            .containsExactlyInAnyOrder("sandbox", "second=00000000-0000-0000-0000-00000000a001");
+                    assertThat(props.webBaseUrl().toString()).isEqualTo("https://github.example");
+                    assertThat(props.callbackUrl().toString())
+                            .isEqualTo("https://aegis.example/admin/integrations/github/callback");
                     var repo = new RepositoryRef("github.example", "sandbox/repo");
                     assertThat(context.getBean(PrProviders.class).forRepository(repo).id()).isEqualTo("github");
                 });
     }
 
     @Test
-    void anAccountBindingThatIsNotAnOrganizationIdFailsAtStartup() throws Exception {
-        Path key = GitHubAppPrProviderTest.writeKey(temporary, GitHubAppPrProviderTest.generateKey());
-        enabled().withPropertyValues("aegis.actions.github.private-key-path=" + key,
-                "aegis.actions.github.allowed-accounts=sandbox=payments-team").run(context ->
-                assertThat(context).hasFailed().getFailure()
-                        .hasRootCauseMessage("allowed-accounts entry for sandbox must bind it to an organization id (a UUID)"));
-    }
-
-    @Test
-    void enabledDefaultsToGithubAndEmptyAllowList() throws Exception {
+    void enabledDefaultsToGithubAndTheLocalFrontend() throws Exception {
         Path key = GitHubAppPrProviderTest.writeKey(temporary, GitHubAppPrProviderTest.generateKey());
         enabled().withPropertyValues("aegis.actions.github.private-key-path=" + key).run(context -> {
             assertThat(context).hasNotFailed();
             GitHubProperties props = context.getBean(GitHubProperties.class);
             assertThat(props.apiBaseUrl().toString()).isEqualTo("https://api.github.com");
+            assertThat(props.webBaseUrl().toString()).isEqualTo("https://github.com");
+            assertThat(props.callbackUrl().toString())
+                    .isEqualTo("http://localhost:3000/admin/integrations/github/callback");
             assertThat(props.hosts()).containsExactly("github.com");
-            assertThat(props.allowedAccounts()).isEmpty();
         });
+    }
+
+    @Test
+    void enabledRequiresClientSecret() {
+        runner.withPropertyValues("aegis.actions.github.enabled=true", "aegis.actions.github.client-id=test-client")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasRootCauseMessage("GitHub App client-secret is required when enabled"));
+    }
+
+    @Test
+    void theClientSecretIsNeverPrinted() throws Exception {
+        Path key = GitHubAppPrProviderTest.writeKey(temporary, GitHubAppPrProviderTest.generateKey());
+        enabled().withPropertyValues("aegis.actions.github.private-key-path=" + key).run(context ->
+                assertThat(context.getBean(GitHubProperties.class).toString())
+                        .contains("test-client").doesNotContain("test-client-secret"));
     }
 
     @Test
@@ -125,6 +138,7 @@ class GitHubAppConfigTest {
     }
 
     private ApplicationContextRunner enabled() {
-        return runner.withPropertyValues("aegis.actions.github.enabled=true", "aegis.actions.github.client-id=test-client");
+        return runner.withPropertyValues("aegis.actions.github.enabled=true", "aegis.actions.github.client-id=test-client",
+                "aegis.actions.github.client-secret=test-client-secret");
     }
 }

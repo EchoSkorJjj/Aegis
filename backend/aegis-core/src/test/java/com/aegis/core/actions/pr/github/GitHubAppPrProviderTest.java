@@ -17,9 +17,11 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -76,6 +78,8 @@ class GitHubAppPrProviderTest {
     private GitHubInstallationTokens tokens;
     private String account = "Sandbox";
     private UUID organization = ORG;
+    /** Each organization's connected installations, as GitHubConnectionStore would report them. */
+    private final Map<UUID, Set<Long>> connected = new ConcurrentHashMap<>();
     private long installationId = 42;
     private volatile int minted;
     private String defaultBranch = "main";
@@ -92,7 +96,9 @@ class GitHubAppPrProviderTest {
         server.createContext("/", this::respond);
         server.setExecutor(handlers);
         server.start();
-        configure(Set.of("sandbox"));
+        connected.put(ORG, ConcurrentHashMap.newKeySet());
+        connected.get(ORG).add(42L);
+        configure();
     }
 
     @AfterEach
@@ -101,7 +107,7 @@ class GitHubAppPrProviderTest {
         handlers.shutdownNow();
     }
 
-    private void configure(Set<String> accounts) throws Exception {
+    private void configure() throws Exception {
         Path key = writeKey(temporary, keys);
         var jwt = new GitHubAppJwt(key, "test-client-id", clock);
         var observations = ObservationRegistry.create();
@@ -118,7 +124,8 @@ class GitHubAppPrProviderTest {
         });
         var api = new GitHubApi(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/v3"),
                 MAPPER, observations);
-        tokens = new GitHubInstallationTokens(api, jwt, GitHubAccounts.parse(accounts), () -> organization, clock);
+        tokens = new GitHubInstallationTokens(api, jwt, () -> !connectedTo(organization).isEmpty(),
+                id -> connectedTo(organization).contains(id), clock);
         provider = new GitHubAppPrProvider(api, tokens, Set.of("github.com"));
     }
 
@@ -187,6 +194,7 @@ class GitHubAppPrProviderTest {
         assertThat(tokens.forRepository("sandbox/repo", Access.PULL_REQUEST)).isEqualTo(TOKEN + "2");
         assertThat(tokens.forRepository("sandbox/other", Access.PULL_REQUEST)).isEqualTo(TOKEN + "3");
         installationId = 99;
+        connected.get(ORG).add(99L);
         assertThat(tokens.forRepository("sandbox/repo", Access.PULL_REQUEST)).isEqualTo(TOKEN + "4");
         assertThat(minted).isEqualTo(4);
         assertThat(requests).filteredOn(request -> request.uri().getPath().endsWith("/installation")).hasSize(5);
@@ -213,26 +221,29 @@ class GitHubAppPrProviderTest {
     }
 
     @Test
-    void emptyAllowListRefusesWithoutAnyHttpCall() throws Exception {
-        configure(Set.of());
+    void anOrganizationWithNothingConnectedIsRefusedWithoutAnyHttpCall() {
+        connected.clear();
         assertThatThrownBy(() -> provider.openDraftPullRequest(draft(null)))
-                .isInstanceOf(ApiExceptions.Forbidden.class).hasMessageContaining("allowed-accounts");
+                .isInstanceOf(ApiExceptions.Forbidden.class)
+                .hasMessage("GitHub isn't connected to this organization; " + GitHubInstallationTokens.CONNECT_HINT);
         assertThat(requests).isEmpty();
     }
 
     @Test
-    void disallowedAccountRefusesBeforeMintingToken() {
-        account = "somebody-else";
+    void anInstallationTheOrganizationDidNotConnectIsRefusedBeforeMintingAToken() {
+        installationId = 43;
         assertThatThrownBy(() -> provider.openDraftPullRequest(draft(null)))
-                .isInstanceOf(ApiExceptions.Forbidden.class).hasMessageContaining("allowed-accounts");
+                .isInstanceOf(ApiExceptions.Forbidden.class)
+                .hasMessageContaining("The Aegis GitHub App on Sandbox isn't connected to this organization");
         assertThat(requests).hasSize(1);
         assertThat(minted).isZero();
     }
 
     @Test
-    void accountIsRecheckedBeforeReusingCachedToken() {
+    void theConnectionIsRecheckedBeforeReusingACachedToken() {
         tokens.forRepository("sandbox/repo", Access.PULL_REQUEST);
-        account = "somebody-else";
+        connected.get(ORG).add(7L); // still connected to something, just not this installation
+        connected.get(ORG).remove(42L);
         assertThatThrownBy(() -> tokens.forRepository("sandbox/repo", Access.PULL_REQUEST)).isInstanceOf(ApiExceptions.Forbidden.class);
         assertThat(minted).isEqualTo(1);
     }
@@ -521,9 +532,10 @@ class GitHubAppPrProviderTest {
                 .isEqualTo("the Aegis GitHub App is not installed on sandbox or can't reach this repository");
 
         failurePath = null;
-        account = "somebody-else";
+        installationId = 43;
         assertThat(readAccess().grant(github("https://github.com/sandbox/repo")).unavailable())
-                .isEqualTo("the Aegis GitHub App is not enabled for sandbox in this organization");
+                .isEqualTo("the Aegis GitHub App on sandbox isn't connected to this organization; "
+                        + GitHubInstallationTokens.CONNECT_HINT);
 
         failurePath = "/installation";
         failureStatus = 500;
@@ -540,29 +552,29 @@ class GitHubAppPrProviderTest {
     }
 
     @Test
-    void anAccountBoundToOneOrganizationIsRefusedToAnother() throws Exception {
-        configure(Set.of("sandbox=" + ORG));
+    void anInstallationOneOrganizationConnectedIsRefusedToAnother() {
         assertThat(tokens.forRepository("sandbox/repo", Access.READ)).isEqualTo(TOKEN + "1");
 
-        organization = OTHER_ORG;
+        organization = OTHER_ORG; // nothing connected
         assertThatThrownBy(() -> tokens.forRepository("sandbox/repo", Access.READ))
-                .isInstanceOf(ApiExceptions.Forbidden.class).hasMessageContaining("not enabled for this organization");
+                .isInstanceOf(ApiExceptions.Forbidden.class).hasMessageContaining("isn't connected to this organization");
+        connected.put(OTHER_ORG, Set.of(7L)); // something else connected
         assertThatThrownBy(() -> provider.openDraftPullRequest(draft(null)))
-                .isInstanceOf(ApiExceptions.Forbidden.class).hasMessageContaining("not enabled for this organization");
+                .isInstanceOf(ApiExceptions.Forbidden.class).hasMessageContaining("isn't connected to this organization");
         assertThat(readAccess().grant(github("https://github.com/sandbox/repo")).credential()).isNull();
         assertThat(minted).isEqualTo(1);
     }
 
     @Test
-    void anAccountCanBeBoundToSeveralOrganizationsAndABindingMustBeAnId() {
-        var accounts = GitHubAccounts.parse(Set.of("Sandbox=" + ORG, "sandbox=" + OTHER_ORG, "open"));
-        assertThat(accounts.unbound()).containsExactly("open");
-        accounts.requireAllowed("SANDBOX", () -> OTHER_ORG);
-        accounts.requireAllowed("open", () -> OTHER_ORG);
-        assertThatThrownBy(() -> accounts.requireAllowed("sandbox", () -> UUID.randomUUID()))
-                .isInstanceOf(ApiExceptions.Forbidden.class);
-        assertThatThrownBy(() -> GitHubAccounts.parse(Set.of("sandbox=not-an-id")))
-                .isInstanceOf(IllegalStateException.class).hasMessageContaining("organization id");
+    void severalOrganizationsCanEachConnectTheSameInstallation() {
+        connected.put(OTHER_ORG, Set.of(42L));
+        assertThat(tokens.forRepository("sandbox/repo", Access.READ)).isNotBlank();
+        organization = OTHER_ORG;
+        assertThat(tokens.forRepository("sandbox/repo", Access.READ)).isNotBlank();
+    }
+
+    private Set<Long> connectedTo(UUID org) {
+        return connected.getOrDefault(org, Set.of());
     }
 
     private GitHubRepositoryReadAccess readAccess() {

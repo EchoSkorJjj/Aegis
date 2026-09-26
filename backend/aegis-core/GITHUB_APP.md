@@ -28,16 +28,18 @@ All keys are under `aegis.actions.github` in `application.yml`.
 |---|---|---|
 | `enabled` | `AEGIS_GITHUB_ENABLED` | `false` |
 | `api-base-url` | `AEGIS_GITHUB_API_URL` | `https://api.github.com` |
+| `web-base-url` | `AEGIS_GITHUB_WEB_URL` | `https://github.com` (the sign-in when connecting) |
 | `client-id` | `AEGIS_GITHUB_APP_CLIENT_ID` | Required when enabled |
+| `client-secret` | `AEGIS_GITHUB_APP_CLIENT_SECRET` | Required when enabled; only for connecting |
 | `private-key-path` | `AEGIS_GITHUB_APP_PRIVATE_KEY_PATH` | Required when enabled; external PKCS#8 PEM |
+| `callback-url` | `AEGIS_GITHUB_CALLBACK_URL` | `http://localhost:3000/admin/integrations/github/callback` |
 | `hosts` | `AEGIS_GITHUB_HOSTS` | `github.com` |
-| `allowed-accounts` | `AEGIS_GITHUB_ALLOWED_ACCOUNTS` | Empty: refuse every operation |
 
-`allowed-accounts` entries are `login=<organization id>` — only that Aegis organization may use the App
-on the account (repeat the entry for each organization) — or a bare `login`, which **every** organization
-may use: fine while one organization uses the deployment, and logged as a warning at startup. A binding
-that is not a UUID stops startup. Comma-separated host and account lists are case-insensitive. An enabled provider requires a client ID,
-a valid API URL and a readable, unencrypted RSA PKCS#8 key of at least 2048 bits at startup. When off,
+Which installations each Aegis organization may use is **not configuration**: its organization admin
+connects them under Organization → Integrations (see "Tenant security" below), and aegis-core records them
+in `github_connections` (V22). `callback-url` must equal the App's registered callback URL. Comma-separated
+host lists are case-insensitive. An enabled provider requires a client ID, a client secret, valid API and
+web URLs and a readable, unencrypted RSA PKCS#8 key of at least 2048 bits at startup. When off,
 the configuration and provider beans are absent and no key is needed. `hosts` selects repository
 hosts; it does not choose an API origin from user input. This deployment uses one configured API
 origin, including an optional Enterprise `/api/v3` prefix. HTTPS is required except for loopback HTTP
@@ -91,12 +93,24 @@ without its response reaching Aegis. Rate-limit responses fail safely; the propo
 
 ## Tenant security and key operations
 
-**Bind every account to its organization.** With one App installed on multiple accounts, a tenant could
-otherwise link another tenant's repository and have Aegis read it (an SBOM import) or propose changes to
-it through the victim's installation. Empty lists refuse all operations; unmatched accounts are rejected
-before token minting; a bound account (`login=<organization id>`) is refused to every other organization
-— for pull requests and reads alike. A bare `login` is still shared by every Aegis tenant, so use one
-only while a single organization uses the deployment.
+**Every installation is connected per organization.** GitHub knows only that the App is installed on an
+account, never which Aegis organization that installation is for. With one App installed on many
+accounts, a tenant could otherwise link another tenant's repository and have Aegis read it (an SBOM
+import) or propose changes to it through the victim's installation. So no installation token is minted —
+for pull requests and reads alike — unless the caller's organization has connected that installation.
+
+Connecting (`GitHubConnections`, `/api/integrations/github`, organization admins only):
+
+1. Aegis records a one-time state bound to the admin and their organization (only its SHA-256 is stored;
+   it lives ten minutes and is consumed on use) and sends them to GitHub to sign in to the App.
+2. GitHub sends them back to `callback-url` with a code; aegis-core exchanges it (client ID + secret) for
+   a short-lived user token and asks GitHub which of the App's installations the admin can see.
+3. It connects only those the admin **controls**: one on their own account (the account is the signed-in
+   user), or on a GitHub organization they are an active **admin** of (`GET /user/memberships/orgs/{org}`,
+   which needs the App's read access to organization members). Seeing an installation is not enough —
+   every member of a GitHub organization can see its installations. The rest are reported with the reason.
+4. The user token is revoked and never stored or logged. Several Aegis organizations may each connect the
+   same installation, each proven separately; disconnecting is one organization's own.
 
 The operator-maintained binding is an interim. Before production, an org admin should explicitly verify
 and bind an installation to their Aegis org through the App's installation flow.
@@ -125,11 +139,15 @@ configuration dumps, request headers or token responses.
 1. Go to Settings → Developer settings → GitHub Apps → New GitHub App. Choose the intended App owner
    and installation visibility. Disable webhooks; this spike does not consume them. The Homepage URL is
    then the only required field, and GitHub only links it from the App's page, so the project
-   repository's URL will do. Leave the Callback URL, Setup URL and user-authorization options empty:
-   Aegis acts as the App through installation tokens, never as a user.
+   repository's URL will do. Set the **Callback URL** to the frontend page GitHub sends an organization
+   admin back to when they connect: `http://localhost:3000/admin/integrations/github/callback` locally
+   (it must equal `callback-url`). Leave "Request user authorization (OAuth) during installation" off —
+   Aegis starts that sign-in itself, with a state it can check. The Setup URL is optional; pointing it at
+   `http://localhost:3000/admin/integrations` brings people back to Aegis after installing.
 2. Grant repository **Contents: Read & write**, **Pull requests: Read & write**, and mandatory
-   **Metadata: Read**. Leave every other permission at No access, especially Workflows,
-   Administration and Actions.
+   **Metadata: Read**. To let admins connect installations on GitHub *organizations*, also grant
+   organization **Members: Read-only** (Aegis only asks whether the person connecting is an admin).
+   Leave every other permission at No access, especially Workflows, Administration and Actions.
 3. Install on **Only select repositories** (the App's settings → **Install App** → **Install** next to
    the account that owns the repositories), initially one disposable sandbox repository. Record its
    owner/account login for the spike allow-list. See GitHub's
@@ -145,28 +163,20 @@ configuration dumps, request headers or token responses.
 ## Running it
 
 There is no GitHub token to create: the App's client ID and private key mint a short-lived installation
-token per repository. The App's **client secret is not used** — it is for acting as a signed-in GitHub
-user, which Aegis never does — so don't configure it; you can delete it from the App's settings. Keep the
-key **outside the repository**, converted once to PKCS#8
+token per repository. The App's **client secret** is used for one thing only: the organization admin's
+GitHub sign-in when they connect an installation. Generate one on the App's settings page and keep it
+out of the repository like the key. Keep the key **outside the repository**, converted once to PKCS#8
 (`openssl pkcs8 -topk8 -nocrypt -in app.pem -out app.pkcs8.pem`).
 
-`AEGIS_GITHUB_ALLOWED_ACCOUNTS` lists the GitHub accounts the App is installed on — the owner in
-`github.com/<owner>/<repo>`, any case — each bound to the Aegis organization allowed to use it:
-`EchoSkorJjj=<organization id>`, comma-separated for several. GitHub knows only that the App is installed
-on an account, not which Aegis organization that installation is for; without this binding any
-organization on the deployment could clone or open pull requests on those repositories. It is a static
-stand-in for a per-organization "Connect GitHub" flow (install, then prove control of the installation
-with a GitHub user sign-in, then store installation → organization). Your organization's id is the `orgId` that
-`http://localhost:3000/api/auth/me` shows while you are signed in to it. A bare login lets every
-organization use that account (fine for a single-organization deployment; aegis-core warns at startup);
-while the list is empty, every GitHub operation is refused.
+Then, in Aegis, an organization admin opens **Organization → Integrations**, installs the App on the
+GitHub account that owns the repositories (choosing only those repositories), and clicks **Connect
+GitHub**. Until they do, every GitHub operation in that organization is refused with that hint.
 
 - **aegis-core run locally** (IDE or `./mvnw spring-boot:run`): Spring Boot does not read `.env` files,
-  so export `AEGIS_GITHUB_ENABLED=true`, `AEGIS_GITHUB_APP_CLIENT_ID`, `AEGIS_GITHUB_APP_PRIVATE_KEY_PATH`
-  (absolute path to the PKCS#8 file) and `AEGIS_GITHUB_ALLOWED_ACCOUNTS` (the repository owner's login,
-  bound to your organization as `login=<organization id>`) in the shell or run configuration.
+  so export `AEGIS_GITHUB_ENABLED=true`, `AEGIS_GITHUB_APP_CLIENT_ID`, `AEGIS_GITHUB_APP_CLIENT_SECRET` and
+  `AEGIS_GITHUB_APP_PRIVATE_KEY_PATH` (absolute path to the PKCS#8 file) in the shell or run configuration.
 - **docker compose**: put `AEGIS_GITHUB_ENABLED=true`, `AEGIS_GITHUB_APP_CLIENT_ID=…` and
-  `AEGIS_GITHUB_ALLOWED_ACCOUNTS=…` in the repo-root `.env`, and mount the key at the path compose
+  `AEGIS_GITHUB_APP_CLIENT_SECRET=…` in the repo-root `.env`, and mount the key at the path compose
   already points the container to, in a `docker-compose.override.yml` next to `docker-compose.yml`.
   Both files are git-ignored, and compose merges the override automatically:
 
@@ -215,17 +225,18 @@ the particular Enterprise Server release before deployment.
 When an operator is ready for a **separately authorized** real sandbox exercise:
 
 1. Register/install the least-privilege App above, use a disposable repository containing one sample
-   file, and supply only that sandbox account in `allowed-accounts`.
+   file, and connect only that sandbox account under Organization → Integrations.
 2. Enable the adapter in an isolated local environment with an external key (see "Running it" below).
    Link a service to the sandbox repository, then draft and approve a safe-upgrade proposal through
    `/api/actions/upgrade-proposals`. Do not add an unauthenticated test endpoint.
 3. Verify the returned URL, draft state, default base, exact diff (only the version changes) and bot
    author. Check that the default branch and workflow files remain untouched.
-4. Repeat with a disallowed account to verify refusal, then disable the adapter, close the draft,
+4. Repeat from an organization that has not connected the account to verify refusal, then disable the adapter, close the draft,
    remove the sandbox branch and uninstall the sandbox installation when finished. Record sanitized
    evidence without JWTs, installation tokens or key material.
 
-Open questions for production: org-installation verification UX; App ownership and final slug;
+Open questions for production: disconnecting automatically when the App is uninstalled on GitHub (needs
+webhooks); App ownership and final slug;
 approval permissions/audit schema; idempotency and partial-failure cleanup; atomic multi-file commits;
 cache invalidation on revocation; GitHub Enterprise versions; secret-manager and rotation ownership.
 
