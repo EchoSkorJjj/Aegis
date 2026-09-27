@@ -3,7 +3,7 @@ import type { BusinessService, Role, SbomImportResult, SbomImportSource } from "
 
 const IMPORTED: SbomImportResult = {
   serviceId: "repository-service", componentsCreated: 3, componentsMatched: 1, serviceComponentsLinked: 4,
-  dependenciesCreated: 2, componentsSkipped: 0,
+  serviceComponentsUnlinked: 0, dependenciesCreated: 2, dependenciesRemoved: 0, componentsSkipped: 0,
 };
 const REPOSITORY = "https://github.com/acme/payments";
 
@@ -59,8 +59,10 @@ async function fixture(page: Page, role: Role, { assigned = false, linked = fals
       if (importFailure && !body.token) {
         return route.fulfill({ status: 400, json: { message: importFailure } });
       }
+      // A re-import unlinks what the repository no longer declares (an upgraded library's old version).
+      const reimport = service.sbomImportedAt !== null;
       service = { ...service, sbomImportedAt: "2026-09-25T15:24:00Z", sbomImportSource: body.token ? "TOKEN" : "PUBLIC" };
-      return route.fulfill({ json: IMPORTED });
+      return route.fulfill({ json: reimport ? { ...IMPORTED, serviceComponentsUnlinked: 2 } : IMPORTED });
     }
     if (path === "/api/inventory/services/repository-service") {
       return route.fulfill({ json: service });
@@ -137,7 +139,9 @@ test("a repository that needed a token last time asks for it before importing, n
   await dialog.getByRole("button", { name: "Import SBOM", exact: true }).click();
 
   await expect(dialog).toBeHidden();
-  await expect(page.getByText("SBOM imported — 3 new", { exact: false })).toBeVisible();
+  await expect(
+    page.getByText("SBOM imported — 3 new, 1 matched, 4 linked, 2 unlinked (no longer in the repository), 2 dependencies."),
+  ).toBeVisible();
   expect(writes).toEqual([
     { method: "POST", path: "/api/inventory/services/repository-service/sbom/from-repository", body: { token: "glpat-readonly" } },
   ]);

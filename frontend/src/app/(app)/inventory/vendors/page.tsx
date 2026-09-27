@@ -1,6 +1,7 @@
 "use client";
 
 import { ResourceManager } from "@/components/app/inventory/resource-manager";
+import { VendorUsedBy } from "@/components/app/inventory/used-by";
 import type { Column, ListQuery } from "@/components/app/inventory/resource-manager";
 import { inventoryApi } from "@/lib/api";
 import type { ThirdPartyVendor } from "@/lib/types";
@@ -27,13 +28,16 @@ const columns: Column<ThirdPartyVendor>[] = [
   },
 ];
 
+const usedBy = { label: "Used by", render: (vendor: ThirdPartyVendor) => <VendorUsedBy vendor={vendor} /> };
+
 export default function VendorsPage() {
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Vendors</h1>
         <p className="text-sm text-muted-foreground">
-          Third-party vendors your services depend on — matched to vendor-status outages.
+          Third-party vendors your services depend on — matched to vendor-status outages.{" "}
+          <span className="font-medium text-foreground">Used by</span> shows every service using one, outage or not.
         </p>
       </div>
 
@@ -49,6 +53,7 @@ export default function VendorsPage() {
         describe={(vendor) => vendor.name}
         searchPlaceholder="Vendor name…"
         defaultSort="name,asc"
+        rowDetail={usedBy}
       />
     </div>
   );

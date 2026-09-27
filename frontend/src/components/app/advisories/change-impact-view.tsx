@@ -4,16 +4,12 @@ import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, Info } from "lucide-react";
 
-import {
-  UpgradeAction,
-  upgradeCandidates,
-  upgradeKey,
-  useUpgradeProposals,
-} from "@/components/app/responses/upgrade-action";
+import { MemoAction, useLiveMemo } from "@/components/app/responses/memo-action";
+import { ResponseAction, useResponses } from "@/components/app/responses/response-action";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ApiError, scoringApi } from "@/lib/api";
-import { canReadInventory, canRespondForService } from "@/lib/roles";
+import { canReadInventory, canRespondForService, respondsForAnyService } from "@/lib/roles";
 import type {
   AffectedProductEvidence,
   BusinessCriticality,
@@ -22,12 +18,12 @@ import type {
   IdentityMatch,
   ImpactTier,
   MatchConfidence,
+  RiskTicket,
   ScoredService,
   ScoreFactor,
   ScoreFactorKind,
   SeverityInput,
   SignalType,
-  UpgradeProposal,
   VersionMatchState,
 } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
@@ -112,9 +108,12 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
     };
   }, [authLoading, canRead, user?.orgId, signalId]);
 
-  // A vulnerability can be remediated by an upgrade: link what is already drafted, offer to draft the rest.
-  const isVulnerability = status === "ok" && data?.change.signalType === "VULNERABILITY";
-  const upgrades = useUpgradeProposals(signalId, isVulnerability);
+  // A vulnerability or a vendor outage gets a response per service (its risk ticket, and for a vulnerability
+  // the upgrade pull request), and a regulator notification when it is material.
+  const respondable =
+    status === "ok" && (data?.change.signalType === "VULNERABILITY" || data?.change.signalType === "VENDOR_OUTAGE");
+  const responses = useResponses(signalId, respondable);
+  const memo = useLiveMemo(signalId, respondable);
 
   const backLink = (
     <Link
@@ -164,6 +163,8 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
   const { change, matchedComponentCount, matchedVendorCount, services } = data;
   const type = SIGNAL_TYPE[change.signalType];
   const needsReview = services.filter((s) => s.confidence === "POSSIBLE").length;
+  const materialCount = services.filter((s) => s.material).length;
+  const roles = user?.roles ?? [];
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6">
@@ -203,6 +204,16 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
         </span>
       </div>
 
+      {respondable && memo !== undefined && (memo || materialCount > 0) && (
+        <MemoAction
+          changeSignalId={signalId}
+          kind={change.signalType === "VENDOR_OUTAGE" ? "MAJOR_INCIDENT" : "CYBER_THREAT"}
+          materialCount={materialCount}
+          existing={memo}
+          canDraft={respondsForAnyService(roles)}
+        />
+      )}
+
       {services.length === 0 ? (
         <StateCard>
           {matchedComponentCount === 0 && matchedVendorCount === 0
@@ -214,24 +225,16 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
           <h2 className="text-sm font-medium text-muted-foreground">
             Impacted services ({services.length})
           </h2>
-          {services.map((scored) => (
-            <ServiceCard
-              key={scored.service.id}
-              scored={scored}
-              upgrade={
-                isVulnerability
-                  ? {
-                      signalId,
-                      proposals: upgrades,
-                      canDraft: canRespondForService(
-                        user?.roles ?? [],
-                        scored.owners.some((owner) => owner.userId === user?.id),
-                      ),
-                    }
-                  : null
-              }
-            />
-          ))}
+          {services.map((scored) => {
+            const canDraft = canRespondForService(roles, scored.owners.some((owner) => owner.userId === user?.id));
+            return (
+              <ServiceCard
+                key={scored.service.id}
+                scored={scored}
+                response={respondable ? { signalId, responses, canDraft } : null}
+              />
+            );
+          })}
         </div>
       )}
     </div>
@@ -239,18 +242,17 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
 }
 
 /**
- * What a service card needs to offer upgrades: the change, the proposals already drafted for it (null
- * while loading), and whether the caller may draft one for this service.
+ * What a service card needs to offer a response: the change, the responses already drafted for it by service
+ * (null while loading), and whether the caller may draft one for this service.
  */
-type UpgradeContext = {
+type ResponseContext = {
   signalId: string;
-  proposals: Map<string, UpgradeProposal> | null;
+  responses: Map<string, RiskTicket> | null;
   canDraft: boolean;
 };
 
-function ServiceCard({ scored, upgrade }: { scored: ScoredService; upgrade: UpgradeContext | null }) {
+function ServiceCard({ scored, response }: { scored: ScoredService; response: ResponseContext | null }) {
   const confidence = CONFIDENCE[scored.confidence];
-  const candidates = upgrade ? upgradeCandidates(scored.evidence) : [];
   return (
     <div className="rounded-lg border">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3">
@@ -272,27 +274,18 @@ function ServiceCard({ scored, upgrade }: { scored: ScoredService; upgrade: Upgr
       </div>
       <div className="space-y-3 p-4">
         <WhyThisScore scored={scored} />
-        {scored.evidence.map((evidence, index) => {
-          const candidate = candidates[index];
-          return (
-            <Evidence
-              key={index}
-              evidence={evidence}
-              action={
-                upgrade?.proposals && candidate ? (
-                  <UpgradeAction
-                    changeSignalId={upgrade.signalId}
-                    serviceId={scored.service.id}
-                    candidate={candidate}
-                    existing={upgrade.proposals.get(upgradeKey(scored.service.id, candidate.component.id))}
-                    canDraft={upgrade.canDraft}
-                  />
-                ) : null
-              }
-            />
-          );
-        })}
+        {scored.evidence.map((evidence, index) => (
+          <Evidence key={index} evidence={evidence} />
+        ))}
       </div>
+      {response?.responses && (
+        <ResponseAction
+          changeSignalId={response.signalId}
+          serviceId={scored.service.id}
+          existing={response.responses.get(scored.service.id)}
+          canDraft={response.canDraft}
+        />
+      )}
     </div>
   );
 }
@@ -449,7 +442,7 @@ function describeSeverity(severity: SeverityInput) {
   return severity.label ? `unrecognised (“${severity.label}”)` : "not published";
 }
 
-function Evidence({ evidence, action }: { evidence: EvidenceChain; action?: React.ReactNode }) {
+function Evidence({ evidence }: { evidence: EvidenceChain }) {
   return (
     <div className="rounded-md border bg-muted/20 p-3">
       {evidence.kind === "VENDOR_DEPENDENCY" && evidence.vendor ? (
@@ -476,7 +469,6 @@ function Evidence({ evidence, action }: { evidence: EvidenceChain; action?: Reac
         </>
       )}
       <p className="mt-2 text-xs text-muted-foreground">{evidence.explanation}</p>
-      {action}
     </div>
   );
 }

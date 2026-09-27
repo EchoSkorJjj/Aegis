@@ -255,30 +255,35 @@ export interface DirectoryMember {
   enabled: boolean;
 }
 
-/** A service impacted by a component — directly, or transitively through a dependency chain. */
-export interface ComponentImpactedService {
-  service: BusinessService;
-  owners: Owner[];
-  /** True only when the service uses the queried component itself, false when reached via a dependency. */
-  direct: boolean;
-  /** The component the service actually depends on directly (the queried one when `direct`). */
-  viaComponent: SoftwareComponent;
-}
-
-export interface ComponentImpact {
-  component: SoftwareComponent;
-  services: ComponentImpactedService[];
-}
-
-/** A service impacted directly (e.g. through a vendor it uses). */
-export interface ImpactedService {
+/** A service using something, with the people accountable for it. */
+export interface UsingService {
   service: BusinessService;
   owners: Owner[];
 }
 
-export interface VendorImpact {
+/** Every service linking a vendor (vendors are linked directly). Mirrors aegis-core VendorUsageResponse. */
+export interface VendorUsage {
   vendor: ThirdPartyVendor;
-  services: ImpactedService[];
+  services: UsingService[];
+}
+
+/**
+ * One service using one version of a package: directly, or `through` its own dependency graph — from the component
+ * the service links down to the one that depends on this version, the shortest way.
+ */
+export interface PackageUse {
+  service: BusinessService;
+  owners: Owner[];
+  component: SoftwareComponent;
+  direct: boolean;
+  through: SoftwareComponent[];
+}
+
+/** Every service using a package, any version of it, by service then version. Mirrors aegis-core PackageUsageResponse. */
+export interface PackageUsage {
+  ecosystem: string;
+  name: string;
+  uses: PackageUse[];
 }
 
 /** What a CycloneDX SBOM import changed on a service. Mirrors aegis-core SbomImportResult. */
@@ -289,7 +294,11 @@ export interface SbomImportResult {
   /** Components dropped because they had no resolvable version. */
   componentsSkipped: number;
   dependenciesCreated: number;
+  /** Dependency edges a re-import from the repository removed because the repository no longer declares them. */
+  dependenciesRemoved: number;
   serviceComponentsLinked: number;
+  /** Direct dependencies a re-import from the repository unlinked because the repository no longer declares them. */
+  serviceComponentsUnlinked: number;
 }
 
 // ---- aegis-core change signals (unified advisories / vendor outages / security news) ---------
@@ -493,7 +502,23 @@ export interface ChangeImpactResponse {
  */
 export type UpgradeProposalStatus = "PROPOSED" | "OPENING" | "OPENED" | "FAILED" | "DISMISSED";
 
-/** GET /api/actions/upgrade-proposals/{id} — the proposal as stored, plus its service's current name. */
+/** One package moved from one version to another in one manifest of the service's repository. */
+export interface UpgradeEdit {
+  componentId: string;
+  ecosystem: string;
+  packageName: string;
+  fromVersion: string;
+  toVersion: string;
+  /** Repository-relative: client/package.json, pom.xml. */
+  manifestPath: string;
+}
+
+/**
+ * GET /api/actions/upgrade-proposals/{id} — one upgrade pull request as stored, plus its service's current
+ * name. It edits every manifest that declares an affected package, and belongs to a response (the risk
+ * ticket for the same vulnerability and service); `riskTicketId` is null only for one drafted on its own
+ * before responses existed, which is still decided on its own.
+ */
 export interface UpgradeProposal {
   id: string;
   serviceId: string;
@@ -501,17 +526,14 @@ export interface UpgradeProposal {
   serviceName: string | null;
   changeSignalId: string;
   vulnerabilityId: string;
-  componentId: string;
-  ecosystem: string;
-  packageName: string;
-  fromVersion: string;
-  toVersion: string;
-  manifestPath: string;
+  riskTicketId: string | null;
+  /** In order; at least one. */
+  edits: UpgradeEdit[];
   repositoryUrl: string;
   baseBranch: string | null;
   headBranch: string;
   matchConfidence: MatchConfidence;
-  /** The exact pull-request title and (Markdown) body, as they will be opened. */
+  /** The exact pull-request title and (Markdown) body; a response's opens with its ticket's key in front. */
   title: string;
   body: string;
   status: UpgradeProposalStatus;
@@ -524,15 +546,6 @@ export interface UpgradeProposal {
   pullRequestNumber: string | null;
   failureMessage: string | null;
   version: number;
-}
-
-export interface ProposeUpgradeInput {
-  changeSignalId: string;
-  serviceId: string;
-  /** The vulnerable component (the first entry of a direct evidence chain's component path). */
-  componentId: string;
-  /** Defaults to the ecosystem's manifest at the repository root (pom.xml, package.json, requirements.txt). */
-  manifestPath?: string;
 }
 
 /**
@@ -563,8 +576,8 @@ export interface UpgradeRecommendation {
   component: MatchedComponentRef;
   /** The direct dependency that pulls it in; null when the service uses it directly. */
   via: MatchedComponentRef | null;
-  /** The manifest declaring the direct dependency (client/package.json), when the import recorded it. */
-  manifestPath: string | null;
+  /** Every manifest declaring the direct dependency (client/package.json), as the import recorded them. */
+  manifestPaths: string[];
   confidence: MatchConfidence;
   /** Most severe first. */
   vulnerabilities: VulnerabilityRef[];
@@ -573,14 +586,31 @@ export interface UpgradeRecommendation {
   material: boolean;
   /** The lowest version that clears every advisory with a fix; null when none can be proven. */
   toVersion: string | null;
-  /** The vulnerability a draft remediates. */
+  /**
+   * The vulnerability a response answers: the most severe one a fixed version clears, else the most severe;
+   * null only when none has a change signal yet.
+   */
   changeSignalId: string | null;
   readiness: UpgradeReadiness;
   /** Why it isn't READY. */
   reason: string | null;
-  /** The upgrade already drafted for it, if any. */
-  proposal: { id: string; status: UpgradeProposalStatus; toVersion: string; pullRequestUrl: string | null } | null;
-  /** Whether you may draft it: an analyst, or one of the service's owners. */
+  /** The current pull request that upgrades it, if any, and the response it belongs to (null: drafted on its own). */
+  proposal: {
+    id: string;
+    status: UpgradeProposalStatus;
+    toVersion: string;
+    pullRequestUrl: string | null;
+    riskTicketId: string | null;
+  } | null;
+  /** The response already drafted for it: the one upgrading it, else the one for `changeSignalId` here. */
+  response: {
+    ticketId: string;
+    changeSignalId: string;
+    status: RiskTicketStatus;
+    issueKey: string | null;
+    issueUrl: string | null;
+  } | null;
+  /** Whether you may draft a response: an analyst, or one of the service's owners. */
   canDraft: boolean;
 }
 
@@ -606,4 +636,117 @@ export interface GitHubIntegration {
 export interface GitHubConnectResult {
   connected: GitHubConnection[];
   skipped: { accountLogin: string; reason: string }[];
+}
+
+export type RiskTicketStatus = "PROPOSED" | "FILING" | "FILED" | "FAILED" | "DISMISSED";
+export type TicketPriority = "HIGHEST" | "HIGH" | "MEDIUM" | "LOW" | "LOWEST";
+
+/**
+ * GET /api/actions/risk-tickets/{id} — a response (E8 story 5): the risk ticket for one change in one service,
+ * its service's current name, and its upgrade pull requests. The title, priority, due date, labels and evidence
+ * are Aegis's own; the summary, risk, impact and actions are the AI's draft (`aiDrafted`) or Aegis's plain
+ * fallback. Approving files it in the organization's Jira, then opens its pull request under the ticket's key.
+ */
+export interface RiskTicket {
+  id: string;
+  serviceId: string;
+  /** The service's current name; null only if it was deleted mid-request (its tickets go with it). */
+  serviceName: string | null;
+  changeSignalId: string;
+  signalType: SignalType;
+  changeTitle: string;
+  title: string;
+  priority: TicketPriority;
+  /** yyyy-mm-dd, from the impact tier; null when the tier sets no deadline. */
+  dueDate: string | null;
+  score: number;
+  tier: ImpactTier;
+  labels: string[];
+  summary: string;
+  risk: string;
+  impact: string;
+  actions: string[];
+  evidence: string[];
+  aiDrafted: boolean;
+  citations: string[];
+  status: RiskTicketStatus;
+  createdBy: string;
+  createdAt: string;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  dismissReason: string | null;
+  issueKey: string | null;
+  issueUrl: string | null;
+  failureMessage: string | null;
+  version: number;
+  /** Newest first; at most one isn't dismissed (the current one). Empty for a vendor outage, or nothing to automate. */
+  pullRequests: UpgradeProposal[];
+  /** One ticket only: the same ticket as ServiceNow incident fields, to paste or post. */
+  serviceNow?: Record<string, string>;
+}
+
+export type MemoKind = "MAJOR_INCIDENT" | "CYBER_THREAT";
+export type RegulatorMemoStatus = "PROPOSED" | "APPROVED" | "DISMISSED";
+
+/** A service a memo's change affects, as Aegis scored it when the memo was drafted. */
+export interface MemoAffectedService {
+  serviceId: string;
+  name: string;
+  criticality: BusinessCriticality;
+  exposure: ServiceExposure | null;
+  score: number;
+  tier: ImpactTier;
+  material: boolean;
+}
+
+/**
+ * GET /api/actions/regulator-memos/{id} — a drafted DORA notification (E8 story 6). `body` is the whole memo
+ * in Markdown, rendered from its template. Approving makes it final; Aegis never sends it.
+ */
+export interface RegulatorMemo {
+  id: string;
+  changeSignalId: string;
+  signalType: SignalType;
+  changeTitle: string;
+  kind: MemoKind;
+  reference: string;
+  /** When the organization became aware: an outage's start, or when the vulnerability was published. */
+  detectedAt: string | null;
+  services: MemoAffectedService[];
+  summary: string;
+  impact: string;
+  measures: string;
+  nextSteps: string;
+  aiDrafted: boolean;
+  citations: string[];
+  body: string;
+  status: RegulatorMemoStatus;
+  createdBy: string;
+  createdAt: string;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  dismissReason: string | null;
+  version: number;
+}
+
+/** Whether Jira is enabled on this deployment and, when connected, where this organization's risk tickets go. */
+export interface JiraIntegration {
+  enabled: boolean;
+  connected: boolean;
+  siteName: string | null;
+  siteUrl: string | null;
+  /** Null until the organization admin chooses the project (and issue type) tickets are filed in. */
+  projectKey: string | null;
+  issueType: string | null;
+  /** The organization admin who connected it (a user id). */
+  connectedBy: string | null;
+  connectedAt: string | null;
+}
+
+/** What an organization admin can choose from: the granted sites, a site's projects, and a project's issue types. */
+export interface JiraOptions {
+  sites: { cloudId: string; name: string; url: string }[];
+  cloudId: string;
+  projects: { key: string; name: string }[];
+  issueTypes: string[];
 }

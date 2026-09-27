@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { ChevronDown, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { DataPagination } from "@/components/app/data-pagination";
@@ -58,6 +58,15 @@ export type SelectFilterSpec = {
   loadOptions?: () => Promise<string[]>;
 };
 
+/**
+ * A panel a row opens below itself — "Used by" — from a button in its own column. One row's is open at a time; it
+ * mounts when opened, so it can load what it shows then.
+ */
+export type RowDetail<T> = {
+  label: string;
+  render: (row: T) => React.ReactNode;
+};
+
 /** The assembled query a page's `list` fetcher receives. Dates are already ISO instants. */
 export type ListQuery = {
   page: number;
@@ -91,6 +100,8 @@ interface ResourceManagerProps<T extends { id: string }> {
   selectFilters?: SelectFilterSpec[];
   /** Initial sort, e.g. "name,asc". */
   defaultSort?: string;
+  /** A panel each row can open below itself, for everyone who can read the list. */
+  rowDetail?: RowDetail<T>;
 }
 
 const SELECT_CLASS =
@@ -111,10 +122,12 @@ export function ResourceManager<T extends { id: string }>({
   searchPlaceholder,
   selectFilters = [],
   defaultSort,
+  rowDetail,
 }: ResourceManagerProps<T>) {
   const { user, isLoading: authLoading } = useAuth();
   const canWrite = !readOnly && canWriteInventory(user?.roles ?? []);
-  const columnCount = columns.length + (canWrite ? 1 : 0);
+  const columnCount = columns.length + (rowDetail ? 1 : 0) + (canWrite ? 1 : 0);
+  const [openDetail, setOpenDetail] = useState<string | null>(null);
 
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -413,6 +426,11 @@ export function ResourceManager<T extends { id: string }>({
                   )}
                 </TableHead>
               ))}
+              {rowDetail && (
+                <TableHead className="w-28">
+                  <span className="sr-only">{rowDetail.label}</span>
+                </TableHead>
+              )}
               {canWrite && (
                 <TableHead className="w-10 text-right">
                   <span className="sr-only">Actions</span>
@@ -445,37 +463,61 @@ export function ResourceManager<T extends { id: string }>({
               </TableRow>
             ) : data && data.content.length > 0 ? (
               data.content.map((row) => (
-                <TableRow key={row.id}>
-                  {columns.map((column) => (
-                    <TableCell key={column.header} className={column.className}>
-                      {column.render(row)}
-                    </TableCell>
-                  ))}
-                  {canWrite && (
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger
-                          render={
-                            <Button variant="ghost" size="icon-sm" aria-label={`${entityLabel} actions`}>
-                              <MoreHorizontal />
-                            </Button>
-                          }
-                        />
-                        <DropdownMenuContent align="end" className="min-w-40">
-                          <DropdownMenuItem onClick={() => openEdit(row)}>
-                            <Pencil />
-                            Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem variant="destructive" onClick={() => onDelete(row)}>
-                            <Trash2 />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
+                <Fragment key={row.id}>
+                  <TableRow>
+                    {columns.map((column) => (
+                      <TableCell key={column.header} className={column.className}>
+                        {column.render(row)}
+                      </TableCell>
+                    ))}
+                    {rowDetail && (
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-expanded={openDetail === row.id}
+                          aria-controls={`detail-${row.id}`}
+                          aria-label={`${rowDetail.label}: ${describe(row)}`}
+                          onClick={() => setOpenDetail((open) => (open === row.id ? null : row.id))}
+                        >
+                          {rowDetail.label}
+                          <ChevronDown className={cn("transition-transform", openDetail === row.id && "rotate-180")} />
+                        </Button>
+                      </TableCell>
+                    )}
+                    {canWrite && (
+                      <TableCell className="text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger
+                            render={
+                              <Button variant="ghost" size="icon-sm" aria-label={`${entityLabel} actions`}>
+                                <MoreHorizontal />
+                              </Button>
+                            }
+                          />
+                          <DropdownMenuContent align="end" className="min-w-40">
+                            <DropdownMenuItem onClick={() => openEdit(row)}>
+                              <Pencil />
+                              Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem variant="destructive" onClick={() => onDelete(row)}>
+                              <Trash2 />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    )}
+                  </TableRow>
+                  {rowDetail && openDetail === row.id && (
+                    <TableRow id={`detail-${row.id}`} className="bg-muted/30 hover:bg-muted/30">
+                      <TableCell colSpan={columnCount} className="whitespace-normal px-4 py-3">
+                        {rowDetail.render(row)}
+                      </TableCell>
+                    </TableRow>
                   )}
-                </TableRow>
+                </Fragment>
               ))
             ) : (
               <TableRow>

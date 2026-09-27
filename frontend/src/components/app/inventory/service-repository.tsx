@@ -35,7 +35,13 @@ const SOURCE_LABEL: Record<SbomImportSource, string> = {
 function importedSummary(result: SbomImportResult): string {
   return (
     `SBOM imported — ${result.componentsCreated} new, ${result.componentsMatched} matched, ` +
-    `${result.serviceComponentsLinked} linked, ${result.dependenciesCreated} dependencies` +
+    `${result.serviceComponentsLinked} linked, ` +
+    (result.serviceComponentsUnlinked
+      ? `${result.serviceComponentsUnlinked} unlinked (no longer in the repository), `
+      : "") +
+    (result.dependenciesRemoved
+      ? `${result.dependenciesCreated} dependencies added, ${result.dependenciesRemoved} removed`
+      : `${result.dependenciesCreated} dependencies`) +
     (result.componentsSkipped ? `, ${result.componentsSkipped} skipped (no version)` : "") +
     "."
   );

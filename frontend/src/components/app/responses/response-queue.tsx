@@ -5,11 +5,18 @@ import Link from "next/link";
 
 import { DataPagination } from "@/components/app/data-pagination";
 import {
+  MEMO_HISTORY_STATUSES,
+  MEMO_KIND,
+  MEMO_REVIEW_STATUSES,
+  MemoStatusBadge,
+  TICKET_HISTORY_STATUSES,
+  TicketStatusBadge,
   UPGRADE_HISTORY_STATUSES,
   UPGRADE_REVIEW_STATUSES,
   UpgradeStatusBadge,
   formatDateTime,
 } from "@/components/app/responses/response-status";
+import { describeEdits } from "@/components/app/responses/upgrade-edits";
 import { RecommendedUpgrades } from "@/components/app/responses/upgrade-recommendations";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -20,9 +27,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ApiError, upgradeApi } from "@/lib/api";
+import { ApiError, memoApi, ticketApi, upgradeApi } from "@/lib/api";
 import { canReadInventory } from "@/lib/roles";
-import type { Page, UpgradeProposal } from "@/lib/types";
+import type { Page, RegulatorMemo, RiskTicket, UpgradeProposal } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
 
 /** The review queue holds what still needs a person; history holds what was decided. */
@@ -35,8 +42,8 @@ const VIEW_COPY: Record<QueueView, { title: string; description: string }> = {
   review: {
     title: "Review & approve",
     description:
-      "What Aegis recommends and what has been drafted, waiting for a person. Nothing reaches a repository " +
-      "until someone approves it.",
+      "What Aegis recommends and what has been drafted, waiting for a person. Nothing leaves Aegis until " +
+      "someone other than its drafter approves it.",
   },
   history: {
     title: "Response history",
@@ -45,17 +52,22 @@ const VIEW_COPY: Record<QueueView, { title: string; description: string }> = {
 };
 
 /**
- * A queue of drafted responses. Each kind of response is its own section with its own paging: the
- * upgrade pull requests today; risk tickets (story 5) and notification memos (story 6) add theirs here.
- * The review view leads with what Aegis recommends drafting, found without anyone searching for a CVE.
+ * A queue of drafted responses, each kind in its own section with its own paging: responses (a risk ticket
+ * with the upgrade pull request that fixes it), regulator memos, and — only while there are any — upgrade pull
+ * requests drafted on their own before responses existed. The review view leads with what Aegis recommends
+ * responding to, found without anyone searching for a CVE.
  */
 export function ResponseQueue({ view }: { view: QueueView }) {
   const { user, isLoading: authLoading } = useAuth();
   const canRead = canReadInventory(user?.roles ?? []);
   const copy = VIEW_COPY[view];
+  const enabled = !authLoading && canRead;
+  const orgId = user?.orgId ?? null;
+  const userId = user?.id ?? null;
+  const review = view === "review";
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6">
+    <div className="mx-auto w-full max-w-6xl space-y-8">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">{copy.title}</h1>
         <p className="text-sm text-muted-foreground">{copy.description}</p>
@@ -66,14 +78,76 @@ export function ResponseQueue({ view }: { view: QueueView }) {
         </div>
       ) : (
         <>
-          {view === "review" && (
-            <RecommendedUpgrades enabled={!authLoading && canRead} orgId={user?.orgId ?? null} />
-          )}
-          <UpgradeProposalSection
-            view={view}
-            enabled={!authLoading && canRead}
-            orgId={user?.orgId ?? null}
-            userId={user?.id ?? null}
+          {review && <RecommendedUpgrades enabled={enabled} orgId={orgId} />}
+          <QueueSection<RiskTicket>
+            id="responses"
+            title={review ? "Responses awaiting a decision" : "Responses"}
+            description="Each one is a vulnerability's or outage's risk to one service: a risk ticket, with the upgrade pull request that fixes it where Aegis can automate one. Approving files the ticket in your organization's Jira, then opens the pull request as a draft."
+            what="responses"
+            enabled={enabled}
+            reloadKey={`${orgId}:${view}`}
+            load={(page) =>
+              ticketApi.list(
+                review
+                  ? { pending: true, page, size: PAGE_SIZE }
+                  : { status: TICKET_HISTORY_STATUSES, pending: false, page, size: PAGE_SIZE },
+              )
+            }
+            columns={["Response", "Service", "Status", review ? "Drafted" : "Decided"]}
+            empty={
+              review
+                ? "No response is waiting for a decision. Draft one from the recommended upgrades above, or from a change's impact page."
+                : "No response has been filed or dismissed yet."
+            }
+            row={(ticket) => (
+              <TicketRow key={ticket.id} ticket={ticket} view={view} draftedByYou={ticket.createdBy === userId} />
+            )}
+          />
+          <QueueSection<RegulatorMemo>
+            id="regulator-memos"
+            title={review ? "Regulator memos awaiting a decision" : "Regulator memos"}
+            description="DORA notifications about changes that materially affect a service. Approving makes one final for a person to submit; Aegis never sends it."
+            what="regulator memos"
+            enabled={enabled}
+            reloadKey={`${orgId}:${view}`}
+            load={(page) =>
+              memoApi.list({
+                status: review ? MEMO_REVIEW_STATUSES : MEMO_HISTORY_STATUSES,
+                page,
+                size: PAGE_SIZE,
+              })
+            }
+            columns={["Notification", "Services affected", "Status", review ? "Drafted" : "Decided"]}
+            empty={
+              review
+                ? "No regulator memo is waiting for a decision."
+                : "No regulator memo has been approved or dismissed yet."
+            }
+            row={(memo) => (
+              <MemoRow key={memo.id} memo={memo} view={view} draftedByYou={memo.createdBy === userId} />
+            )}
+          />
+          <QueueSection<UpgradeProposal>
+            id="upgrade-proposals"
+            title={review ? "Upgrade pull requests awaiting a decision" : "Upgrade pull requests"}
+            description="Drafted on their own, before responses existed: approving one opens its draft pull request. Aegis never merges it."
+            what="upgrade proposals"
+            enabled={enabled}
+            reloadKey={`${orgId}:${view}`}
+            load={(page) =>
+              upgradeApi.list({
+                status: review ? UPGRADE_REVIEW_STATUSES : UPGRADE_HISTORY_STATUSES,
+                standalone: true,
+                page,
+                size: PAGE_SIZE,
+              })
+            }
+            columns={["Upgrade", "Service", "Status", review ? "Drafted" : "Decided"]}
+            empty=""
+            hideWhenEmpty
+            row={(proposal) => (
+              <ProposalRow key={proposal.id} proposal={proposal} view={view} draftedByYou={proposal.createdBy === userId} />
+            )}
           />
         </>
       )}
@@ -81,19 +155,35 @@ export function ResponseQueue({ view }: { view: QueueView }) {
   );
 }
 
-function UpgradeProposalSection({
-  view,
+/** One kind of response, paged on its own. `reloadKey` changes when the section must start over. */
+function QueueSection<T>({
+  id,
+  title,
+  description,
+  what,
   enabled,
-  orgId,
-  userId,
+  reloadKey,
+  load,
+  columns,
+  empty,
+  hideWhenEmpty = false,
+  row,
 }: {
-  view: QueueView;
+  id: string;
+  title: string;
+  description: string;
+  what: string;
   enabled: boolean;
-  orgId: string | null;
-  userId: string | null;
+  reloadKey: string;
+  load: (page: number) => Promise<Page<T>>;
+  columns: string[];
+  empty: string;
+  /** Leave the section out while there is nothing in it. */
+  hideWhenEmpty?: boolean;
+  row: (item: T) => React.ReactNode;
 }) {
   const [pageIndex, setPageIndex] = useState(0);
-  const [data, setData] = useState<Page<UpgradeProposal> | null>(null);
+  const [data, setData] = useState<Page<T> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<"forbidden" | "error" | null>(null);
 
@@ -103,12 +193,7 @@ function UpgradeProposalSection({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     setError(null);
-    upgradeApi
-      .list({
-        status: view === "review" ? UPGRADE_REVIEW_STATUSES : UPGRADE_HISTORY_STATUSES,
-        page: pageIndex,
-        size: PAGE_SIZE,
-      })
+    load(pageIndex)
       .then((page) => {
         if (!cancelled) setData(page);
       })
@@ -123,36 +208,40 @@ function UpgradeProposalSection({
     return () => {
       cancelled = true;
     };
-  }, [enabled, orgId, view, pageIndex]);
+    // `load` is a new function every render; what it loads changes only with these.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, reloadKey, pageIndex]);
+
+  if (hideWhenEmpty && !loading && !error && (data?.totalElements ?? 0) === 0) {
+    return null;
+  }
 
   return (
-    <section aria-labelledby="upgrade-proposals-heading" className="space-y-3">
+    <section aria-labelledby={`${id}-heading`} className="space-y-3">
       <div>
-        <h2 id="upgrade-proposals-heading" className="text-sm font-medium">
-          {view === "review" ? "Drafted, awaiting a decision" : "Upgrade pull requests"}
+        <h2 id={`${id}-heading`} className="text-sm font-medium">
+          {title}
           {data && data.totalElements > 0 && (
             <span className="ml-1.5 text-muted-foreground">({data.totalElements})</span>
           )}
         </h2>
-        <p className="text-xs text-muted-foreground">
-          Each one moves a vulnerable dependency to the lowest version clear of its advisories. Approving
-          opens a draft pull request; Aegis never merges it.
-        </p>
+        <p className="text-xs text-muted-foreground">{description}</p>
       </div>
 
       <div className="rounded-lg border">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Upgrade</TableHead>
-              <TableHead>Service</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">{view === "review" ? "Drafted" : "Decided"}</TableHead>
+              {columns.map((column, index) => (
+                <TableHead key={column} className={index === columns.length - 1 ? "text-right" : undefined}>
+                  {column}
+                </TableHead>
+              ))}
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
-              Array.from({ length: 4 }).map((_, rowIndex) => (
+              Array.from({ length: 3 }).map((_, rowIndex) => (
                 <TableRow key={rowIndex}>
                   {Array.from({ length: COLUMN_COUNT }).map((__, cellIndex) => (
                     <TableCell key={cellIndex}>
@@ -164,22 +253,11 @@ function UpgradeProposalSection({
             ) : error === "forbidden" ? (
               <MessageRow>You don&apos;t have access to responses — an Aegis domain role is required.</MessageRow>
             ) : error ? (
-              <MessageRow>Could not load upgrade proposals. Please try again.</MessageRow>
+              <MessageRow>Could not load {what}. Please try again.</MessageRow>
             ) : data && data.content.length > 0 ? (
-              data.content.map((proposal) => (
-                <ProposalRow
-                  key={proposal.id}
-                  proposal={proposal}
-                  view={view}
-                  draftedByYou={proposal.createdBy === userId}
-                />
-              ))
+              data.content.map(row)
             ) : (
-              <MessageRow>
-                {view === "review"
-                  ? "Nothing drafted is waiting for a decision. Draft one of the recommended upgrades above."
-                  : "No upgrade proposal has been approved or dismissed yet."}
-              </MessageRow>
+              <MessageRow>{empty}</MessageRow>
             )}
           </TableBody>
         </Table>
@@ -221,14 +299,9 @@ function ProposalRow({
           href={`/responses/upgrades/${proposal.id}`}
           className="font-medium underline-offset-4 hover:underline"
         >
-          {proposal.packageName}
+          {describeEdits(proposal.edits)}
         </Link>
-        <span className="mt-0.5 block font-mono text-xs text-muted-foreground">
-          {proposal.fromVersion} → <span className="text-foreground">{proposal.toVersion}</span>
-        </span>
-        <span className="mt-0.5 block font-mono text-xs text-muted-foreground">
-          {proposal.vulnerabilityId} · {proposal.ecosystem}
-        </span>
+        <span className="mt-0.5 block font-mono text-xs text-muted-foreground">{proposal.vulnerabilityId}</span>
       </TableCell>
       <TableCell className="align-top">
         {proposal.serviceName ?? <span className="text-muted-foreground italic">Deleted service</span>}
@@ -236,24 +309,109 @@ function ProposalRow({
       <TableCell className="max-w-xs align-top whitespace-normal">
         <UpgradeStatusBadge status={proposal.status} />
         {proposal.status === "OPENED" && proposal.pullRequestUrl && (
-          <a
-            href={proposal.pullRequestUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-1 block text-xs font-medium text-primary underline-offset-4 hover:underline"
-          >
+          <ExternalRowLink href={proposal.pullRequestUrl}>
             {proposal.pullRequestNumber ? `Pull request #${proposal.pullRequestNumber}` : "Pull request"}
-          </a>
+          </ExternalRowLink>
         )}
-        {note && <span className="mt-1 block text-xs text-muted-foreground line-clamp-2">{note}</span>}
-        {view === "review" && draftedByYou && (
-          <span className="mt-1 block text-xs text-muted-foreground">You drafted this; someone else approves it</span>
-        )}
+        <StatusNotes note={note} review={view === "review"} draftedByYou={draftedByYou} />
       </TableCell>
-      <TableCell className="text-right align-top text-muted-foreground">
-        {formatDateTime(view === "review" ? proposal.createdAt : (proposal.decidedAt ?? proposal.createdAt))}
-      </TableCell>
+      <DateCell view={view} createdAt={proposal.createdAt} decidedAt={proposal.decidedAt} />
     </TableRow>
+  );
+}
+
+function TicketRow({ ticket, view, draftedByYou }: { ticket: RiskTicket; view: QueueView; draftedByYou: boolean }) {
+  const note =
+    ticket.status === "FAILED" ? ticket.failureMessage : ticket.status === "DISMISSED" ? ticket.dismissReason : null;
+  const pullRequest = ticket.pullRequests.find((candidate) => candidate.status !== "DISMISSED");
+  return (
+    <TableRow>
+      <TableCell className="max-w-md align-top whitespace-normal">
+        <Link href={`/responses/tickets/${ticket.id}`} className="font-medium underline-offset-4 hover:underline">
+          {ticket.title}
+        </Link>
+        <span className="mt-0.5 block text-xs text-muted-foreground">
+          {ticket.priority.charAt(0)}
+          {ticket.priority.slice(1).toLowerCase()} priority · impact {ticket.score.toFixed(1)}
+        </span>
+        {pullRequest && (
+          <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+            <UpgradeStatusBadge status={pullRequest.status} />
+            <span className="font-mono">{describeEdits(pullRequest.edits)}</span>
+          </span>
+        )}
+      </TableCell>
+      <TableCell className="align-top">
+        {ticket.serviceName ?? <span className="text-muted-foreground italic">Deleted service</span>}
+      </TableCell>
+      <TableCell className="max-w-xs align-top whitespace-normal">
+        <TicketStatusBadge status={ticket.status} />
+        {ticket.status === "FILED" && ticket.issueUrl && (
+          <ExternalRowLink href={ticket.issueUrl}>{ticket.issueKey ?? "Issue"}</ExternalRowLink>
+        )}
+        <StatusNotes note={note} review={view === "review"} draftedByYou={draftedByYou} />
+      </TableCell>
+      <DateCell view={view} createdAt={ticket.createdAt} decidedAt={ticket.decidedAt} />
+    </TableRow>
+  );
+}
+
+function MemoRow({ memo, view, draftedByYou }: { memo: RegulatorMemo; view: QueueView; draftedByYou: boolean }) {
+  const material = memo.services.filter((service) => service.material);
+  return (
+    <TableRow>
+      <TableCell className="max-w-md align-top whitespace-normal">
+        <Link href={`/responses/memos/${memo.id}`} className="font-medium underline-offset-4 hover:underline">
+          {MEMO_KIND[memo.kind].title}
+        </Link>
+        <span className="mt-0.5 block text-xs text-muted-foreground break-words">{memo.changeTitle}</span>
+        <span className="mt-0.5 block font-mono text-xs text-muted-foreground">{memo.reference}</span>
+      </TableCell>
+      <TableCell className="max-w-xs align-top whitespace-normal">
+        {material.map((service) => service.name).join(", ") || "—"}
+      </TableCell>
+      <TableCell className="max-w-xs align-top whitespace-normal">
+        <MemoStatusBadge status={memo.status} />
+        <StatusNotes
+          note={memo.status === "DISMISSED" ? memo.dismissReason : null}
+          review={view === "review"}
+          draftedByYou={draftedByYou}
+        />
+      </TableCell>
+      <DateCell view={view} createdAt={memo.createdAt} decidedAt={memo.decidedAt} />
+    </TableRow>
+  );
+}
+
+function ExternalRowLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-1 block text-xs font-medium text-primary underline-offset-4 hover:underline"
+    >
+      {children}
+    </a>
+  );
+}
+
+function StatusNotes({ note, review, draftedByYou }: { note: string | null; review: boolean; draftedByYou: boolean }) {
+  return (
+    <>
+      {note && <span className="mt-1 block text-xs text-muted-foreground line-clamp-2">{note}</span>}
+      {review && draftedByYou && (
+        <span className="mt-1 block text-xs text-muted-foreground">You drafted this; someone else approves it</span>
+      )}
+    </>
+  );
+}
+
+function DateCell({ view, createdAt, decidedAt }: { view: QueueView; createdAt: string; decidedAt: string | null }) {
+  return (
+    <TableCell className="text-right align-top text-muted-foreground">
+      {formatDateTime(view === "review" ? createdAt : (decidedAt ?? createdAt))}
+    </TableCell>
   );
 }
 

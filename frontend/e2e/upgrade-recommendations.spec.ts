@@ -10,13 +10,13 @@ function recommendation(overrides: Partial<UpgradeRecommendation>): UpgradeRecom
   return {
     serviceId: PORTAL, serviceName: "Customer Portal",
     component: { id: "axios-0211", ecosystem: "npm", name: "axios", version: "0.21.1" },
-    via: null, manifestPath: "client/package.json", confidence: "CONFIRMED",
+    via: null, manifestPaths: ["client/package.json", "server/package.json"], confidence: "CONFIRMED",
     vulnerabilities: [
       { id: "CVE-2026-40175", changeSignalId: "signal-axios", confidence: "CONFIRMED", cvssVersion: "3.1", cvssBaseScore: 7.5, severity: "HIGH" },
       { id: "CVE-2023-45857", changeSignalId: "signal-other", confidence: "CONFIRMED", cvssVersion: "3.1", cvssBaseScore: 6.5, severity: "MEDIUM" },
     ],
     score: 67.5, tier: "HIGH", material: true, toVersion: "1.15.0", changeSignalId: "signal-axios",
-    readiness: "READY", reason: null, proposal: null, canDraft: true,
+    readiness: "READY", reason: null, proposal: null, response: null, canDraft: true,
     ...overrides,
   };
 }
@@ -25,8 +25,9 @@ const RECOMMENDATIONS: UpgradeRecommendation[] = [
   recommendation({}),
   recommendation({
     serviceId: EDU, serviceName: "EduHelper", component: { id: "log4j", ecosystem: "maven", name: "org.apache.logging.log4j:log4j-core", version: "2.14.1" },
-    manifestPath: "service/pom.xml", toVersion: "2.17.1", score: 42.1, tier: "MEDIUM",
-    proposal: { id: "proposal-open", status: "OPENED", toVersion: "2.17.1", pullRequestUrl: "https://github.com/acme/edu/pull/9" },
+    manifestPaths: ["service/pom.xml"], toVersion: "2.17.1", score: 42.1, tier: "MEDIUM",
+    proposal: { id: "proposal-open", status: "OPENED", toVersion: "2.17.1", pullRequestUrl: "https://github.com/acme/edu/pull/9", riskTicketId: "ticket-log4j" },
+    response: { ticketId: "ticket-log4j", changeSignalId: "signal-axios", status: "FILED", issueKey: "SEC-3", issueUrl: "https://acme.atlassian.net/browse/SEC-3" },
   }),
   recommendation({
     serviceId: EDU, serviceName: "EduHelper", component: { id: "lodash", ecosystem: "npm", name: "lodash", version: "4.17.20" },
@@ -72,12 +73,12 @@ async function fakeBff(page: Page, role: Role, recommendations: UpgradeRecommend
       listed.push(serviceId);
       return route.fulfill({ json: serviceId ? recommendations.filter((item) => item.serviceId === serviceId) : recommendations });
     }
-    if (path === "/api/actions/upgrade-proposals" && request.method() === "POST") {
+    if (path === "/api/actions/risk-tickets" && request.method() === "POST") {
       drafts.push(request.postDataJSON());
-      return route.fulfill({ status: 201, json: { id: "proposal-new" } });
+      return route.fulfill({ status: 201, json: { id: "ticket-new", pullRequests: [] } });
     }
-    if (path.startsWith("/api/actions/upgrade-proposals/")) {
-      return route.fulfill({ status: 404, json: { message: "Upgrade proposal not found" } });
+    if (path.startsWith("/api/actions/risk-tickets/")) {
+      return route.fulfill({ status: 404, json: { message: "Risk ticket not found" } });
     }
     if (path === `/api/inventory/services/${EDU}`) {
       return route.fulfill({ json: service });
@@ -104,20 +105,27 @@ test("the review queue leads with the upgrades Aegis found — no CVE to look up
   await expect(axios.getByRole("link", { name: "CVE-2026-40175" })).toHaveAttribute("href", "/advisories/signal-axios");
   await expect(axios.getByRole("link", { name: "Customer Portal" })).toHaveAttribute("href", `/inventory/services/${PORTAL}`);
 
-  const log4j = recommended.getByRole("row").filter({ hasText: "log4j-core" });
-  await expect(log4j.getByText("Draft PR open")).toBeVisible();
-  await expect(log4j.getByRole("link", { name: "View proposal →" })).toHaveAttribute("href", "/responses/upgrades/proposal-open");
+  await expect(axios).toContainText("client/package.json, server/package.json");
 
+  // A response already drafted is linked, not offered again.
+  const log4j = recommended.getByRole("row").filter({ hasText: "log4j-core" });
+  await expect(log4j.getByText("Filed", { exact: true })).toBeVisible();
+  await expect(log4j.getByRole("link", { name: "View response →" })).toHaveAttribute("href", "/responses/tickets/ticket-log4j");
+  await expect(log4j.getByRole("button")).toHaveCount(0);
+
+  // Nothing to automate until the repository is linked: the response is the ticket alone.
   const minimist = recommended.getByRole("row").filter({ hasText: "minimist" });
-  await expect(minimist.getByRole("link", { name: "Link the repository →" })).toHaveAttribute("href", `/inventory/services/${PORTAL}`);
+  await expect(minimist).toContainText("Ticket only until the service's repository is linked.");
+  await expect(minimist.getByRole("link", { name: "Link it →" })).toHaveAttribute("href", `/inventory/services/${PORTAL}`);
+  await expect(minimist.getByRole("button", { name: "Draft response" })).toBeVisible();
 
   const lodash = recommended.getByRole("row").filter({ hasText: "lodash" });
   await expect(lodash.getByRole("button")).toHaveCount(0);
-  await expect(lodash).toContainText("An analyst or the service's owner can draft it");
+  await expect(lodash).toContainText("An analyst or the service's owner can draft a response");
 
-  await axios.getByRole("button", { name: "Draft PR" }).click();
-  await expect(page).toHaveURL(/\/responses\/upgrades\/proposal-new$/);
-  expect(drafts).toEqual([{ changeSignalId: "signal-axios", serviceId: PORTAL, componentId: "axios-0211" }]);
+  await axios.getByRole("button", { name: "Draft response" }).click();
+  await expect(page).toHaveURL(/\/responses\/tickets\/ticket-new$/);
+  expect(drafts).toEqual([{ changeSignalId: "signal-axios", serviceId: PORTAL }]);
   expect([...new Set(listed)]).toEqual([null]);
 });
 
@@ -130,8 +138,10 @@ test("a service's page lists its vulnerable dependencies, including those anothe
   await expect(vulnerable.getByRole("row")).toHaveCount(1 + 3);
   await expect(vulnerable.getByRole("columnheader", { name: "Service" })).toHaveCount(0);
   const transitive = vulnerable.getByRole("row").filter({ hasText: "follow-redirects" });
-  await expect(transitive).toContainText("follow-redirects comes in through axios; upgrade axios, or pin follow-redirects to 1.15.6 by hand");
-  await expect(transitive.getByRole("button")).toHaveCount(0);
+  await expect(transitive).toContainText(
+    "Ticket only: follow-redirects comes in through axios; upgrade axios, or pin follow-redirects to 1.15.6 by hand");
+  // Nothing to upgrade automatically still gets a response: its ticket alone.
+  await expect(transitive.getByRole("button", { name: "Draft response" })).toBeVisible();
   expect([...new Set(listed)]).toEqual([EDU]);
 });
 

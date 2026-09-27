@@ -29,7 +29,6 @@ export const domainNav: NavItem[] = [
       { title: "Components", href: "/inventory/components" },
       { title: "Vendors", href: "/inventory/vendors" },
       { title: "Owners", href: "/inventory/owners" },
-      { title: "Dependency map", href: "/inventory/map" },
     ],
   },
   { title: "Advisories", href: "/advisories", icon: Rss },
@@ -69,6 +68,8 @@ export const orgAdminNav: NavLink[] = [{ title: "Integrations", href: "/admin/in
 /** Pages reached from inside a section rather than from the sidebar. */
 const unlistedPages = [
   { href: "/responses/upgrades", title: "Responses / Upgrade proposal" },
+  { href: "/responses/tickets", title: "Responses / Response" },
+  { href: "/responses/memos", title: "Responses / Regulator memo" },
   { href: "/organizations/new", title: "New organization" },
 ];
 

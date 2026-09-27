@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { GitHubIntegration } from "@/components/admin/github-integration";
+import { JiraIntegration } from "@/components/admin/jira-integration";
 
 export const metadata: Metadata = { title: "Integrations" };
 
@@ -15,6 +16,7 @@ export default function IntegrationsPage() {
       </div>
 
       <GitHubIntegration />
+      <JiraIntegration />
     </div>
   );
 }

@@ -8,12 +8,13 @@ import type {
   ChangeMatchResponse,
   ChangeSignal,
   ChangeSignalFacets,
-  ComponentImpact,
   CreateOrgInput,
   ForgotPasswordInput,
   GitHubConnectResult,
   GitHubIntegration,
   InviteUserInput,
+  JiraIntegration,
+  JiraOptions,
   LoginInput,
   LoginResponse,
   Membership,
@@ -21,12 +22,16 @@ import type {
   MfaStatus,
   DirectoryMember,
   Owner,
+  PackageUsage,
   Page,
   Passkey,
-  ProposeUpgradeInput,
   RecoveryCodes,
   RegisterInput,
+  RegulatorMemo,
+  RegulatorMemoStatus,
   ResetPasswordInput,
+  RiskTicket,
+  RiskTicketStatus,
   Role,
   SbomImportResult,
   SelectMethodInput,
@@ -39,7 +44,7 @@ import type {
   UpgradeProposalStatus,
   UpgradeRecommendation,
   UserProfile,
-  VendorImpact,
+  VendorUsage,
   VerifyOtpInput,
 } from "@/lib/types";
 import type {
@@ -392,13 +397,14 @@ export const inventoryApi = {
     });
   },
 
-  /** Services + owners impacted by a component, including those reached transitively. */
-  componentImpact(id: string) {
-    return bffFetch<ComponentImpact>(`/api/inventory/components/${id}/impact`);
+  /** Every service using a package — any version of it — directly or through which of its dependencies. */
+  packageUsage(ecosystem: string, name: string) {
+    const params = new URLSearchParams({ ecosystem, name });
+    return bffFetch<PackageUsage>(`/api/inventory/components/used-by?${params}`);
   },
-  /** Services + owners impacted by a vendor (direct dependency only). */
-  vendorImpact(id: string) {
-    return bffFetch<VendorImpact>(`/api/inventory/vendors/${id}/impact`);
+  /** Every service using a vendor, with its owners. */
+  vendorUsage(id: string) {
+    return bffFetch<VendorUsage>(`/api/inventory/vendors/${id}/used-by`);
   },
 };
 
@@ -433,9 +439,10 @@ export const scoringApi = {
 };
 
 /**
- * Safe-upgrade proposals (E8 story 4): drafting one writes nothing outside Aegis; only a person's
- * approval opens the draft pull request, and a dismissal records why. Org-scoped server-side; the
- * backend enforces who may draft and decide (governance, or the service's assigned owners).
+ * Safe-upgrade pull requests (E8 story 4). One is drafted, and approved, as part of a response
+ * (`ticketApi`); here it is read, and left out of its response by dismissing it with a reason. One drafted
+ * on its own before responses existed (`standalone`) is still approved here. Org-scoped server-side; the
+ * backend enforces who may decide (an analyst, or the service's assigned owners).
  */
 export const upgradeApi = {
   list(
@@ -443,13 +450,15 @@ export const upgradeApi = {
       serviceId?: string;
       changeSignalId?: string;
       status?: UpgradeProposalStatus[];
+      /** Only those drafted on their own, before responses. */
+      standalone?: boolean;
       page?: number;
       size?: number;
     } = {},
   ) {
-    const { status, ...rest } = params;
+    const { status, standalone, ...rest } = params;
     return bffFetch<Page<UpgradeProposal>>(
-      `/api/actions/upgrade-proposals${qs({ ...rest, status: status?.join(",") })}`,
+      `/api/actions/upgrade-proposals${qs({ ...rest, status: status?.join(","), standalone: standalone ? "true" : undefined })}`,
     );
   },
   get(id: string) {
@@ -459,18 +468,100 @@ export const upgradeApi = {
   recommendations(params: { serviceId?: string } = {}) {
     return bffFetch<UpgradeRecommendation[]>(`/api/actions/upgrade-recommendations${qs(params)}`);
   },
-  propose(input: ProposeUpgradeInput) {
-    return bffFetch<UpgradeProposal>("/api/actions/upgrade-proposals", {
-      method: "POST",
-      body: JSON.stringify(input),
-    });
-  },
-  /** Open the draft pull request. Aegis never merges it. */
+  /** Open the draft pull request of one drafted on its own. Aegis never merges it. */
   approve(id: string) {
     return bffFetch<UpgradeProposal>(`/api/actions/upgrade-proposals/${id}/approve`, { method: "POST" });
   },
+  /** Dismiss with a reason: for a response's pull request, leave it out of the response. */
   dismiss(id: string, reason: string) {
     return bffFetch<UpgradeProposal>(`/api/actions/upgrade-proposals/${id}/dismiss`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+  },
+};
+
+/**
+ * Responses (E8 story 5): the risk ticket for a change's impact on one service, with the upgrade pull request
+ * that fixes it where Aegis can automate one. Drafting sends nothing; approving files the ticket in the
+ * organization's Jira, then opens the pull request under the ticket's key. An analyst, or the service's
+ * owners, drafts and decides — never the drafter of a response with a pull request; a compliance admin audits.
+ */
+export const ticketApi = {
+  list(
+    params: {
+      serviceId?: string;
+      changeSignalId?: string;
+      status?: RiskTicketStatus[];
+      /** True: those that still need a person (the ticket or its pull request); false: those that don't. */
+      pending?: boolean;
+      page?: number;
+      size?: number;
+    } = {},
+  ) {
+    const { status, pending, ...rest } = params;
+    return bffFetch<Page<RiskTicket>>(
+      `/api/actions/risk-tickets${qs({ ...rest, status: status?.join(","), pending: pending === undefined ? undefined : String(pending) })}`,
+    );
+  },
+  /** One ticket, with its ServiceNow incident fields. */
+  get(id: string) {
+    return bffFetch<RiskTicket>(`/api/actions/risk-tickets/${id}`);
+  },
+  propose(input: { changeSignalId: string; serviceId: string }) {
+    return bffFetch<RiskTicket>("/api/actions/risk-tickets", { method: "POST", body: JSON.stringify(input) });
+  },
+  /** File the ticket in the organization's Jira, then open its pull request, if any, under the ticket's key. */
+  approve(id: string) {
+    return bffFetch<RiskTicket>(`/api/actions/risk-tickets/${id}/approve`, { method: "POST" });
+  },
+  /** Draft the upgrade pull request of a response that has none. */
+  draftPullRequest(id: string) {
+    return bffFetch<RiskTicket>(`/api/actions/risk-tickets/${id}/pull-requests`, { method: "POST" });
+  },
+  /** Open a filed response's pull request on its own: left for later, drafted afterwards, or failed. */
+  approvePullRequest(id: string, proposalId: string) {
+    return bffFetch<RiskTicket>(`/api/actions/risk-tickets/${id}/pull-requests/${proposalId}/approve`, {
+      method: "POST",
+    });
+  },
+  dismiss(id: string, reason: string) {
+    return bffFetch<RiskTicket>(`/api/actions/risk-tickets/${id}/dismiss`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+  },
+};
+
+/**
+ * Regulator memos (E8 story 6): a DORA notification about one change, drafted only when it materially
+ * affects a service. An analyst drafts; a second analyst approves it, which makes it final. Aegis never
+ * sends it.
+ */
+export const memoApi = {
+  list(
+    params: { changeSignalId?: string; status?: RegulatorMemoStatus[]; page?: number; size?: number } = {},
+  ) {
+    const { status, ...rest } = params;
+    return bffFetch<Page<RegulatorMemo>>(
+      `/api/actions/regulator-memos${qs({ ...rest, status: status?.join(",") })}`,
+    );
+  },
+  get(id: string) {
+    return bffFetch<RegulatorMemo>(`/api/actions/regulator-memos/${id}`);
+  },
+  propose(changeSignalId: string) {
+    return bffFetch<RegulatorMemo>("/api/actions/regulator-memos", {
+      method: "POST",
+      body: JSON.stringify({ changeSignalId }),
+    });
+  },
+  /** Make the memo final, ready for a person to submit. */
+  approve(id: string) {
+    return bffFetch<RegulatorMemo>(`/api/actions/regulator-memos/${id}/approve`, { method: "POST" });
+  },
+  dismiss(id: string, reason: string) {
+    return bffFetch<RegulatorMemo>(`/api/actions/regulator-memos/${id}/dismiss`, {
       method: "POST",
       body: JSON.stringify({ reason }),
     });
@@ -533,8 +624,9 @@ export const mfaApi = {
 };
 
 /**
- * Connect GitHub (aegis-core): which GitHub App installations this organization may act through. Everyone
- * with a role can see them; only the organization admin connects or disconnects.
+ * The organization's integrations (aegis-core): which GitHub App installations it may act through, and the
+ * Jira site its risk tickets are filed in. Everyone with a role can see them; only the organization admin
+ * connects, configures or disconnects them.
  */
 export const integrationsApi = {
   github() {
@@ -553,5 +645,32 @@ export const integrationsApi = {
   },
   disconnectGitHub(installationId: number) {
     return bffFetch<void>(`/api/integrations/github/connections/${installationId}`, { method: "DELETE" });
+  },
+  jira() {
+    return bffFetch<JiraIntegration>("/api/integrations/jira");
+  },
+  /** Where to send the organization admin to grant Aegis a Jira site. */
+  startJira() {
+    return bffFetch<{ authorizeUrl: string }>("/api/integrations/jira/authorizations", { method: "POST" });
+  },
+  /** Finish with what Atlassian sent back; the project is chosen next. */
+  finishJira(code: string, state: string) {
+    return bffFetch<JiraIntegration>("/api/integrations/jira/connections", {
+      method: "POST",
+      body: JSON.stringify({ code, state }),
+    });
+  },
+  /** The granted sites, a site's projects, and — once a project is picked — its issue types. */
+  jiraOptions(params: { cloudId?: string; projectKey?: string } = {}) {
+    return bffFetch<JiraOptions>(`/api/integrations/jira/options${qs(params)}`);
+  },
+  configureJira(settings: { cloudId: string; projectKey: string; issueType: string }) {
+    return bffFetch<JiraIntegration>("/api/integrations/jira/settings", {
+      method: "PUT",
+      body: JSON.stringify(settings),
+    });
+  },
+  disconnectJira() {
+    return bffFetch<void>("/api/integrations/jira/connection", { method: "DELETE" });
   },
 };

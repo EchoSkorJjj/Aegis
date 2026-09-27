@@ -1,8 +1,8 @@
-import type { UpgradeProposalStatus } from "@/lib/types";
+import type { MemoKind, RegulatorMemoStatus, RiskTicketStatus, UpgradeProposalStatus } from "@/lib/types";
 
 /**
- * How far along a drafted response is, whatever its kind — an upgrade pull request today; a risk
- * ticket (story 5) or a notification memo (story 6) maps its own statuses onto the same tones.
+ * How far along a drafted response is, whatever its kind: an upgrade pull request, a risk ticket or a
+ * regulator memo each map their own statuses onto the same tones.
  */
 export type ResponseTone = "waiting" | "working" | "done" | "failed" | "declined";
 
@@ -40,6 +40,48 @@ export const UPGRADE_REVIEW_STATUSES: UpgradeProposalStatus[] = ["PROPOSED", "FA
 /** Decided: a draft pull request was opened, or the proposal was dismissed. */
 export const UPGRADE_HISTORY_STATUSES: UpgradeProposalStatus[] = ["OPENED", "DISMISSED"];
 
+export const TICKET_STATUS: Record<RiskTicketStatus, { label: string; tone: ResponseTone }> = {
+  PROPOSED: { label: "Awaiting decision", tone: "waiting" },
+  FILING: { label: "Filing in Jira", tone: "working" },
+  FILED: { label: "Filed", tone: "done" },
+  FAILED: { label: "Filing failed", tone: "failed" },
+  DISMISSED: { label: "Dismissed", tone: "declined" },
+};
+
+export function TicketStatusBadge({ status }: { status: RiskTicketStatus }) {
+  return <StatusBadge tone={TICKET_STATUS[status].tone}>{TICKET_STATUS[status].label}</StatusBadge>;
+}
+
+/** Decided: filed in the tracker, or dismissed (the review queue asks for pending responses instead). */
+export const TICKET_HISTORY_STATUSES: RiskTicketStatus[] = ["FILED", "DISMISSED"];
+
+export const MEMO_STATUS: Record<RegulatorMemoStatus, { label: string; tone: ResponseTone }> = {
+  PROPOSED: { label: "Awaiting decision", tone: "waiting" },
+  APPROVED: { label: "Final", tone: "done" },
+  DISMISSED: { label: "Dismissed", tone: "declined" },
+};
+
+export function MemoStatusBadge({ status }: { status: RegulatorMemoStatus }) {
+  return <StatusBadge tone={MEMO_STATUS[status].tone}>{MEMO_STATUS[status].label}</StatusBadge>;
+}
+
+export const MEMO_REVIEW_STATUSES: RegulatorMemoStatus[] = ["PROPOSED"];
+
+/** The two DORA notifications Aegis drafts: a vendor outage is an incident, a vulnerability a threat. */
+export const MEMO_KIND: Record<MemoKind, { title: string; article: string }> = {
+  MAJOR_INCIDENT: {
+    title: "Major ICT-related incident notification",
+    article: "the initial notification of a major ICT-related incident (DORA Article 19(1))",
+  },
+  CYBER_THREAT: {
+    title: "Significant cyber threat notification",
+    article: "a voluntary notification of a significant cyber threat (DORA Article 19(2))",
+  },
+};
+
+/** Decided: approved as final (ready for a person to submit), or dismissed. */
+export const MEMO_HISTORY_STATUSES: RegulatorMemoStatus[] = ["APPROVED", "DISMISSED"];
+
 export function formatDateTime(iso: string | null): string {
   if (!iso) return "—";
   const date = new Date(iso);
@@ -50,5 +92,17 @@ export function formatDateTime(iso: string | null): string {
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+  });
+}
+
+/** A calendar date (yyyy-mm-dd, no time zone) as the reader's locale writes it. */
+export function formatDate(date: string | null): string {
+  if (!date) return "—";
+  const [year, month, day] = date.split("-").map(Number);
+  if (!year || !month || !day) return "—";
+  return new Date(year, month - 1, day).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
   });
 }

@@ -6,19 +6,17 @@ import type {
   OwnerRef,
   Role,
   ScoreFactor,
+  UpgradeEdit,
   UpgradeProposal,
 } from "../src/lib/types";
 
-// Browser contract checks use a fake BFF. Backend RBAC, tenancy and the proposal state machine are
-// covered by UpgradeProposalIntegrationTest.
+// Browser contract checks use a fake BFF. Backend RBAC, tenancy and the proposal state machine are covered by
+// UpgradeProposalIntegrationTest. A pull request is drafted and decided with its response (risk-tickets.spec);
+// here: its own page, and those drafted on their own before responses, which are still decided on their own.
 const SIGNAL = "signal-1";
 const SERVICE = "service-1";
 const LOG4J: MatchedComponentRef = {
   id: "log4j", ecosystem: "maven", name: "org.apache.logging.log4j:log4j-core", version: "2.14.1",
-};
-const SNAKEYAML: MatchedComponentRef = { id: "snakeyaml", ecosystem: "maven", name: "org.yaml:snakeyaml", version: "1.29" };
-const STARTER: MatchedComponentRef = {
-  id: "starter", ecosystem: "maven", name: "org.springframework.boot:spring-boot-starter", version: "2.5.0",
 };
 
 function chain(componentPath: MatchedComponentRef[]): EvidenceChain {
@@ -34,7 +32,7 @@ function impact(owners: OwnerRef[]): ChangeImpactResponse {
   });
   return {
     change: { id: SIGNAL, signalType: "VULNERABILITY", sourceId: "nvd", externalId: "CVE-2021-44228", title: "Log4Shell" },
-    matchedComponentCount: 2,
+    matchedComponentCount: 1,
     matchedVendorCount: 0,
     severity: { source: "CVSS", cvssVersion: "3.1", cvssBaseScore: 10, label: null, factor: 1 },
     services: [{
@@ -47,17 +45,20 @@ function impact(owners: OwnerRef[]): ChangeImpactResponse {
       factors: [factor("SEVERITY", "CVSS 3.1 base 10.0"), factor("EXPOSURE", "INTERNET_FACING"), factor("CRITICALITY", "HIGH")],
       explanation: "Worst case.",
       owners,
-      evidence: [chain([LOG4J]), chain([SNAKEYAML, STARTER])],
+      evidence: [chain([LOG4J])],
     }],
     owners: [],
   };
 }
 
+function edit(manifestPath: string): UpgradeEdit {
+  return { componentId: LOG4J.id, ecosystem: "maven", packageName: LOG4J.name, fromVersion: "2.14.1", toVersion: "2.17.1", manifestPath };
+}
+
 function proposal(overrides: Partial<UpgradeProposal> = {}): UpgradeProposal {
   return {
     id: "proposal-1", serviceId: SERVICE, serviceName: "Payments API", changeSignalId: SIGNAL,
-    vulnerabilityId: "CVE-2021-44228", componentId: LOG4J.id, ecosystem: "maven", packageName: LOG4J.name,
-    fromVersion: "2.14.1", toVersion: "2.17.1", manifestPath: "pom.xml",
+    vulnerabilityId: "CVE-2021-44228", riskTicketId: null, edits: [edit("pom.xml")],
     repositoryUrl: "https://github.com/acme/payments", baseBranch: "main",
     headBranch: "aegis/upgrade-log4j-core-2.17.1-1a2b3c4d", matchConfidence: "CONFIRMED",
     title: "Upgrade org.apache.logging.log4j:log4j-core from 2.14.1 to 2.17.1 (CVE-2021-44228)",
@@ -70,7 +71,7 @@ function proposal(overrides: Partial<UpgradeProposal> = {}): UpgradeProposal {
 }
 
 /** Dev-mode React runs effects twice, so compare the filters requested, not the number of requests. */
-function distinct(values: (string | null)[]) {
+function distinct(values: string[]) {
   return [...new Set(values)];
 }
 
@@ -79,7 +80,7 @@ type Options = { owners?: OwnerRef[]; proposals?: UpgradeProposal[]; approveFail
 async function fakeBff(page: Page, role: Role, { owners = [], proposals = [], approveFailure }: Options = {}) {
   const store = [...proposals];
   const writes: { path: string; body: unknown }[] = [];
-  const listedStatuses: (string | null)[] = [];
+  const listed: string[] = [];
   await page.context().addCookies([{ name: "um_refresh", value: "browser-fixture", url: "http://localhost:3000" }]);
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -109,19 +110,12 @@ async function fakeBff(page: Page, role: Role, { owners = [], proposals = [], ap
       return route.fulfill({ json: { content, totalElements: 1, totalPages: 1, number: 0, size: 100 } });
     }
     if (path === "/api/actions/upgrade-proposals" && request.method() === "GET") {
+      listed.push(url.search);
       const status = url.searchParams.get("status");
-      listedStatuses.push(status);
-      const signal = url.searchParams.get("changeSignalId");
+      const standalone = url.searchParams.get("standalone") === "true";
       const content = store.filter((candidate) => (!status || status.split(",").includes(candidate.status))
-        && (!signal || candidate.changeSignalId === signal));
+        && (!standalone || candidate.riskTicketId === null));
       return route.fulfill({ json: { content, totalElements: content.length, totalPages: 1, number: 0, size: 20 } });
-    }
-    if (path === "/api/actions/upgrade-proposals" && request.method() === "POST") {
-      const body = request.postDataJSON();
-      writes.push({ path, body });
-      const created = proposal({ id: "proposal-new", componentId: body.componentId, manifestPath: body.manifestPath ?? "pom.xml" });
-      store.push(created);
-      return route.fulfill({ status: 201, json: created });
     }
     const match = path.match(/^\/api\/actions\/upgrade-proposals\/([^/]+)(?:\/(approve|dismiss))?$/);
     if (match) {
@@ -146,55 +140,38 @@ async function fakeBff(page: Page, role: Role, { owners = [], proposals = [], ap
     }
     return route.fulfill({ json: { content: [], totalElements: 0, totalPages: 1, number: 0, size: 20 } });
   });
-  return { writes, listedStatuses };
+  return { writes, listed };
 }
 
-test("an analyst drafts a direct upgrade from the impact page; a transitive one is explained instead", async ({ page }) => {
-  const { writes, listedStatuses } = await fakeBff(page, "ANALYST");
+test("the impact page drafts a response for each service, not a pull request on its own", async ({ page }) => {
+  await fakeBff(page, "ANALYST");
   await page.goto(`/advisories/${SIGNAL}`);
   await expect(page.getByRole("heading", { name: "Log4Shell" })).toBeVisible();
-  await expect(page.getByText(
-    `${SNAKEYAML.name} reaches this service through ${STARTER.name}. Transitive upgrades aren't automated yet`,
-  )).toBeVisible();
-  expect(distinct(listedStatuses)).toEqual(["PROPOSED,OPENING,OPENED,FAILED"]);
+  await expect(page.getByRole("button", { name: "Draft response" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Draft upgrade PR" })).toHaveCount(0);
+});
 
-  await expect(page.getByRole("button", { name: "Draft upgrade PR" })).toHaveCount(1);
-  await page.getByRole("button", { name: "Draft upgrade PR" }).click();
-  await page.getByLabel("Manifest path").fill("services/payments/pom.xml");
-  await page.getByRole("button", { name: "Draft proposal" }).click();
-
-  await expect(page).toHaveURL(/\/responses\/upgrades\/proposal-new$/);
+test("a response's pull request shows every edit, and is decided on its response", async ({ page }) => {
+  await fakeBff(page, "ANALYST", {
+    proposals: [proposal({
+      riskTicketId: "ticket-1", edits: [edit("api/pom.xml"), edit("worker/pom.xml")],
+      title: "Upgrade org.apache.logging.log4j:log4j-core to 2.17.1 in 2 manifests (CVE-2021-44228)",
+    })],
+  });
+  await page.goto("/responses/upgrades/proposal-1");
   await expect(page.getByRole("heading", { name: `Upgrade ${LOG4J.name}` })).toBeVisible();
-  expect(writes).toEqual([{
-    path: "/api/actions/upgrade-proposals",
-    body: { changeSignalId: SIGNAL, serviceId: SERVICE, componentId: LOG4J.id, manifestPath: "services/payments/pom.xml" },
-  }]);
+  const changes = page.getByRole("table", { name: "What the pull request changes" });
+  await expect(changes.getByRole("row")).toHaveCount(1 + 2);
+  await expect(changes).toContainText("api/pom.xml");
+  await expect(changes).toContainText("worker/pom.xml");
+
+  const decision = page.getByRole("region", { name: "Decision" });
+  await expect(decision.getByText("Part of a response")).toBeVisible();
+  await expect(decision.getByRole("link", { name: "View the response →" })).toHaveAttribute("href", "/responses/tickets/ticket-1");
+  await expect(decision.getByRole("button")).toHaveCount(0);
 });
 
-test("an upgrade already drafted is linked, not offered again", async ({ page }) => {
-  await fakeBff(page, "ANALYST", { proposals: [proposal({ status: "OPENED", pullRequestNumber: "42" })] });
-  await page.goto(`/advisories/${SIGNAL}`);
-  await expect(page.getByText("Draft PR open")).toBeVisible();
-  await expect(page.getByRole("link", { name: "View proposal →" })).toHaveAttribute("href", "/responses/upgrades/proposal-1");
-  await expect(page.getByRole("button", { name: "Draft upgrade PR" })).toHaveCount(0);
-});
-
-test("a service owner who doesn't own the service sees drafted upgrades but can't draft", async ({ page }) => {
-  await fakeBff(page, "SERVICE_OWNER", { proposals: [proposal({ status: "OPENED", pullRequestNumber: "42" })] });
-  await page.goto(`/advisories/${SIGNAL}`);
-  // The drafted proposal showing means the upgrade rows have rendered; no drafting affordance may appear.
-  await expect(page.getByRole("link", { name: "View proposal →" })).toBeVisible();
-  await expect(page.getByText("Transitive upgrades aren't automated yet", { exact: false })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Draft upgrade PR" })).toHaveCount(0);
-});
-
-test("an assigned service owner may draft", async ({ page }) => {
-  await fakeBff(page, "SERVICE_OWNER", { owners: [{ id: "owner-row", userId: "me", name: "Me" }] });
-  await page.goto(`/advisories/${SIGNAL}`);
-  await expect(page.getByRole("button", { name: "Draft upgrade PR" })).toBeVisible();
-});
-
-test("approving opens a draft pull request and the body is shown as text", async ({ page }) => {
+test("one drafted on its own: approving opens a draft pull request, and the body is shown as text", async ({ page }) => {
   const { writes } = await fakeBff(page, "ANALYST", { proposals: [proposal()] });
   await page.goto("/responses/upgrades/proposal-1");
   const decision = page.getByRole("region", { name: "Decision" });
@@ -214,7 +191,7 @@ test("approving opens a draft pull request and the body is shown as text", async
   expect(writes).toEqual([{ path: "/api/actions/upgrade-proposals/proposal-1/approve", body: null }]);
 });
 
-test("a failed opening shows why, and can be dismissed with a reason", async ({ page }) => {
+test("one drafted on its own: a failed opening shows why, and can be dismissed with a reason", async ({ page }) => {
   const failure = "The manifest changed after it was read; approve again";
   const { writes } = await fakeBff(page, "ANALYST", { proposals: [proposal()], approveFailure: failure });
   await page.goto("/responses/upgrades/proposal-1");
@@ -239,7 +216,7 @@ test("a failed opening shows why, and can be dismissed with a reason", async ({ 
   });
 });
 
-test("a service owner who doesn't own the service can read a proposal but not decide it", async ({ page }) => {
+test("one drafted on its own: a service owner who doesn't own the service can read it but not decide", async ({ page }) => {
   await fakeBff(page, "SERVICE_OWNER", { proposals: [proposal()] });
   await page.goto("/responses/upgrades/proposal-1");
   const decision = page.getByRole("region", { name: "Decision" });
@@ -248,7 +225,7 @@ test("a service owner who doesn't own the service can read a proposal but not de
   await expect(decision.getByRole("button")).toHaveCount(0);
 });
 
-test("an assigned service owner can decide", async ({ page }) => {
+test("one drafted on its own: an assigned service owner can decide", async ({ page }) => {
   await fakeBff(page, "SERVICE_OWNER", { owners: [{ id: "owner-row", userId: "me", name: "Me" }], proposals: [proposal()] });
   await page.goto("/responses/upgrades/proposal-1");
   const decision = page.getByRole("region", { name: "Decision" });
@@ -256,7 +233,7 @@ test("an assigned service owner can decide", async ({ page }) => {
   await expect(decision.getByRole("button", { name: "Dismiss", exact: true })).toBeVisible();
 });
 
-test("whoever drafted a proposal may dismiss it, but someone else approves it", async ({ page }) => {
+test("one drafted on its own: whoever drafted it may dismiss it, but someone else approves it", async ({ page }) => {
   await fakeBff(page, "ANALYST", { proposals: [proposal({ createdBy: "me" })] });
   await page.goto("/responses/upgrades/proposal-1");
   const decision = page.getByRole("region", { name: "Decision" });
@@ -264,41 +241,42 @@ test("whoever drafted a proposal may dismiss it, but someone else approves it", 
   await expect(decision.getByText("You drafted this, so someone else approves it", { exact: false })).toBeVisible();
   await expect(decision.getByRole("button", { name: "Dismiss", exact: true })).toBeVisible();
   await expect(decision.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
-
-  await page.goto("/responses/review");
-  const drafted = page.getByRole("region", { name: "Drafted, awaiting a decision" });
-  await expect(drafted.getByText("You drafted this; someone else approves it")).toBeVisible();
 });
 
-test("a compliance admin audits upgrades but neither drafts nor decides them", async ({ page }) => {
-  // The proposal is for another component, so the impact page has log4j's upgrade to offer (or not).
-  await fakeBff(page, "COMPLIANCE_ADMIN", { proposals: [proposal({ componentId: "another-component" })] });
+test("one drafted on its own: a compliance admin audits it but doesn't decide", async ({ page }) => {
+  await fakeBff(page, "COMPLIANCE_ADMIN", { proposals: [proposal()] });
   await page.goto("/responses/upgrades/proposal-1");
   const decision = page.getByRole("region", { name: "Decision" });
   await expect(decision.getByText("You audit these decisions rather than make them.", { exact: false })).toBeVisible();
   await expect(decision.getByRole("button")).toHaveCount(0);
-
-  await page.goto(`/advisories/${SIGNAL}`);
-  await expect(page.getByText("An analyst or this service's owner can draft the upgrade.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Draft upgrade PR" })).toHaveCount(0);
 });
 
-test("the review queue holds what needs a person, history holds what was decided", async ({ page }) => {
+test("the queues list pull requests drafted on their own, and only while there are any", async ({ page }) => {
   const dismissed = proposal({
     id: "proposal-2", status: "DISMISSED", dismissReason: "Not reachable in our usage",
     decidedBy: "analyst-1", decidedAt: "2026-09-24T12:00:00Z",
   });
-  const { listedStatuses } = await fakeBff(page, "ANALYST", { proposals: [proposal(), dismissed] });
+  const inResponse = proposal({ id: "proposal-3", riskTicketId: "ticket-9" });
+  const { listed } = await fakeBff(page, "ANALYST", { proposals: [proposal(), dismissed, inResponse] });
 
   await page.goto("/responses/review");
-  const drafted = page.getByRole("region", { name: "Drafted, awaiting a decision" });
-  await expect(drafted.getByRole("link", { name: LOG4J.name })).toHaveAttribute("href", "/responses/upgrades/proposal-1");
-  await expect(drafted.getByText("Awaiting decision")).toBeVisible();
-  await expect(drafted.getByText("Not reachable in our usage")).toHaveCount(0);
+  const drafted = page.getByRole("region", { name: "Upgrade pull requests awaiting a decision" });
+  await expect(drafted.getByRole("link", { name: `${LOG4J.name} 2.14.1 → 2.17.1` }))
+    .toHaveAttribute("href", "/responses/upgrades/proposal-1");
+  await expect(drafted.getByRole("row")).toHaveCount(1 + 1);
 
   await page.goto("/responses/history");
   const decided = page.getByRole("region", { name: "Upgrade pull requests" });
-  await expect(decided.getByRole("link", { name: LOG4J.name })).toHaveAttribute("href", "/responses/upgrades/proposal-2");
+  await expect(decided.getByRole("link", { name: `${LOG4J.name} 2.14.1 → 2.17.1` }))
+    .toHaveAttribute("href", "/responses/upgrades/proposal-2");
   await expect(decided.getByText("Not reachable in our usage")).toBeVisible();
-  expect(distinct(listedStatuses)).toEqual(["PROPOSED,FAILED,OPENING", "OPENED,DISMISSED"]);
+  expect(distinct(listed).every((query) => query.includes("standalone=true"))).toBe(true);
+});
+
+test("with none drafted on their own, the queue shows no such section", async ({ page }) => {
+  await fakeBff(page, "ANALYST", { proposals: [proposal({ riskTicketId: "ticket-9" })] });
+  await page.goto("/responses/review");
+  await expect(page.getByRole("region", { name: "Responses awaiting a decision" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Regulator memos awaiting a decision" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Upgrade pull requests awaiting a decision" })).toHaveCount(0);
 });

@@ -3,11 +3,11 @@
 import { useEffect, useId, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronDown, GitPullRequest, Loader2 } from "lucide-react";
+import { ChevronDown, ClipboardList, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { DataPagination } from "@/components/app/data-pagination";
-import { UpgradeStatusBadge } from "@/components/app/responses/response-status";
+import { TicketStatusBadge, UpgradeStatusBadge } from "@/components/app/responses/response-status";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -29,7 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ApiError, upgradeApi } from "@/lib/api";
+import { ApiError, ticketApi, upgradeApi } from "@/lib/api";
 import type { ImpactTier, UpgradeRecommendation } from "@/lib/types";
 
 const TIER_CLASS: Record<ImpactTier, string> = {
@@ -43,8 +43,9 @@ const TIER_CLASS: Record<ImpactTier, string> = {
 /**
  * The upgrades Aegis recommends, found from the services' side — nobody has to know a CVE to find them.
  * With a `serviceId`, one service's vulnerable dependencies (its page), including those another package
- * pulls in; without one, every service's direct ones (the review queue), highest impact first.
- * `refreshSignal` re-reads the list, e.g. after an SBOM import.
+ * pulls in; without one, every service's direct ones (the review queue), highest impact first. Each row
+ * offers to draft a response — the risk ticket, and the upgrade pull request where Aegis can automate it —
+ * or links the one already drafted. `refreshSignal` re-reads the list, e.g. after an SBOM import.
  */
 export function RecommendedUpgrades({
   serviceId,
@@ -126,9 +127,12 @@ export function RecommendedUpgrades({
         </h2>
         <p className="text-xs text-muted-foreground">
           {forService
-            ? "Every dependency of this service a known advisory affects, and the version that fixes it."
+            ? "Every dependency of this service a known advisory affects, and the version that fixes it. A response " +
+              "drafts its risk ticket and, where Aegis can automate it, the upgrade pull request."
             : "Aegis checks every service's dependencies against the advisories it ingests, so there is nothing " +
-              "to look up. Drafting one shows the exact pull request; nothing is opened until someone approves it."}
+              "to look up. Drafting a response prepares the risk ticket and, where Aegis can automate it, one " +
+              "upgrade pull request for every manifest that declares the package. Nothing leaves Aegis until " +
+              "someone approves it."}
         </p>
       </div>
 
@@ -389,15 +393,25 @@ function RecommendationRow({ item, showService }: { item: UpgradeRecommendation;
             </>
           )}
           {item.component.ecosystem}
-          {item.manifestPath && (
+          {item.manifestPaths.length > 0 && (
             <>
               {" · "}
-              <span className="font-mono">{item.manifestPath}</span>
+              <span className="font-mono">{item.manifestPaths.join(", ")}</span>
             </>
           )}
         </span>
-        {item.reason && item.readiness !== "NO_REPOSITORY" && (
-          <span className="mt-1 block text-xs text-muted-foreground">{item.reason}</span>
+        {item.readiness === "NO_REPOSITORY" ? (
+          <span className="mt-1 block text-xs text-muted-foreground">
+            Ticket only until the service&apos;s repository is linked.{" "}
+            <Link
+              href={`/inventory/services/${item.serviceId}`}
+              className="font-medium text-primary underline-offset-4 hover:underline"
+            >
+              Link it →
+            </Link>
+          </span>
+        ) : (
+          item.reason && <span className="mt-1 block text-xs text-muted-foreground">Ticket only: {item.reason}</span>
         )}
       </TableCell>
       {showService && (
@@ -428,9 +442,25 @@ function RecommendationRow({ item, showService }: { item: UpgradeRecommendation;
   );
 }
 
-/** What can be done about it now: see the draft, draft one, link the repository — or nothing, with why. */
+/**
+ * What can be done about it now: see the response already drafted for it, draft one, or who can. A pull
+ * request drafted on its own before responses existed is linked as it is.
+ */
 function RecommendationAction({ item }: { item: UpgradeRecommendation }) {
-  if (item.proposal) {
+  if (item.response) {
+    return (
+      <span className="inline-flex flex-col items-end gap-1">
+        <TicketStatusBadge status={item.response.status} />
+        <Link
+          href={`/responses/tickets/${item.response.ticketId}`}
+          className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+        >
+          View response →
+        </Link>
+      </span>
+    );
+  }
+  if (item.proposal && !item.proposal.riskTicketId) {
     return (
       <span className="inline-flex flex-col items-end gap-1">
         <UpgradeStatusBadge status={item.proposal.status} />
@@ -443,30 +473,20 @@ function RecommendationAction({ item }: { item: UpgradeRecommendation }) {
       </span>
     );
   }
-  if (item.readiness === "NO_REPOSITORY") {
-    return (
-      <Link
-        href={`/inventory/services/${item.serviceId}`}
-        className="text-xs font-medium text-primary underline-offset-4 hover:underline"
-      >
-        Link the repository →
-      </Link>
-    );
-  }
-  if (item.readiness !== "READY") {
+  if (!item.changeSignalId) {
     return null;
   }
   if (!item.canDraft) {
     return (
       <span className="text-xs text-muted-foreground">
-        An analyst or the service&apos;s owner can draft it
+        An analyst or the service&apos;s owner can draft a response
       </span>
     );
   }
-  return <DraftButton item={item} />;
+  return <DraftResponseButton item={item} />;
 }
 
-function DraftButton({ item }: { item: UpgradeRecommendation }) {
+function DraftResponseButton({ item }: { item: UpgradeRecommendation }) {
   const router = useRouter();
   const [drafting, setDrafting] = useState(false);
 
@@ -474,15 +494,11 @@ function DraftButton({ item }: { item: UpgradeRecommendation }) {
     if (!item.changeSignalId) return;
     setDrafting(true);
     try {
-      const proposal = await upgradeApi.propose({
-        changeSignalId: item.changeSignalId,
-        serviceId: item.serviceId,
-        componentId: item.component.id,
-      });
-      toast.success("Upgrade drafted — review the pull request, then approve or dismiss it");
-      router.push(`/responses/upgrades/${proposal.id}`);
+      const response = await ticketApi.propose({ changeSignalId: item.changeSignalId, serviceId: item.serviceId });
+      toast.success("Response drafted — review it, then approve or dismiss it");
+      router.push(`/responses/tickets/${response.id}`);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Could not draft the upgrade.");
+      toast.error(err instanceof ApiError ? err.message : "Could not draft the response.");
       setDrafting(false);
     }
   }
@@ -496,8 +512,8 @@ function DraftButton({ item }: { item: UpgradeRecommendation }) {
         </>
       ) : (
         <>
-          <GitPullRequest />
-          Draft PR
+          <ClipboardList />
+          Draft response
         </>
       )}
     </Button>

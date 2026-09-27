@@ -1,6 +1,7 @@
 "use client";
 
 import { ResourceManager } from "@/components/app/inventory/resource-manager";
+import { ComponentUsedBy } from "@/components/app/inventory/used-by";
 import type { Column, ListQuery, SelectFilterSpec } from "@/components/app/inventory/resource-manager";
 import { inventoryApi } from "@/lib/api";
 import type { SoftwareComponent } from "@/lib/types";
@@ -43,6 +44,8 @@ const columns: Column<SoftwareComponent>[] = [
   },
 ];
 
+const usedBy = { label: "Used by", render: (component: SoftwareComponent) => <ComponentUsedBy component={component} /> };
+
 export default function ComponentsPage() {
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6">
@@ -50,7 +53,8 @@ export default function ComponentsPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Components</h1>
         <p className="text-sm text-muted-foreground">
           Software components (ecosystem, name, version) — created by importing a service&apos;s
-          SBOM, or added by hand here.
+          SBOM, or added by hand here. <span className="font-medium text-foreground">Used by</span> shows
+          every service using a package, in any version, and whether directly or through which component.
         </p>
       </div>
 
@@ -83,6 +87,7 @@ export default function ComponentsPage() {
         searchPlaceholder="Name or version…"
         selectFilters={filters}
         defaultSort="name,asc"
+        rowDetail={usedBy}
       />
     </div>
   );

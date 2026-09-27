@@ -269,9 +269,13 @@ export function ServiceDetailView({ serviceId }: { serviceId: string }) {
       <RelationshipSection serviceId={serviceId} canWrite={canGovern} config={ownersConfig} />
 
       <p className="text-xs text-muted-foreground">
-        Wired up? Trace the blast radius on the{" "}
-        <Link href="/inventory/map" className="underline underline-offset-4 hover:text-foreground">
-          dependency map
+        Which other services use one of these? Open <span className="font-medium">Used by</span> on its row in{" "}
+        <Link href="/inventory/components" className="underline underline-offset-4 hover:text-foreground">
+          Components
+        </Link>{" "}
+        or{" "}
+        <Link href="/inventory/vendors" className="underline underline-offset-4 hover:text-foreground">
+          Vendors
         </Link>
         .
       </p>
