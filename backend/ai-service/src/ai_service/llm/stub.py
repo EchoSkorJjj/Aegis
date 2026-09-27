@@ -28,7 +28,8 @@ class StubLlmClient:
                 case "object":
                     return {key: sample(value) for key, value in node["properties"].items()}
                 case "array":
-                    return []
+                    # One sample item, so required lists (a ticket's actions) are filled.
+                    return [sample(node["items"])] if "items" in node else []
                 case "boolean":
                     return False
                 case "integer" | "number":
@@ -40,7 +41,7 @@ class StubLlmClient:
 
         output = sample(json_schema)
         passages = re.findall(r'<passage id="([A-Z][0-9]+)">', user)
-        if isinstance(output, dict) and "cited_passage_ids" in output and passages:
+        if isinstance(output, dict) and "cited_passage_ids" in output:
             output["cited_passage_ids"] = passages[:1]
         return LlmResult(json.dumps(output), self.provider, self.model, 0, 0)
 

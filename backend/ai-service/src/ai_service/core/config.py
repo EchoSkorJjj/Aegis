@@ -25,7 +25,8 @@ class Settings(BaseSettings):
     groq_base_url: str = "https://api.groq.com/openai/v1"
     # One wall-clock deadline, including retries and backoff; core waits 30s.
     llm_timeout_seconds: float = Field(default=20, gt=0, le=20)
-    llm_max_output_tokens: int = Field(default=1000, gt=0)
+    # Room for a memo's four sections; a response cut short is invalid JSON and costs a retry.
+    llm_max_output_tokens: int = Field(default=1500, gt=0)
     llm_max_input_chars: int = Field(default=16000, gt=0)
     llm_max_requests_per_minute: int = Field(default=25, gt=0)
     llm_max_tokens_per_minute: int = Field(default=7000, gt=0)

@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ai_service.capabilities.draft import MemoOutput, TicketOutput
 from ai_service.llm.structured import strict_schema
 
 
@@ -41,3 +42,12 @@ def test_transform_does_not_mutate_model_schema():
     before = StructuredOutput.model_json_schema()
     strict_schema(StructuredOutput)
     assert StructuredOutput.model_json_schema() == before
+
+
+def test_ticket_and_memo_schemas_require_every_section_and_leave_bounds_to_local_validation():
+    for model, sections in [(TicketOutput, {"summary", "risk", "impact", "actions", "cited_passage_ids"}),
+                            (MemoOutput, {"summary", "impact", "measures", "next_steps", "cited_passage_ids"})]:
+        schema = strict_schema(model)
+        assert set(schema["required"]) == sections
+        assert schema["additionalProperties"] is False
+        assert "maxLength" not in str(schema) and "minItems" not in str(schema)

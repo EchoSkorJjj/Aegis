@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from ai_service.capabilities.assess import AssessmentOutput, assess
-from ai_service.capabilities.draft import DraftOutput, draft
+from ai_service.capabilities.draft import DraftOutput, MemoOutput, TicketOutput, draft
 from ai_service.core.config import Settings
 from ai_service.core.errors import BadGateway, BadRequest
 from ai_service.llm.base import LlmResult
@@ -161,33 +161,89 @@ def test_assessment_splits_each_source_without_losing_characters():
     assert max(map(len, prompt.passages.values())) <= PASSAGE_CHARS
 
 
-@pytest.mark.parametrize("draft_type", ["risk_ticket", "upgrade", "memo"])
-def test_draft_preserves_requested_type_and_resolves_exact_context(draft_type):
+def ticket_output(**changes):
+    return {
+        "summary": "Payments API runs a log4j-core version CVE-2021-44228 affects.",
+        "risk": "Remote code execution through crafted log messages.",
+        "impact": "An attacker could run code on an internet-facing service.",
+        "actions": ["Upgrade log4j-core to 2.17.1.", "Confirm no other service uses 2.14.1."],
+        "cited_passage_ids": ["C1"],
+        **changes,
+    }
+
+
+def memo_output(**changes):
+    return {
+        "summary": "A third-party payments provider reported an outage on 1 October.",
+        "impact": "Card payments through Payments API failed; clients affected: [To be confirmed].",
+        "measures": "Traffic was routed to the secondary provider.",
+        "next_steps": "Confirm the duration and clients affected before the intermediate report.",
+        "cited_passage_ids": ["C1"],
+        **changes,
+    }
+
+
+OUTPUTS = {
+    "upgrade": {"content": "Draft for human review.", "cited_passage_ids": ["C1"]},
+    "risk_ticket": ticket_output(),
+    "memo": memo_output(),
+}
+
+
+def test_upgrade_draft_preserves_type_and_resolves_exact_context():
     context = "  Upgrade evidence <safe-version> & limits.\n"
-    engine = RecordingEngine({"content": "Draft for human review.", "cited_passage_ids": ["C1"]})
+    engine = RecordingEngine(OUTPUTS["upgrade"])
     result = asyncio.run(
-        draft(DraftRequest(finding_id="opaque-secret-id", draft_type=draft_type, context=context), engine)
+        draft(DraftRequest(finding_id="opaque-secret-id", draft_type="upgrade", context=context), engine)
     )
-    assert result.draft_type == draft_type
+    assert result.draft_type == "upgrade"
     assert result.content == "Draft for human review."
     assert result.citations == [context]
-    assert set(result.model_dump()) == {"draft_type", "content", "citations"}
+    assert result.ticket is None and result.memo is None
     assert engine.calls[0]["template_id"] == "draft.v1"
     assert "opaque-secret-id" not in engine.calls[0]["user"] + engine.calls[0]["system"]
 
 
+def test_risk_ticket_returns_typed_sections_and_a_readable_draft():
+    engine = RecordingEngine(ticket_output())
+    result = asyncio.run(
+        draft(DraftRequest(finding_id="f1", draft_type="risk_ticket", context="CVE-2021-44228 evidence"), engine)
+    )
+    assert engine.calls[0]["template_id"] == "draft_risk_ticket.v1"
+    assert engine.calls[0]["output_model"] is TicketOutput
+    assert result.ticket.actions == ["Upgrade log4j-core to 2.17.1.", "Confirm no other service uses 2.14.1."]
+    assert result.memo is None
+    assert result.content.startswith("Payments API runs a log4j-core version")
+    assert "- Upgrade log4j-core to 2.17.1." in result.content
+    assert result.citations == ["CVE-2021-44228 evidence"]
+
+
+def test_memo_returns_typed_sections_under_the_dora_template():
+    engine = RecordingEngine(memo_output())
+    result = asyncio.run(draft(DraftRequest(finding_id="f1", draft_type="memo", context="outage evidence"), engine))
+    call = engine.calls[0]
+    assert call["template_id"] == "draft_memo.v1"
+    assert call["output_model"] is MemoOutput
+    assert "Digital Operational" in call["system"] and "[To be confirmed]" in call["system"]
+    assert result.memo.next_steps.startswith("Confirm the duration")
+    assert result.ticket is None
+    assert "Measures\nTraffic was routed" in result.content
+
+
+@pytest.mark.parametrize("draft_type", ["upgrade", "risk_ticket", "memo"])
 @pytest.mark.parametrize("cited_ids", [[], ["C2"], ["A1"]])
-def test_draft_with_context_requires_known_citations(cited_ids):
-    engine = RecordingEngine({"content": "Draft.", "cited_passage_ids": cited_ids})
+def test_draft_with_context_requires_known_citations(draft_type, cited_ids):
+    engine = RecordingEngine({**OUTPUTS[draft_type], "cited_passage_ids": cited_ids})
     with pytest.raises(ValueError):
         asyncio.run(
-            draft(DraftRequest(finding_id="f1", draft_type="memo", context="evidence"), engine)
+            draft(DraftRequest(finding_id="f1", draft_type=draft_type, context="evidence"), engine)
         )
 
 
-def test_draft_without_context_can_offer_an_uncited_outline():
-    engine = RecordingEngine({"content": "Evidence missing: draft outline.", "cited_passage_ids": []})
-    result = asyncio.run(draft(DraftRequest(finding_id="f1", draft_type="memo"), engine))
+@pytest.mark.parametrize("draft_type", ["upgrade", "risk_ticket", "memo"])
+def test_draft_without_context_can_offer_an_uncited_outline(draft_type):
+    engine = RecordingEngine({**OUTPUTS[draft_type], "cited_passage_ids": []})
+    result = asyncio.run(draft(DraftRequest(finding_id="f1", draft_type=draft_type), engine))
     assert result.citations == []
 
 
@@ -200,6 +256,40 @@ def test_draft_output_is_strict_and_bounded(changes):
         DraftOutput.model_validate_json(
             json.dumps({"content": "Draft.", "cited_passage_ids": [], **changes})
         )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"actions": []},
+        {"actions": ["step"] * 7},
+        {"actions": ["x" * 201]},
+        {"summary": "x" * 301},
+        {"summary": "   "},
+        {"risk": ""},
+        {"priority": "HIGH"},
+        {"actions": "Upgrade it."},
+    ],
+)
+def test_ticket_output_is_strict_and_bounded(changes):
+    with pytest.raises(ValidationError):
+        TicketOutput.model_validate_json(json.dumps(ticket_output(**changes)))
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [{"summary": "x" * 1001}, {"measures": ""}, {"next_steps": 3}, {"classification": "major"}],
+)
+def test_memo_output_is_strict_and_bounded(changes):
+    with pytest.raises(ValidationError):
+        MemoOutput.model_validate_json(json.dumps(memo_output(**changes)))
+
+
+def test_memo_output_without_a_section_is_rejected():
+    output = memo_output()
+    del output["measures"]
+    with pytest.raises(ValidationError):
+        MemoOutput.model_validate_json(json.dumps(output))
 
 
 @pytest.mark.parametrize(
@@ -292,7 +382,17 @@ def test_real_generator_retries_draft_citations_before_returning_wire_response()
     )
     engine = StructuredGenerator(Settings(_env_file=None), client)
     result = asyncio.run(
-        draft(DraftRequest(finding_id="f1", draft_type="memo", context="source"), engine)
+        draft(DraftRequest(finding_id="f1", draft_type="upgrade", context="source"), engine)
     )
     assert result.citations == ["source"]
+    assert len(client.calls) == 2
+
+
+def test_real_generator_retries_a_ticket_without_actions_then_returns_its_sections():
+    client = ScriptedClient([ticket_output(actions=[]), ticket_output()])
+    engine = StructuredGenerator(Settings(_env_file=None), client)
+    result = asyncio.run(
+        draft(DraftRequest(finding_id="f1", draft_type="risk_ticket", context="source"), engine)
+    )
+    assert len(result.ticket.actions) == 2
     assert len(client.calls) == 2

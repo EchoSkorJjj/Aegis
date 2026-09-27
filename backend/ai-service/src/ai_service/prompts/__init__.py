@@ -37,9 +37,11 @@ def build_prompt(
         f'<passage id="{passage_id}">{escape(text, quote=False)}</passage>'
         for passage_id, text in passages.items()
     )
+    # A risk ticket and a memo each have their own template and output; an upgrade uses the generic one.
+    template = f"draft_{draft_type}" if draft_type in ("risk_ticket", "memo") else capability
     resources = files(__package__)
-    system = resources.joinpath(f"{capability}.system.md").read_text(encoding="utf-8")
-    user = resources.joinpath(f"{capability}.user.md").read_text(encoding="utf-8").format(
+    system = resources.joinpath(f"{template}.system.md").read_text(encoding="utf-8")
+    user = resources.joinpath(f"{template}.user.md").read_text(encoding="utf-8").format(
         passages=blocks, draft_type=draft_type
     )
-    return Prompt(f"{capability}.v1", system, user, passages)
+    return Prompt(f"{template}.v1", system, user, passages)
