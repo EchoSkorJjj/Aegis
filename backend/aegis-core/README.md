@@ -155,11 +155,15 @@ that fixes it, drafted and approved together. Nothing leaves Aegis without an ap
   `canDraft` follows the same rule.
 - **One pull request per vulnerability per repository** (`UpgradeProposalService.plan`): every direct
   dependency the vulnerability matches for the service, in **every manifest** the SBOM import found it
-  declared in (V26: `business_service_components.manifest_paths`; the ecosystem's manifest at the root when
-  none was recorded). A dependency another current PR already upgrades is left to it; what can't be
-  automated — transitive, an unsupported ecosystem, no fix, no linked repository — is recorded on the ticket
-  as `Not automated: …` evidence instead. Edits are JSON on the proposal (V27); several in one file are
-  applied in turn.
+  declared in (V26: `business_service_components.manifest_paths`; the ecosystem's manifest at the root only
+  when nothing was recorded — an uploaded SBOM, a component linked by hand). A dependency another current PR
+  already upgrades is left to it; what can't be automated — transitive, an unsupported ecosystem, no fix, no
+  linked repository, **found only in files Aegis doesn't edit** (a Gradle lockfile, `poetry.lock`,
+  `requirements-dev.txt`, a jar), or **a repository host no pull-request provider serves** (only the GitHub App
+  opens PRs, so GitLab and Bitbucket get tickets) — is recorded on the ticket as `Not automated: …` evidence
+  instead, and the recommendation says so up front (`UNSUPPORTED`, with the reason) rather than failing at
+  approval. A dependency also found in such a file gets its editable manifests upgraded and the ticket names
+  the rest. Edits are JSON on the proposal (V27); several in one file are applied in turn.
 - **The safe version is deterministic** (`matching.UpgradeTargets`): starting from the installed version,
   move to the fixed version of whichever affected range still contains it, across **every** advisory
   Aegis holds for the package, not only the one being remediated (Log4Shell's own fix, 2.15.0, was still
@@ -402,9 +406,10 @@ git gives up on a transfer slower than 1 KB/s for 30 seconds rather than waiting
 they declare below them — taken literally, every library would look transitive and nothing could ever be
 upgraded, and two repositories' private `client@0.0.0` would share coordinates. A repository import
 (`inventory.sbom.RepositoryLayout`) removes those project packages, makes what they declare the service's
-direct dependencies, and records on each link every manifest that declares it (`business_service_components.
+direct dependencies, and records on each link every file that declares it (`business_service_components.
 manifest_paths`, **V26**, replacing V20's single path: `client/package.json`, `backend/aegis-core/pom.xml`; the
-`package.json` beside a pnpm/yarn lockfile). The same version declared in two projects is one component that syft
+`package.json` beside a pnpm/yarn lockfile; and a file Aegis doesn't edit as itself — `app/gradle.lockfile`,
+`poetry.lock` — so an upgrade never guesses a manifest instead). The same version declared in two projects is one component that syft
 reports with a location for each, so its link lists both, and a response's upgrade pull request edits every
 one of them. Services imported before V26 keep the one manifest V20 recorded; re-import them. A version syft could
 not resolve (`UNKNOWN`, a parent-managed Maven version) is skipped rather than imported.

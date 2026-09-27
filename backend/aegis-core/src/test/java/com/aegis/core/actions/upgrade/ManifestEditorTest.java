@@ -11,6 +11,20 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ManifestEditorTest {
 
+    @Test
+    void anUpgradeEditsTheRecordedManifestsItCanTheRootOnlyWhenNoneWereRecordedAndNeverGuesses() {
+        ManifestEditor maven = new MavenPomEditor();
+        // Nothing recorded (an uploaded SBOM, a hand-linked component): the root manifest, as before.
+        assertThat(maven.manifestsFor(List.of())).containsExactly("pom.xml");
+        assertThat(maven.manifestsFor(List.of("svc/pom.xml", " svc/pom.xml ", "gradle.lockfile", "../pom.xml")))
+                .containsExactly("svc/pom.xml");
+        // Recorded only in files Aegis doesn't edit: none, so no pull request is planned against a guess.
+        assertThat(maven.manifestsFor(List.of("app/gradle.lockfile", "lib/vendored.jar"))).isEmpty();
+        assertThat(new PipRequirementsEditor().manifestsFor(List.of("poetry.lock", "requirements-dev.txt"))).isEmpty();
+        assertThat(new NpmPackageJsonEditor().manifestsFor(List.of("client/package.json", "server/package.json")))
+                .containsExactly("client/package.json", "server/package.json");
+    }
+
     private static final String LOG4J = "org.apache.logging.log4j:log4j-core";
 
     @Test

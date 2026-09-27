@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import com.aegis.core.advisories.Advisory;
 import com.aegis.core.advisories.AdvisoryStore;
@@ -34,6 +35,8 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -165,6 +168,86 @@ class UpgradeRecommendationIntegrationTest extends AbstractInventoryIntegrationT
                 .filter(item -> "UNSUPPORTED".equals(item.get("readiness"))).findFirst().orElseThrow();
         assertThat(after).containsEntry("proposal", null);
         assertThat(JsonPath.<String>read(after, "$.response.ticketId")).isEqualTo(JsonPath.<String>read(created, "$.id"));
+    }
+
+    /**
+     * A dependency the repository declares only in a file Aegis doesn't edit — a Gradle lockfile, poetry.lock — gets
+     * a ticket saying where it lives, never a pull request against a guessed root manifest; one declared in a pom as
+     * well gets its pom upgraded, and the ticket names the file left for a person.
+     */
+    @Test
+    void aDependencyFoundOnlyInFilesAegisDoesNotEditGetsATicketSayingWhere() throws Exception {
+        String tag = Long.toHexString(Math.abs(UUID.randomUUID().getMostSignificantBits()));
+        BusinessService service = inventory.createBusinessService(
+                "Gradle " + tag, BusinessCriticality.CRITICAL, ServiceExposure.INTERNET_FACING);
+        inventory.linkServiceRepository(service.getId(),
+                RepositoryUrl.parse("https://gitlab.com/acme/gradle-" + tag, List.of("gitlab.com")), null);
+        String gradleLib = "com.acme:gradle-lib-" + tag;
+        String poetryLib = "poetry-lib-" + tag;
+        String mixedLib = "com.acme:mixed-lib-" + tag;
+        // As an import from the repository records them: the file syft found each one in.
+        store.linkRepositoryComponent(service.getId(),
+                inventory.createSoftwareComponent("maven", gradleLib, "1.0.0").getId(), List.of("app/gradle.lockfile"));
+        store.linkRepositoryComponent(service.getId(),
+                inventory.createSoftwareComponent("pypi", poetryLib, "1.0.0").getId(), List.of("poetry.lock"));
+        store.linkRepositoryComponent(service.getId(), inventory.createSoftwareComponent("maven", mixedLib, "1.0.0")
+                .getId(), List.of("svc/pom.xml", "app/gradle.lockfile"));
+        advisory("CVE-2099-" + tag + "1", "9.1", AffectedProduct.ofPackage("Maven", gradleLib, null, "1.0.0", null, null, "1.2.0"));
+        advisory("CVE-2099-" + tag + "2", "8.1", AffectedProduct.ofPackage("PyPI", poetryLib, null, "1.0.0", null, null, "1.2.0"));
+        advisory("CVE-2099-" + tag + "3", "7.1", AffectedProduct.ofPackage("Maven", mixedLib, null, "1.0.0", null, null, "1.2.0"));
+
+        Map<String, Map<String, Object>> byName = recommendations(service.getId(), as("ANALYST", UUID.randomUUID()))
+                .stream().collect(Collectors.toMap(item -> JsonPath.read(item, "$.component.name"), item -> item));
+
+        assertThat(byName.get(gradleLib)).containsEntry("readiness", "UNSUPPORTED")
+                .containsEntry("reason", "Found in app/gradle.lockfile, which Aegis doesn't edit; upgrade it by hand");
+        assertThat(byName.get(poetryLib)).containsEntry("readiness", "UNSUPPORTED")
+                .containsEntry("reason", "Found in poetry.lock, which Aegis doesn't edit; upgrade it by hand");
+        assertThat(byName.get(mixedLib)).containsEntry("readiness", "READY");
+        mvc.perform(post("/api/actions/risk-tickets").with(as("ANALYST", UUID.randomUUID()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(response(byName.get(gradleLib).get("changeSignalId"), service)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.pullRequests").isEmpty())
+                .andExpect(jsonPath("$.evidence").value(hasItem("Not automated: " + gradleLib + " 1.0.0 is found in "
+                        + "app/gradle.lockfile, which Aegis doesn't edit; upgrade it by hand")));
+        mvc.perform(post("/api/actions/risk-tickets").with(as("ANALYST", UUID.randomUUID()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(response(byName.get(mixedLib).get("changeSignalId"), service)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.pullRequests[0].edits[*].manifestPath", contains("svc/pom.xml")))
+                .andExpect(jsonPath("$.evidence").value(hasItem("Not automated: " + mixedLib + " 1.0.0 is also found in "
+                        + "app/gradle.lockfile, which Aegis doesn't edit; upgrade it there by hand")));
+    }
+
+    /** A repository on a host no pull-request provider serves gets a ticket saying so, not a PR that fails later. */
+    @Test
+    void aRepositoryNoPullRequestProviderServesGetsATicketSayingSo() throws Exception {
+        String tag = Long.toHexString(Math.abs(UUID.randomUUID().getMostSignificantBits()));
+        String lib = "com.acme:bb-lib-" + tag;
+        BusinessService service = inventory.createBusinessService(
+                "Bitbucket " + tag, BusinessCriticality.HIGH, ServiceExposure.INTERNAL);
+        inventory.linkServiceRepository(service.getId(),
+                RepositoryUrl.parse("https://bitbucket.org/acme/bb-" + tag, List.of("bitbucket.org")), null);
+        store.linkRepositoryComponent(service.getId(),
+                inventory.createSoftwareComponent("maven", lib, "1.0.0").getId(), List.of("pom.xml"));
+        advisory("CVE-2099-" + tag + "1", "9.1", AffectedProduct.ofPackage("Maven", lib, null, "1.0.0", null, null, "1.2.0"));
+
+        Map<String, Object> item = recommendations(service.getId(), as("ANALYST", UUID.randomUUID())).getFirst();
+
+        String unsupported = "No pull-request provider is enabled for bitbucket.org, so Aegis can't open the pull request";
+        assertThat(item).containsEntry("readiness", "UNSUPPORTED").containsEntry("toVersion", "1.2.0")
+                .containsEntry("reason", unsupported + "; upgrade it by hand");
+        mvc.perform(post("/api/actions/risk-tickets").with(as("ANALYST", UUID.randomUUID()))
+                        .contentType(MediaType.APPLICATION_JSON).content(response(item.get("changeSignalId"), service)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.pullRequests").isEmpty())
+                .andExpect(jsonPath("$.evidence").value(hasItem("Not automated: " + unsupported + "; upgrade " + lib
+                        + " by hand")));
+    }
+
+    private static String response(Object changeSignalId, BusinessService service) {
+        return "{\"changeSignalId\":\"%s\",\"serviceId\":\"%s\"}".formatted(changeSignalId, service.getId());
     }
 
     private static String response(Object changeSignalId, Estate estate) {

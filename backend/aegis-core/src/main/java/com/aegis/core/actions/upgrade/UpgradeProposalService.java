@@ -89,6 +89,7 @@ public class UpgradeProposalService {
     private final PrProviders providers;
     private final UpgradeProposalStore store;
     private final SbomGenerationProperties repositoryHosts;
+    private final PullRequestHosts pullRequestHosts;
 
     public UpgradeProposalService(
             InventoryService inventory,
@@ -99,7 +100,8 @@ public class UpgradeProposalService {
             AiDrafter drafter,
             PrProviders providers,
             UpgradeProposalStore store,
-            SbomGenerationProperties repositoryHosts) {
+            SbomGenerationProperties repositoryHosts,
+            PullRequestHosts pullRequestHosts) {
         this.inventory = inventory;
         this.inventoryStore = inventoryStore;
         this.scoring = scoring;
@@ -109,15 +111,18 @@ public class UpgradeProposalService {
         this.providers = providers;
         this.store = store;
         this.repositoryHosts = repositoryHosts;
+        this.pullRequestHosts = pullRequestHosts;
     }
 
     /**
      * What the upgrade pull request of a response to this change in this service would edit: every direct
      * dependency the change matches, in every manifest the SBOM import found it declared in (the ecosystem's
-     * manifest at the repository root when it found none), each moved to the lowest version that clears every
+     * manifest at the repository root when it recorded none, and none at all when it recorded only files Aegis
+     * doesn't edit), each moved to the lowest version that clears every
      * advisory with a fix for its package ({@link UpgradeTargets}). A dependency another current pull request
      * already upgrades is left to that one. What can't be automated — pulled in by another package, an
-     * ecosystem whose manifest Aegis doesn't edit, no fixed version, no linked repository — is listed with why.
+     * ecosystem or a manifest Aegis doesn't edit, no fixed version, no linked repository, a repository host no
+     * pull-request provider serves — is listed with why.
      * Deterministic, and writes nothing.
      */
     public UpgradePlan plan(UUID changeSignalId, UUID serviceId) {
@@ -170,6 +175,13 @@ public class UpgradeProposalService {
                         + " (" + component.ecosystem() + ") by hand");
                 continue;
             }
+            List<String> recorded = declaredIn.getOrDefault(component.id(), List.of());
+            List<String> manifests = editor.get().manifestsFor(recorded);
+            if (manifests.isEmpty()) {
+                notAutomated.add(component.name() + " " + component.version() + " is found in "
+                        + String.join(", ", recorded) + ", which Aegis doesn't edit; upgrade it by hand");
+                continue;
+            }
             UpgradeTarget target;
             try {
                 target = targets.resolve(changeSignalId, component);
@@ -179,7 +191,7 @@ public class UpgradeProposalService {
             }
             vulnerabilityId = target.vulnerabilityId();
             boolean added = false;
-            for (String manifest : manifests(declaredIn.getOrDefault(component.id(), List.of()), editor.get())) {
+            for (String manifest : manifests) {
                 if (claimed.contains(claim(component.id(), manifest))) {
                     notAutomated.add(component.name() + " in " + manifest
                             + " is already being upgraded by another upgrade pull request");
@@ -194,6 +206,12 @@ public class UpgradeProposalService {
             if (added) {
                 checked.addAll(target.checked());
                 notCleared.addAll(target.notCleared());
+                List<String> elsewhere = recorded.stream().map(String::strip)
+                        .filter(path -> !manifests.contains(path)).distinct().toList();
+                if (!elsewhere.isEmpty()) {
+                    notAutomated.add(component.name() + " " + component.version() + " is also found in "
+                            + String.join(", ", elsewhere) + ", which Aegis doesn't edit; upgrade it there by hand");
+                }
                 if (chain.explanation() != null && !chain.explanation().isBlank()) {
                     evidence.add(chain.explanation());
                 }
@@ -208,6 +226,13 @@ public class UpgradeProposalService {
             notAutomated.addFirst("Link the service's repository so Aegis can draft the upgrade pull request for "
                     + edits.stream().map(Edit::packageName).distinct().collect(Collectors.joining(", ")));
             edits.clear();
+        } else if (!edits.isEmpty()) {
+            String unsupported = pullRequestHosts.unsupported(service.getRepositoryUrl());
+            if (unsupported != null) {
+                notAutomated.addFirst(unsupported + "; upgrade "
+                        + edits.stream().map(Edit::packageName).distinct().collect(Collectors.joining(", ")) + " by hand");
+                edits.clear();
+            }
         }
         return new UpgradePlan(changeSignalId, serviceId, impact.change(),
                 vulnerabilityId == null ? impact.change().externalId() : vulnerabilityId, edits, notAutomated,
@@ -423,22 +448,6 @@ public class UpgradeProposalService {
      * The manifests to edit: those the SBOM import recorded that fit this editor, else the ecosystem's
      * manifest at the repository root.
      */
-    private static List<String> manifests(List<String> recorded, ManifestEditor editor) {
-        List<String> usable = new ArrayList<>();
-        for (String path : recorded) {
-            String trimmed = path == null ? "" : path.trim();
-            try {
-                FileChange.requireSafePath(trimmed);
-            } catch (ApiExceptions.BadRequest unsafe) {
-                continue;
-            }
-            if (trimmed.equals(editor.fileName()) || trimmed.endsWith("/" + editor.fileName())) {
-                usable.add(trimmed);
-            }
-        }
-        return usable.isEmpty() ? List.of(editor.fileName()) : usable;
-    }
-
     private static String claim(UUID componentId, String manifestPath) {
         return componentId + " " + manifestPath;
     }

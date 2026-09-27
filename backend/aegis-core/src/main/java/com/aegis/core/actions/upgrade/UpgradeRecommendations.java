@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -60,14 +61,16 @@ public class UpgradeRecommendations {
     private final ImpactScorer scorer;
     private final UpgradeProposalStore proposals;
     private final ResponseDirectory responses;
+    private final PullRequestHosts pullRequestHosts;
 
     public UpgradeRecommendations(InventoryStore inventory, VulnerableDependencies vulnerable, ImpactScorer scorer,
-            UpgradeProposalStore proposals, ResponseDirectory responses) {
+            UpgradeProposalStore proposals, ResponseDirectory responses, PullRequestHosts pullRequestHosts) {
         this.inventory = inventory;
         this.vulnerable = vulnerable;
         this.scorer = scorer;
         this.proposals = proposals;
         this.responses = responses;
+        this.pullRequestHosts = pullRequestHosts;
     }
 
     /** Whether Aegis can draft the pull request now and, if not, what stands in the way. */
@@ -78,7 +81,11 @@ public class UpgradeRecommendations {
         NO_REPOSITORY,
         /** Pulled in by another dependency; upgrading that one, or pinning this one, is a person's call. */
         TRANSITIVE,
-        /** An ecosystem whose manifest Aegis does not edit yet. */
+        /**
+         * Aegis can't open this pull request: an ecosystem it doesn't edit, a dependency found only in files it
+         * doesn't edit (a Gradle lockfile, {@code poetry.lock}), or a repository host no pull-request provider
+         * serves. The reason says which.
+         */
         UNSUPPORTED,
         /** No advisory publishes a version that provably fixes it. */
         NO_FIX
@@ -177,21 +184,30 @@ public class UpgradeRecommendations {
 
         Readiness readiness;
         String reason;
+        Optional<ManifestEditor> editor = ManifestEditor.forEcosystem(component.ecosystem());
+        String unsupportedHost;
         if (dependency.via() != null) {
             readiness = Readiness.TRANSITIVE;
             reason = component.name() + " comes in through " + dependency.via().name() + "; upgrade "
                     + dependency.via().name() + ", or pin " + component.name()
                     + (toVersion == null ? "" : " to " + toVersion) + " by hand";
-        } else if (ManifestEditor.forEcosystem(component.ecosystem()).isEmpty()) {
+        } else if (editor.isEmpty()) {
             readiness = Readiness.UNSUPPORTED;
             reason = "Aegis drafts upgrades for Maven, npm and PyPI manifests; upgrade this "
                     + component.ecosystem() + " package by hand";
+        } else if (editor.get().manifestsFor(dependency.manifestPaths()).isEmpty()) {
+            readiness = Readiness.UNSUPPORTED;
+            reason = "Found in " + String.join(", ", dependency.manifestPaths())
+                    + ", which Aegis doesn't edit; upgrade it by hand";
         } else if (toVersion == null) {
             readiness = Readiness.NO_FIX;
             reason = blocked != null ? blocked : "No advisory publishes a fixed version to upgrade to";
         } else if (service.getRepositoryUrl() == null) {
             readiness = Readiness.NO_REPOSITORY;
             reason = "Link the service's repository so Aegis can draft the pull request";
+        } else if ((unsupportedHost = pullRequestHosts.unsupported(service.getRepositoryUrl())) != null) {
+            readiness = Readiness.UNSUPPORTED;
+            reason = unsupportedHost + "; upgrade it by hand";
         } else {
             readiness = Readiness.READY;
             reason = null;

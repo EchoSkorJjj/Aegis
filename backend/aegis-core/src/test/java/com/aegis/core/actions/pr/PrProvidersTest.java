@@ -39,6 +39,16 @@ class PrProvidersTest {
     }
 
     @Test
+    void supportsSaysUpFrontWhetherAPullRequestCanBeOpened() {
+        assertThat(new PrProviders(List.of(new RecordingPrProvider("github.com"))).supports(REPOSITORY)).isTrue();
+        assertThat(new PrProviders(List.of()).supports(REPOSITORY)).isFalse();
+        assertThat(new PrProviders(List.of(new RecordingPrProvider("gitlab.com"))).supports(REPOSITORY)).isFalse();
+        assertThat(new PrProviders(List.of(new RecordingPrProvider("github.com"), new RecordingPrProvider("github.com")))
+                .supports(REPOSITORY)).as("forRepository would refuse two").isFalse();
+        assertThat(new PrProviders(List.of(new RecordingPrProvider("github.com"))).supports(null)).isFalse();
+    }
+
+    @Test
     void ambiguousProvidersAreRefusedAndRegistryDefensivelyCopiesInput() {
         var first = new RecordingPrProvider("github.com");
         var second = new RecordingPrProvider("github.com");

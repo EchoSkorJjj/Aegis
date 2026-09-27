@@ -34,7 +34,9 @@ import com.aegis.core.inventory.sbom.CycloneDxBom.Property;
  * roots already; syft leaves dev dependencies out, so a dev tool is never mistaken for a project.)
  *
  * @param bom            the SBOM with the project packages removed and their dependencies hung on the root
- * @param manifestsByRef the manifests declaring each direct dependency, by bom-ref, where they are known
+ * @param manifestsByRef the files declaring each direct dependency, by bom-ref, where they are known: the manifest
+ *                       an upgrade edits (an npm lockfile's {@code package.json}, a {@code pom.xml}), or the file
+ *                       itself when Aegis doesn't edit it (a Gradle lockfile, {@code poetry.lock}, a jar)
  * @param projects       the project packages removed — a re-import unlinks them from the service
  */
 record RepositoryLayout(CycloneDxBom bom, Map<String, List<String>> manifestsByRef, List<Component> projects) {
@@ -124,15 +126,16 @@ record RepositoryLayout(CycloneDxBom bom, Map<String, List<String>> manifestsByR
     }
 
     /**
-     * The manifest an upgrade of this package edits, where it is one Aegis can edit: the {@code pom.xml}
-     * that declares it, the {@code package.json} beside the lockfile that pins it, or a
-     * {@code requirements.txt}. Repository-relative, without a leading slash; null otherwise.
+     * The file declaring this package: the {@code package.json} beside the npm lockfile that pins it (what an upgrade
+     * edits), else the file itself — a {@code pom.xml} or {@code requirements.txt} Aegis edits, or one it doesn't,
+     * such as a {@code gradle.lockfile}, {@code poetry.lock} or a jar, recorded so an upgrade never guesses another.
+     * Repository-relative, without a leading slash; null when there is no usable location.
      */
     static String manifestOf(Component component) {
         return manifestAt(component.property(LOCATION));
     }
 
-    /** The manifests at every location syft found this package, in its order, each once. */
+    /** The files declaring this package at every location syft found it, in its order, each once ({@link #manifestOf}). */
     static List<String> manifestsOf(Component component) {
         Map<Integer, String> byIndex = new TreeMap<>();
         for (Property property : component.properties() == null ? List.<Property>of() : component.properties()) {
@@ -160,10 +163,9 @@ record RepositoryLayout(CycloneDxBom bom, Map<String, List<String>> manifestsByR
         int slash = path.lastIndexOf('/');
         String directory = slash < 0 ? "" : path.substring(0, slash + 1);
         String manifest = switch (fileName(path)) {
-            case "pom.xml", "requirements.txt" -> path;
             case "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "package.json" ->
                     directory + "package.json";
-            default -> null;
+            default -> path;
         };
         return manifest == null || manifest.isEmpty() || manifest.length() > MAX_MANIFEST_PATH ? null : manifest;
     }

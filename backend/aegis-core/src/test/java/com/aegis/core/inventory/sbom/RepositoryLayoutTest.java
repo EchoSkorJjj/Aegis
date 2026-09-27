@@ -79,7 +79,8 @@ class RepositoryLayoutTest {
                 new Property("syft:location:2:path", "/api/package-lock.json"),
                 new Property("syft:location:3:path", "/docs/build.gradle")));
 
-        assertThat(RepositoryLayout.manifestsOf(lib)).containsExactly("api/package.json", "web/package.json");
+        assertThat(RepositoryLayout.manifestsOf(lib)).containsExactly("api/package.json", "web/package.json",
+                "docs/build.gradle");
     }
 
     @Test
@@ -132,12 +133,15 @@ class RepositoryLayoutTest {
     }
 
     @Test
-    void onlyManifestsAegisCanEditAreRemembered() {
+    void aPackageRemembersTheFileDeclaringItEvenOneAegisDoesNotEdit() {
         assertThat(RepositoryLayout.manifestOf(located("/requirements.txt"))).isEqualTo("requirements.txt");
         assertThat(RepositoryLayout.manifestOf(located("/web/yarn.lock"))).isEqualTo("web/package.json");
         assertThat(RepositoryLayout.manifestOf(located("/package-lock.json"))).isEqualTo("package.json");
-        assertThat(RepositoryLayout.manifestOf(located("/svc/build.gradle"))).isNull();
-        assertThat(RepositoryLayout.manifestOf(located("/poetry.lock"))).isNull();
+        // Recorded so an upgrade knows the dependency lives there, and never guesses a root pom.xml instead.
+        assertThat(RepositoryLayout.manifestOf(located("/svc/gradle.lockfile"))).isEqualTo("svc/gradle.lockfile");
+        assertThat(RepositoryLayout.manifestOf(located("/poetry.lock"))).isEqualTo("poetry.lock");
+        assertThat(RepositoryLayout.manifestOf(located("/lib/vendored.jar"))).isEqualTo("lib/vendored.jar");
+        assertThat(RepositoryLayout.manifestOf(located("/" + "d/".repeat(200) + "x.lock"))).isNull();
         assertThat(RepositoryLayout.manifestOf(located(null))).isNull();
     }
 
