@@ -8,10 +8,13 @@ import type {
   ChangeMatchResponse,
   ChangeSignal,
   ChangeSignalFacets,
-  ComponentImpact,
   CreateOrgInput,
   ForgotPasswordInput,
+  GitHubConnectResult,
+  GitHubIntegration,
   InviteUserInput,
+  JiraIntegration,
+  JiraOptions,
   LoginInput,
   LoginResponse,
   Membership,
@@ -19,11 +22,16 @@ import type {
   MfaStatus,
   DirectoryMember,
   Owner,
+  PackageUsage,
   Page,
   Passkey,
   RecoveryCodes,
   RegisterInput,
+  RegulatorMemo,
+  RegulatorMemoStatus,
   ResetPasswordInput,
+  RiskTicket,
+  RiskTicketStatus,
   Role,
   SbomImportResult,
   SelectMethodInput,
@@ -32,8 +40,11 @@ import type {
   ThirdPartyVendor,
   TotpInit,
   UpdateProfileInput,
+  UpgradeProposal,
+  UpgradeProposalStatus,
+  UpgradeRecommendation,
   UserProfile,
-  VendorImpact,
+  VendorUsage,
   VerifyOtpInput,
 } from "@/lib/types";
 import type {
@@ -372,39 +383,28 @@ export const inventoryApi = {
   },
 
   /**
-   * Import a service's components and dependency edges from a CycloneDX JSON SBOM. `cyclonedxJson`
-   * is the raw file text; the backend parses it, is additive + idempotent, and returns a summary.
+   * Generate the service's SBOM from its linked repository (the backend shallow-clones it and runs syft)
+   * and import it. `token` is only for a private repository no host integration (the GitHub App) covers —
+   * used for this clone, never stored — and `username` only where the host wants a particular one with it.
    */
-  importSbom(serviceId: string, cyclonedxJson: string) {
-    return bffFetch<SbomImportResult>(`/api/inventory/services/${serviceId}/sbom`, {
-      method: "POST",
-      body: cyclonedxJson,
-    });
-  },
-
-  /**
-   * Generate a CycloneDX SBOM from a Git repository (the backend shallow-clones it and runs syft) and
-   * import it into the service. `ref` is an optional branch/tag; `token` is an optional access token for
-   * a private repository (used transiently for the clone, never stored).
-   */
-  generateSbomFromRepo(serviceId: string, repoUrl: string, ref?: string, token?: string) {
-    return bffFetch<SbomImportResult>(`/api/inventory/services/${serviceId}/sbom/from-repo`, {
+  importSbomFromRepository(serviceId: string, credentials: { token?: string; username?: string } = {}) {
+    return bffFetch<SbomImportResult>(`/api/inventory/services/${serviceId}/sbom/from-repository`, {
       method: "POST",
       body: JSON.stringify({
-        repoUrl,
-        ref: ref?.trim() || undefined,
-        token: token?.trim() || undefined,
+        token: credentials.token?.trim() || undefined,
+        username: credentials.username?.trim() || undefined,
       }),
     });
   },
 
-  /** Services + owners impacted by a component, including those reached transitively. */
-  componentImpact(id: string) {
-    return bffFetch<ComponentImpact>(`/api/inventory/components/${id}/impact`);
+  /** Every service using a package — any version of it — directly or through which of its dependencies. */
+  packageUsage(ecosystem: string, name: string) {
+    const params = new URLSearchParams({ ecosystem, name });
+    return bffFetch<PackageUsage>(`/api/inventory/components/used-by?${params}`);
   },
-  /** Services + owners impacted by a vendor (direct dependency only). */
-  vendorImpact(id: string) {
-    return bffFetch<VendorImpact>(`/api/inventory/vendors/${id}/impact`);
+  /** Every service using a vendor, with its owners. */
+  vendorUsage(id: string) {
+    return bffFetch<VendorUsage>(`/api/inventory/vendors/${id}/used-by`);
   },
 };
 
@@ -435,6 +435,136 @@ export const matchApi = {
 export const scoringApi = {
   scoreChange(signalId: string) {
     return bffFetch<ChangeImpactResponse>(`/api/scoring/change-signals/${signalId}`);
+  },
+};
+
+/**
+ * Safe-upgrade pull requests (E8 story 4). One is drafted, and approved, as part of a response
+ * (`ticketApi`); here it is read, and left out of its response by dismissing it with a reason. One drafted
+ * on its own before responses existed (`standalone`) is still approved here. Org-scoped server-side; the
+ * backend enforces who may decide (an analyst, or the service's assigned owners).
+ */
+export const upgradeApi = {
+  list(
+    params: {
+      serviceId?: string;
+      changeSignalId?: string;
+      status?: UpgradeProposalStatus[];
+      /** Only those drafted on their own, before responses. */
+      standalone?: boolean;
+      page?: number;
+      size?: number;
+    } = {},
+  ) {
+    const { status, standalone, ...rest } = params;
+    return bffFetch<Page<UpgradeProposal>>(
+      `/api/actions/upgrade-proposals${qs({ ...rest, status: status?.join(","), standalone: standalone ? "true" : undefined })}`,
+    );
+  },
+  get(id: string) {
+    return bffFetch<UpgradeProposal>(`/api/actions/upgrade-proposals/${id}`);
+  },
+  /** The upgrades Aegis recommends for every service — or one — with no CVE to look up. */
+  recommendations(params: { serviceId?: string } = {}) {
+    return bffFetch<UpgradeRecommendation[]>(`/api/actions/upgrade-recommendations${qs(params)}`);
+  },
+  /** Open the draft pull request of one drafted on its own. Aegis never merges it. */
+  approve(id: string) {
+    return bffFetch<UpgradeProposal>(`/api/actions/upgrade-proposals/${id}/approve`, { method: "POST" });
+  },
+  /** Dismiss with a reason: for a response's pull request, leave it out of the response. */
+  dismiss(id: string, reason: string) {
+    return bffFetch<UpgradeProposal>(`/api/actions/upgrade-proposals/${id}/dismiss`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+  },
+};
+
+/**
+ * Responses (E8 story 5): the risk ticket for a change's impact on one service, with the upgrade pull request
+ * that fixes it where Aegis can automate one. Drafting sends nothing; approving files the ticket in the
+ * organization's Jira, then opens the pull request under the ticket's key. An analyst, or the service's
+ * owners, drafts and decides — never the drafter of a response with a pull request; a compliance admin audits.
+ */
+export const ticketApi = {
+  list(
+    params: {
+      serviceId?: string;
+      changeSignalId?: string;
+      status?: RiskTicketStatus[];
+      /** True: those that still need a person (the ticket or its pull request); false: those that don't. */
+      pending?: boolean;
+      page?: number;
+      size?: number;
+    } = {},
+  ) {
+    const { status, pending, ...rest } = params;
+    return bffFetch<Page<RiskTicket>>(
+      `/api/actions/risk-tickets${qs({ ...rest, status: status?.join(","), pending: pending === undefined ? undefined : String(pending) })}`,
+    );
+  },
+  /** One ticket, with its ServiceNow incident fields. */
+  get(id: string) {
+    return bffFetch<RiskTicket>(`/api/actions/risk-tickets/${id}`);
+  },
+  propose(input: { changeSignalId: string; serviceId: string }) {
+    return bffFetch<RiskTicket>("/api/actions/risk-tickets", { method: "POST", body: JSON.stringify(input) });
+  },
+  /** File the ticket in the organization's Jira, then open its pull request, if any, under the ticket's key. */
+  approve(id: string) {
+    return bffFetch<RiskTicket>(`/api/actions/risk-tickets/${id}/approve`, { method: "POST" });
+  },
+  /** Draft the upgrade pull request of a response that has none. */
+  draftPullRequest(id: string) {
+    return bffFetch<RiskTicket>(`/api/actions/risk-tickets/${id}/pull-requests`, { method: "POST" });
+  },
+  /** Open a filed response's pull request on its own: left for later, drafted afterwards, or failed. */
+  approvePullRequest(id: string, proposalId: string) {
+    return bffFetch<RiskTicket>(`/api/actions/risk-tickets/${id}/pull-requests/${proposalId}/approve`, {
+      method: "POST",
+    });
+  },
+  dismiss(id: string, reason: string) {
+    return bffFetch<RiskTicket>(`/api/actions/risk-tickets/${id}/dismiss`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+  },
+};
+
+/**
+ * Regulator memos (E8 story 6): a DORA notification about one change, drafted only when it materially
+ * affects a service. An analyst drafts; a second analyst approves it, which makes it final. Aegis never
+ * sends it.
+ */
+export const memoApi = {
+  list(
+    params: { changeSignalId?: string; status?: RegulatorMemoStatus[]; page?: number; size?: number } = {},
+  ) {
+    const { status, ...rest } = params;
+    return bffFetch<Page<RegulatorMemo>>(
+      `/api/actions/regulator-memos${qs({ ...rest, status: status?.join(",") })}`,
+    );
+  },
+  get(id: string) {
+    return bffFetch<RegulatorMemo>(`/api/actions/regulator-memos/${id}`);
+  },
+  propose(changeSignalId: string) {
+    return bffFetch<RegulatorMemo>("/api/actions/regulator-memos", {
+      method: "POST",
+      body: JSON.stringify({ changeSignalId }),
+    });
+  },
+  /** Make the memo final, ready for a person to submit. */
+  approve(id: string) {
+    return bffFetch<RegulatorMemo>(`/api/actions/regulator-memos/${id}/approve`, { method: "POST" });
+  },
+  dismiss(id: string, reason: string) {
+    return bffFetch<RegulatorMemo>(`/api/actions/regulator-memos/${id}/dismiss`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
   },
 };
 
@@ -490,5 +620,57 @@ export const mfaApi = {
     return bffFetch<void>(`/api/auth/mfa/webauthn/credentials/${id}`, {
       method: "DELETE",
     });
+  },
+};
+
+/**
+ * The organization's integrations (aegis-core): which GitHub App installations it may act through, and the
+ * Jira site its risk tickets are filed in. Everyone with a role can see them; only the organization admin
+ * connects, configures or disconnects them.
+ */
+export const integrationsApi = {
+  github() {
+    return bffFetch<GitHubIntegration>("/api/integrations/github");
+  },
+  /** Where to send the organization admin to sign in to GitHub. */
+  startGitHub() {
+    return bffFetch<{ authorizeUrl: string }>("/api/integrations/github/authorizations", { method: "POST" });
+  },
+  /** Finish with what GitHub sent back: connects every installation the admin controls. */
+  finishGitHub(code: string, state: string) {
+    return bffFetch<GitHubConnectResult>("/api/integrations/github/connections", {
+      method: "POST",
+      body: JSON.stringify({ code, state }),
+    });
+  },
+  disconnectGitHub(installationId: number) {
+    return bffFetch<void>(`/api/integrations/github/connections/${installationId}`, { method: "DELETE" });
+  },
+  jira() {
+    return bffFetch<JiraIntegration>("/api/integrations/jira");
+  },
+  /** Where to send the organization admin to grant Aegis a Jira site. */
+  startJira() {
+    return bffFetch<{ authorizeUrl: string }>("/api/integrations/jira/authorizations", { method: "POST" });
+  },
+  /** Finish with what Atlassian sent back; the project is chosen next. */
+  finishJira(code: string, state: string) {
+    return bffFetch<JiraIntegration>("/api/integrations/jira/connections", {
+      method: "POST",
+      body: JSON.stringify({ code, state }),
+    });
+  },
+  /** The granted sites, a site's projects, and — once a project is picked — its issue types. */
+  jiraOptions(params: { cloudId?: string; projectKey?: string } = {}) {
+    return bffFetch<JiraOptions>(`/api/integrations/jira/options${qs(params)}`);
+  },
+  configureJira(settings: { cloudId: string; projectKey: string; issueType: string }) {
+    return bffFetch<JiraIntegration>("/api/integrations/jira/settings", {
+      method: "PUT",
+      body: JSON.stringify(settings),
+    });
+  },
+  disconnectJira() {
+    return bffFetch<void>("/api/integrations/jira/connection", { method: "DELETE" });
   },
 };

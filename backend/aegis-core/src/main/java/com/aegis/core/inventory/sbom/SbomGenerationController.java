@@ -16,9 +16,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Generate a service's CycloneDX SBOM directly from a Git repository (via syft) and import it — the
- * automated counterpart to uploading a hand-generated CycloneDX file. Present only when SBOM generation
- * is enabled ({@code aegis.inventory.sbom-generation.enabled}); the upload endpoint is always available.
+ * Generate a service's CycloneDX SBOM from its linked Git repository (via syft) and import it — the
+ * automated counterpart to uploading a CycloneDX file (which stays available, e.g. for a CI pipeline).
+ * Present only when SBOM generation is enabled ({@code aegis.inventory.sbom-generation.enabled}).
  */
 @RestController
 @RequestMapping("/api/inventory")
@@ -32,11 +32,14 @@ public class SbomGenerationController {
         this.generation = generation;
     }
 
-    @PostMapping("/services/{serviceId}/sbom/from-repo")
+    @PostMapping("/services/{serviceId}/sbom/from-repository")
     @PreAuthorize(InventoryRoles.COMPOSE)
-    @Operation(summary = "Generate a CycloneDX SBOM from a Git repository (syft) and import it into the service "
-            + "(governance roles, or the service's owners)")
-    public SbomImportResult importFromRepo(@PathVariable UUID serviceId, @Valid @RequestBody RepoSbomRequest request) {
-        return generation.importFromRepo(serviceId, request.repoUrl(), request.ref(), request.token());
+    @Operation(summary = "Generate a CycloneDX SBOM from the service's linked repository (syft) and import it "
+            + "(governance roles, or the service's owners); a token is only needed for a private repository "
+            + "no host integration covers")
+    public SbomImportResult importFromRepository(
+            @PathVariable UUID serviceId, @Valid @RequestBody(required = false) RepositoryImportRequest request) {
+        RepositoryImportRequest credentials = request == null ? new RepositoryImportRequest(null, null) : request;
+        return generation.importFromRepository(serviceId, credentials.token(), credentials.username());
     }
 }

@@ -51,15 +51,35 @@ aegis:
   ai:
     base-url: ${AI_SERVICE_URI:http://localhost:8083}
     service-token: ${AI_SERVICE_TOKEN:dev-internal-token-change-me}
-  # GitHub App spike: no execution endpoint. Requires a future human-approval workflow.
+  # The GitHub App (GITHUB_APP.md): draft pull requests and SBOM clones, only through installations an
+  # organization admin has connected under Organization > Integrations (V22).
   actions:
     github:
       enabled: ${AEGIS_GITHUB_ENABLED:false}
       api-base-url: ${AEGIS_GITHUB_API_URL:https://api.github.com}
+      web-base-url: ${AEGIS_GITHUB_WEB_URL:https://github.com}
       client-id: ${AEGIS_GITHUB_APP_CLIENT_ID:}
+      # Only for the admin's GitHub sign-in when connecting; never logged.
+      client-secret: ${AEGIS_GITHUB_APP_CLIENT_SECRET:}
       private-key-path: ${AEGIS_GITHUB_APP_PRIVATE_KEY_PATH:}
+      # Must equal the App's registered callback URL: the frontend page GitHub sends the admin back to.
+      callback-url: ${AEGIS_GITHUB_CALLBACK_URL:http://localhost:3000/admin/integrations/github/callback}
       hosts: ${AEGIS_GITHUB_HOSTS:github.com}
-      allowed-accounts: ${AEGIS_GITHUB_ALLOWED_ACCOUNTS:}
+    # Jira (JIRA.md): where approved risk tickets are filed, through the site each organization's admin
+    # connected under Organization > Integrations (V24). Its tokens are sealed with aegis.secrets.key.
+    jira:
+      enabled: ${AEGIS_JIRA_ENABLED:false}
+      client-id: ${AEGIS_JIRA_CLIENT_ID:}
+      # Only for exchanging the admin's consent and renewing tokens; never logged.
+      client-secret: ${AEGIS_JIRA_CLIENT_SECRET:}
+      # Must equal the Atlassian app's callback URL: the frontend page Atlassian sends the admin back to.
+      callback-url: ${AEGIS_JIRA_CALLBACK_URL:http://localhost:3000/admin/integrations/jira/callback}
+      auth-base-url: ${AEGIS_JIRA_AUTH_URL:https://auth.atlassian.com}
+      api-base-url: ${AEGIS_JIRA_API_URL:https://api.atlassian.com}
+  # Seals the integration credentials Aegis keeps (Jira's tokens): base64 of 32 random bytes
+  # (openssl rand -base64 32). Required when Jira is enabled; keep it out of the repository.
+  secrets:
+    key: ${AEGIS_SECRETS_KEY:}
   # identity-service's member directory — e.g. to verify that a service's assigned owner is a member of
   # the caller's organization holding the SERVICE_OWNER role. Called with the CALLER's own access token
   # (token relay), so identity-service applies the caller's org scope; never with a service credential.
@@ -71,12 +91,13 @@ aegis:
   inventory:
     # Generate a service's CycloneDX SBOM straight from a Git repo: shallow-clone it and run syft (a
     # STATIC cataloguer — it never runs a package manager or the repo's own code). Needs git + syft on
-    # the image (the Dockerfile installs both). Every axis is bounded; disable to hide the endpoint and
-    # keep only the manual CycloneDX upload.
+    # the image (the Dockerfile installs both). Every axis is bounded; disable to hide the import from a
+    # linked repository (the CycloneDX upload API stays).
     sbom-generation:
       enabled: ${AEGIS_SBOM_GENERATION_ENABLED:true}
-      # Hosts that may be cloned (public or, with a per-request access token, private). Never an
-      # internal or arbitrary host — this is the SSRF boundary. Add a self-hosted GitLab/Gitea host here.
+      # Hosts that may be linked and cloned (public, or private with a per-import access token or the
+      # GitHub App). Never an internal or arbitrary host — this is the SSRF boundary. Add a self-hosted
+      # GitLab/Gitea/Bitbucket host here.
       allowed-hosts: ${AEGIS_SBOM_ALLOWED_HOSTS:github.com,gitlab.com,bitbucket.org}
       git-path: ${AEGIS_SBOM_GIT_PATH:git}
       syft-path: ${AEGIS_SBOM_SYFT_PATH:syft}

@@ -1,22 +1,27 @@
 package com.aegis.core.actions.pr.github;
 
 import java.net.URI;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
+import com.aegis.core.actions.pr.FileChange;
 import com.aegis.core.actions.pr.PrProvider;
 import com.aegis.core.actions.pr.PullRequestDraft;
 import com.aegis.core.actions.pr.PullRequestRef;
+import com.aegis.core.actions.pr.RepositoryFile;
 import com.aegis.core.actions.pr.RepositoryRef;
 import com.aegis.core.platform.common.ApiExceptions;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.http.HttpMethod;
 
-/** Spike adapter. Only a future approval-gated executor may call this port. */
+/** GitHub App adapter. Only the approval-gated executor ({@code actions.upgrade}) calls this port. */
 final class GitHubAppPrProvider implements PrProvider {
     private final GitHubApi api;
     private final GitHubInstallationTokens tokens;
@@ -39,12 +44,54 @@ final class GitHubAppPrProvider implements PrProvider {
     }
 
     @Override
+    public RepositoryFile readFile(RepositoryRef repository, String branch, String path) {
+        if (!supports(repository)) {
+            throw new ApiExceptions.Conflict("GitHub provider does not support this repository");
+        }
+        FileChange.requireSafePath(path);
+        if (branch != null && !PullRequestDraft.safeBranch(branch)) {
+            throw new ApiExceptions.BadRequest("That branch name is not allowed");
+        }
+        String token = tokens.forRepository(repository.path(), GitHubInstallationTokens.Access.PULL_REQUEST);
+        Object found = api.call(HttpMethod.GET, api.uri("repos/" + repository.path() + "/contents/" + path, branch),
+                token, null, Object.class, false, path + " was not found in the repository");
+        if (!(found instanceof Map<?, ?> file) || !"file".equals(file.get("type"))
+                || !(file.get("sha") instanceof String sha) || !validSha(sha)) {
+            throw new ApiExceptions.Conflict(path + " is not a regular file in the repository");
+        }
+        // GitHub inlines base64 content up to 1 MB and reports encoding "none" for anything larger.
+        if (!"base64".equals(file.get("encoding")) || !(file.get("content") instanceof String encoded)) {
+            throw new ApiExceptions.Conflict(path + " is too large to edit through the GitHub API");
+        }
+        byte[] bytes = Base64.getMimeDecoder().decode(encoded);
+        if (bytes.length > FileChange.MAX_BYTES) {
+            throw new ApiExceptions.Conflict(path + " is larger than 1 MiB");
+        }
+        try {
+            String content = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes))
+                    .toString();
+            return new RepositoryFile(path, content, sha);
+        } catch (CharacterCodingException notText) {
+            throw new ApiExceptions.Conflict(path + " is not UTF-8 text");
+        }
+    }
+
+    @Override
     public PullRequestRef openDraftPullRequest(PullRequestDraft draft) {
         if (draft == null || !supports(draft.repository())) {
             throw new ApiExceptions.Conflict("GitHub provider does not support this repository");
         }
+        // Checked before anything is written, so a bad precondition never leaves a branch behind.
+        for (var change : draft.changes()) {
+            if (change.expectedRevision() != null && !validSha(change.expectedRevision())) {
+                throw new ApiExceptions.BadRequest("A GitHub file revision must be a 40-character blob SHA");
+            }
+        }
         String root = "repos/" + draft.repository().path();
-        String token = tokens.forRepository(draft.repository().path());
+        String token = tokens.forRepository(draft.repository().path(), GitHubInstallationTokens.Access.PULL_REQUEST);
         String base = draft.baseBranch();
         if (base == null) {
             base = api.get(root, token, Repository.class).defaultBranch();
@@ -70,20 +117,26 @@ final class GitHubAppPrProvider implements PrProvider {
         try {
             for (var change : draft.changes()) {
                 String path = root + "/contents/" + change.path();
-                // Untyped on purpose: a directory answers with a JSON array, which is a wrong target
-                // (Conflict below), not a malformed GitHub response.
-                Object existing = api.call(HttpMethod.GET, api.uri(path, draft.headBranch()), token, null,
-                        Object.class, true, "GitHub file not found");
                 var body = new HashMap<String, Object>();
                 body.put("message", draft.commitMessage());
                 body.put("content", Base64.getEncoder().encodeToString(change.content().getBytes(StandardCharsets.UTF_8)));
                 body.put("branch", draft.headBranch());
-                if (existing != null) {
-                    if (!(existing instanceof Map<?, ?> file) || !"file".equals(file.get("type"))
-                            || !(file.get("sha") instanceof String sha) || !validSha(sha)) {
-                        throw new ApiExceptions.Conflict("GitHub target must be a regular file with a valid blob SHA");
+                if (change.expectedRevision() != null) {
+                    // Written only over the revision the change was computed from: GitHub refuses the
+                    // write (409) if the file moved on after it was read.
+                    body.put("sha", change.expectedRevision());
+                } else {
+                    // Untyped on purpose: a directory answers with a JSON array, which is a wrong target
+                    // (Conflict below), not a malformed GitHub response.
+                    Object existing = api.call(HttpMethod.GET, api.uri(path, draft.headBranch()), token, null,
+                            Object.class, true, "GitHub file not found");
+                    if (existing != null) {
+                        if (!(existing instanceof Map<?, ?> file) || !"file".equals(file.get("type"))
+                                || !(file.get("sha") instanceof String sha) || !validSha(sha)) {
+                            throw new ApiExceptions.Conflict("GitHub target must be a regular file with a valid blob SHA");
+                        }
+                        body.put("sha", sha);
                     }
-                    body.put("sha", sha);
                 }
                 api.call(HttpMethod.PUT, api.uri(path, null), token, body, Void.class, false, "GitHub repository not found");
             }

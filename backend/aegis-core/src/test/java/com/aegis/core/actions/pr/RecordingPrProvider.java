@@ -24,6 +24,11 @@ final class RecordingPrProvider implements PrProvider {
     }
 
     @Override
+    public RepositoryFile readFile(RepositoryRef repository, String branch, String path) {
+        throw new UnsupportedOperationException("the recording provider serves no files");
+    }
+
+    @Override
     public PullRequestRef openDraftPullRequest(PullRequestDraft draft) {
         received.add(draft);
         return new PullRequestRef(id(), "https://" + host + "/" + draft.repository().path() + "/pull/1",

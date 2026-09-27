@@ -15,6 +15,14 @@ public class PrProviders {
         this.providers = List.copyOf(providers);
     }
 
+    /**
+     * Whether a pull request can be opened in the repository — exactly one enabled adapter serves its host — so
+     * a caller can say so up front instead of failing at approval ({@link #forRepository}).
+     */
+    public boolean supports(RepositoryRef repository) {
+        return repository != null && providers.stream().filter(provider -> provider.supports(repository)).count() == 1;
+    }
+
     public PrProvider forRepository(RepositoryRef repository) {
         if (repository == null) {
             throw new ApiExceptions.BadRequest("A repository is required");

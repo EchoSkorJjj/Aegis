@@ -40,3 +40,5 @@ def test_draft_with_token_returns_stub(client):
     response = client.post("/v1/draft", headers=TOKEN, json={"finding_id": "f1", "draft_type": "risk_ticket"})
     assert response.status_code == 200
     assert response.json()["draft_type"] == "risk_ticket"
+    assert response.json()["ticket"]["actions"], "the offline stub still fills the ticket's required actions"
+    assert response.json()["memo"] is None

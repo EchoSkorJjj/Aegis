@@ -39,17 +39,25 @@ final class GitHubApi {
     }
 
     URI uri(String path, String ref) {
+        return uriWithQuery(path, ref == null ? Map.of() : Map.of("ref", ref));
+    }
+
+    URI uriWithQuery(String path, Map<String, String> query) {
         var builder = UriComponentsBuilder.fromUri(baseUrl).pathSegment(path.split("/"));
-        if (ref != null) {
-            builder.queryParam("ref", ref);
-        }
+        query.forEach(builder::queryParam);
         return builder.build().encode().toUri();
     }
 
     <T> T call(HttpMethod method, URI uri, String token, Object body, Class<T> type,
                boolean missingAllowed, String notFound) {
+        return exchange(method, uri, "Bearer " + token, body, type, missingAllowed, notFound);
+    }
+
+    /** {@link #call} with a whole {@code Authorization} value — the App's own Basic credentials, say. */
+    <T> T exchange(HttpMethod method, URI uri, String authorization, Object body, Class<T> type,
+                   boolean missingAllowed, String notFound) {
         try {
-            var request = http.method(method).uri(uri).header(HttpHeaders.AUTHORIZATION, "Bearer " + token);
+            var request = http.method(method).uri(uri).header(HttpHeaders.AUTHORIZATION, authorization);
             if (body != null) {
                 request.contentType(MediaType.APPLICATION_JSON).body(body);
             }

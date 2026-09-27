@@ -1,5 +1,6 @@
 package com.aegis.core.inventory.sbom;
 
+import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -16,6 +17,10 @@ import java.util.UUID;
 
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
+import com.aegis.core.inventory.InventoryStore.ComponentDependencyLink;
+import com.aegis.core.inventory.InventoryStore.DependencyChanges;
+import com.aegis.core.inventory.domain.BusinessService;
+import com.aegis.core.inventory.domain.SbomImportSource;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.sbom.CycloneDxBom.Component;
 import com.aegis.core.inventory.sbom.CycloneDxBom.Dependency;
@@ -24,12 +29,20 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Merges a CycloneDX SBOM into the inventory map for one business service. The import is additive
- * and idempotent: components are matched by (ecosystem, name, version) and existing edges are kept.
+ * Merges a CycloneDX SBOM into the inventory map for one business service. The import is idempotent:
+ * components are matched by (ecosystem, name, version) and existing edges are kept.
  *
  * <p>The service is linked only to its top-level components — the SBOM root's direct dependencies
  * plus any component nothing else depends on — so deeper libraries stay reachable transitively
- * through dependency edges, which is what the impact query reports as a transitive hit.
+ * through dependency edges, which is what the impact query reports as a transitive hit. The edges are the
+ * service's own: another service's lockfile may resolve the same library to different dependencies.
+ *
+ * <p>An uploaded SBOM only adds. An import from the service's repository reads everything the repository
+ * declares, so it also unlinks the direct dependencies an earlier import from it linked and the repository no
+ * longer declares — an upgraded library's old version — and removes the dependency edges it no longer declares.
+ * Components stay in the inventory, and a component linked by hand or by an upload stays linked.
+ *
+ * <p>Each import is recorded on the service — when, and how it got in ({@link SbomImportSource}).
  */
 @Service
 public class SbomImportService {
@@ -46,9 +59,32 @@ public class SbomImportService {
         this.store = store;
     }
 
+    /** A CycloneDX file posted to the API (or the demo seed), recorded as {@link SbomImportSource#UPLOAD}. */
     @Transactional
     public SbomImportResult importSbom(UUID serviceId, CycloneDxBom bom) {
-        inventory.getBusinessService(serviceId);
+        return importSbom(serviceId, bom, SbomImportSource.UPLOAD);
+    }
+
+    @Transactional
+    public SbomImportResult importSbom(UUID serviceId, CycloneDxBom bom, SbomImportSource source) {
+        return importSbom(serviceId, bom, source, null);
+    }
+
+    /**
+     * An SBOM generated from the service's repository ({@link RepositoryLayout}): each direct dependency
+     * is linked with every manifest that declares it; what an earlier import from the repository linked and the
+     * repository no longer declares is unlinked, and so are the repository's own packages, which an earlier
+     * import may have linked as components.
+     */
+    @Transactional
+    public SbomImportResult importRepository(UUID serviceId, RepositoryLayout layout, SbomImportSource source) {
+        return importSbom(serviceId, layout.bom(), source, layout);
+    }
+
+    /** {@code repository} is the layout of an import from the service's repository; null for an upload. */
+    private SbomImportResult importSbom(UUID serviceId, CycloneDxBom bom, SbomImportSource source,
+            RepositoryLayout repository) {
+        BusinessService service = inventory.getBusinessService(serviceId);
         if (bom == null || !"CycloneDX".equals(bom.bomFormat())) {
             throw new ApiExceptions.BadRequest("Expected a CycloneDX JSON SBOM (bomFormat \"CycloneDX\")");
         }
@@ -94,9 +130,8 @@ public class SbomImportService {
 
         Set<UUID> rootDependencies = new LinkedHashSet<>();
         Set<UUID> dependedOn = new HashSet<>();
-        Set<List<UUID>> edges = new HashSet<>();
+        Set<ComponentDependencyLink> edges = new LinkedHashSet<>();
         int declaredEdges = 0;
-        int dependenciesCreated = 0;
         for (Dependency dependency : nullSafe(bom.dependencies())) {
             if (dependency == null || dependency.ref() == null) {
                 continue;
@@ -121,24 +156,53 @@ public class SbomImportService {
                     continue;
                 }
                 dependedOn.add(to);
-                if (edges.add(List.of(from, to)) && !store.componentDependencyExists(from, to)) {
-                    store.addComponentDependency(from, to);
-                    dependenciesCreated++;
-                }
+                edges.add(new ComponentDependencyLink(from, to, serviceId));
             }
         }
+        DependencyChanges dependencies = store.recordServiceDependencies(serviceId, edges, repository != null);
 
         Set<UUID> topLevel = new LinkedHashSet<>(rootDependencies);
         idsByCoordinates.values().stream().filter(id -> !dependedOn.contains(id)).forEach(topLevel::add);
+        // Several bom-refs can be one component (the same version in two lockfiles): every manifest counts.
+        Map<UUID, Set<String>> manifests = new HashMap<>();
+        if (repository != null) {
+            repository.manifestsByRef().forEach((ref, paths) -> {
+                UUID id = idsByRef.get(ref);
+                if (id != null) {
+                    manifests.computeIfAbsent(id, component -> new LinkedHashSet<>()).addAll(paths);
+                }
+            });
+        }
         int linked = 0;
         for (UUID componentId : topLevel) {
-            if (!store.serviceComponentExists(serviceId, componentId)) {
+            boolean existing = store.serviceComponentExists(serviceId, componentId);
+            if (repository != null) {
+                store.linkRepositoryComponent(serviceId, componentId,
+                        List.copyOf(manifests.getOrDefault(componentId, Set.of())));
+            } else if (!existing) {
                 store.addServiceComponent(serviceId, componentId);
+            }
+            if (!existing) {
                 linked++;
             }
         }
+        int unlinked = 0;
+        if (repository != null) {
+            for (Component project : repository.projects()) {
+                Coordinates coordinates = Coordinates.of(project);
+                SoftwareComponent component = coordinates == null ? null : store.findSoftwareComponentByCoordinates(
+                        coordinates.ecosystem(), coordinates.name(), coordinates.version()).orElse(null);
+                if (component != null && store.removeServiceComponent(serviceId, component.getId())) {
+                    unlinked++;
+                }
+            }
+            unlinked += store.unlinkRepositoryComponentsExcept(serviceId, topLevel);
+        }
 
-        return new SbomImportResult(serviceId, created, matched, skipped, dependenciesCreated, linked);
+        service.recordSbomImport(source, Instant.now());
+        store.save(service);
+        return new SbomImportResult(serviceId, created, matched, skipped, dependencies.added(), dependencies.removed(),
+                linked, unlinked);
     }
 
     /** CycloneDX components may nest (assemblies); walk them iteratively so depth is never a stack risk. */
@@ -168,7 +232,8 @@ public class SbomImportService {
             PackageUrl purl = isBlank(component.purl()) ? null : PackageUrl.parse(component.purl());
             String version = !isBlank(component.version()) ? component.version().trim()
                     : purl == null ? null : purl.version();
-            if (version == null) {
+            // syft reports a version it could not resolve (a parent-managed Maven one) as UNKNOWN.
+            if (version == null || version.equalsIgnoreCase("UNKNOWN")) {
                 return null;
             }
             String name;

@@ -100,7 +100,7 @@ def test_request_contract_usage_metrics_and_safe_logging(make_client, caplog):
     assert request.headers["authorization"] == "Bearer offline-test-credential"
     body = json.loads(request.content)
     assert body["model"] == labels[1]
-    assert body["max_completion_tokens"] == 1000
+    assert body["max_completion_tokens"] == 1500
     assert body["temperature"] == 0.1
     assert body["reasoning_effort"] == "low"
     assert body["include_reasoning"] is False

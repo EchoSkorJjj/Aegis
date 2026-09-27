@@ -72,67 +72,74 @@ class DemoEstateIntegrationTest extends AbstractInventoryIntegrationTest {
 
     @Test
     void log4jCoreReachesOrderServiceDirectlyAndPaymentsThroughThreeHops() throws Exception {
-        componentImpact("maven", "org.apache.logging.log4j:log4j-core", "2.14.1")
-                .andExpect(jsonPath("$.services[*].service.name", contains("Order Service", "Payments API")))
-                .andExpect(jsonPath("$.services[0].direct").value(true))
-                .andExpect(jsonPath("$.services[0].owners").isEmpty())
-                .andExpect(jsonPath("$.services[1].direct").value(false))
-                .andExpect(jsonPath("$.services[1].service.criticality").value("CRITICAL"))
-                .andExpect(jsonPath("$.services[1].viaComponent.name")
-                        .value("org.springframework.boot:spring-boot-starter-log4j2"))
+        String uses = version("2.14.1");
+        usedBy("maven", "org.apache.logging.log4j:log4j-core")
+                .andExpect(jsonPath(uses + ".service.name", contains("Order Service", "Payments API")))
+                .andExpect(jsonPath(uses + ".direct", contains(true, false)))
+                .andExpect(jsonPath(uses + ".service.criticality", contains("HIGH", "CRITICAL")))
+                .andExpect(jsonPath(uses + ".through[0].name",
+                        contains("org.springframework.boot:spring-boot-starter-log4j2")))
                 // The demo seeds no owners (owners are verified organization members).
-                .andExpect(jsonPath("$.services[1].owners").isEmpty());
+                .andExpect(jsonPath(uses + ".owners[*]").isEmpty());
     }
 
     @Test
     void jacksonDatabindIsDirectForOrdersAndTransitiveForPayments() throws Exception {
-        componentImpact("maven", "com.fasterxml.jackson.core:jackson-databind", "2.13.0")
-                .andExpect(jsonPath("$.services[*].service.name", contains("Order Service", "Payments API")))
-                .andExpect(jsonPath("$.services[*].direct", contains(true, false)))
-                .andExpect(jsonPath("$.services[1].viaComponent.name")
-                        .value("org.springframework.boot:spring-boot-starter-web"));
+        String uses = version("2.13.0");
+        usedBy("maven", "com.fasterxml.jackson.core:jackson-databind")
+                .andExpect(jsonPath(uses + ".service.name", contains("Order Service", "Payments API")))
+                .andExpect(jsonPath(uses + ".direct", contains(true, false)))
+                .andExpect(jsonPath(uses + ".through[0].name",
+                        contains("org.springframework.boot:spring-boot-starter-web")));
     }
 
     @Test
     void directUsageWinsWhenLodashIsAlsoPulledInByTheUiKit() throws Exception {
-        componentImpact("npm", "lodash", "4.17.20")
-                .andExpect(jsonPath("$.services[*].service.name", contains("Customer Portal")))
-                .andExpect(jsonPath("$.services[0].direct").value(true));
+        String uses = version("4.17.20");
+        usedBy("npm", "lodash")
+                .andExpect(jsonPath(uses + ".service.name", contains("Customer Portal")))
+                .andExpect(jsonPath(uses + ".direct", contains(true)));
     }
 
     @Test
     void reactReachedThroughTwoPathsIsReportedOnce() throws Exception {
-        componentImpact("npm", "react", "17.0.2")
-                .andExpect(jsonPath("$.services[*].service.name", contains("Customer Portal")))
-                .andExpect(jsonPath("$.services[0].direct").value(false));
+        String uses = version("17.0.2");
+        usedBy("npm", "react")
+                .andExpect(jsonPath(uses + ".service.name", contains("Customer Portal")))
+                .andExpect(jsonPath(uses + ".direct", contains(false)));
     }
 
     @Test
     void transitivePythonDependencyReachesInternalReporting() throws Exception {
-        componentImpact("pypi", "urllib3", "1.26.4")
-                .andExpect(jsonPath("$.services[*].service.name", contains("Internal Reporting")))
-                .andExpect(jsonPath("$.services[0].viaComponent.name").value("requests"))
-                .andExpect(jsonPath("$.services[0].owners").isEmpty());
+        String uses = version("1.26.4");
+        usedBy("pypi", "urllib3")
+                .andExpect(jsonPath(uses + ".service.name", contains("Internal Reporting")))
+                .andExpect(jsonPath(uses + ".through[0].name", contains("requests")));
     }
 
     @Test
-    void vendorImpactCoversServicesWithAndWithoutSboms() throws Exception {
-        vendorImpact("Amazon Web Services")
+    void vendorUsedByCoversServicesWithAndWithoutSboms() throws Exception {
+        vendorUsedBy("Amazon Web Services")
                 .andExpect(jsonPath("$.services[*].service.name", contains("Order Service", "Payments API")));
-        vendorImpact("Cloudflare")
+        vendorUsedBy("Cloudflare")
                 .andExpect(jsonPath("$.services[*].service.name", contains("Customer Portal", "Marketing Site")))
                 .andExpect(jsonPath("$.services[1].owners").isEmpty());
     }
 
-    private ResultActions componentImpact(String ecosystem, String name, String version) throws Exception {
-        UUID id = store.findSoftwareComponentByCoordinates(ecosystem, name, version).orElseThrow().getId();
-        return mvc.perform(get("/api/inventory/components/{id}/impact", id).with(role("SERVICE_OWNER")))
+    /** The uses of one version, from a package's "Used by". */
+    private static String version(String version) {
+        return "$.uses[?(@.component.version == '" + version + "')]";
+    }
+
+    private ResultActions usedBy(String ecosystem, String name) throws Exception {
+        return mvc.perform(get("/api/inventory/components/used-by").param("ecosystem", ecosystem).param("name", name)
+                        .with(role("SERVICE_OWNER")))
                 .andExpect(status().isOk());
     }
 
-    private ResultActions vendorImpact(String vendorName) throws Exception {
+    private ResultActions vendorUsedBy(String vendorName) throws Exception {
         UUID id = store.findThirdPartyVendorByName(vendorName).orElseThrow().getId();
-        return mvc.perform(get("/api/inventory/vendors/{id}/impact", id).with(role("ANALYST")))
+        return mvc.perform(get("/api/inventory/vendors/{id}/used-by", id).with(role("ANALYST")))
                 .andExpect(status().isOk());
     }
 

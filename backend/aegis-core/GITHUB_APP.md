@@ -1,9 +1,12 @@
 # GitHub App provider spike (E8 Story 3)
 
 Story 3 implements a disabled-by-default `PrProvider` in `actions.pr.github`. It can create a branch,
-commit proposed file contents and open a **draft** PR. There is no execution endpoint, scheduled job,
-approval workflow, merge operation, or real GitHub App registration in this change. Tests use only a
-local fake GitHub server and runtime-generated temporary RSA keys.
+commit proposed file contents and open a **draft** PR. It has no merge operation and no scheduled job.
+Since story 4 its only caller is the approval step for safe-upgrade proposals
+(`POST /api/actions/upgrade-proposals/{id}/approve`, see the aegis-core README): a person's decision,
+never an automatic one. The same App also lets the inventory **clone** a repository it is installed on to
+import the service's SBOM — with a read-only token, so no personal access token is needed. Tests use only
+a local fake GitHub server and runtime-generated temporary RSA keys.
 
 ## Decision and scope
 
@@ -12,9 +15,10 @@ have short lifetimes and independently narrowed permissions. A fine-grained PAT 
 fallback behind `PrProvider`; no PAT adapter is implemented. The App is independent of an employee's
 personal credentials. See GitHub's [App authentication model](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/about-authentication-with-a-github-app).
 
-Only `PrProvider` is published as an adapter bean. Authentication, configuration, HTTP mapping and
-token caching stay inside `actions.pr.github`; the existing architecture test guards this boundary.
-Inventory repository links do not call this adapter. Linking a repository does not authorize execution.
+The adapter is reached only through two ports: `PrProvider` (draft pull requests) and the inventory's
+`RepositoryReadAccess` (read access for SBOM imports). Authentication, configuration, HTTP mapping and
+token caching stay inside `actions.pr.github`; the architecture test guards this boundary. Linking a
+repository does not authorize execution.
 
 ## Configuration
 
@@ -24,13 +28,18 @@ All keys are under `aegis.actions.github` in `application.yml`.
 |---|---|---|
 | `enabled` | `AEGIS_GITHUB_ENABLED` | `false` |
 | `api-base-url` | `AEGIS_GITHUB_API_URL` | `https://api.github.com` |
+| `web-base-url` | `AEGIS_GITHUB_WEB_URL` | `https://github.com` (the sign-in when connecting) |
 | `client-id` | `AEGIS_GITHUB_APP_CLIENT_ID` | Required when enabled |
+| `client-secret` | `AEGIS_GITHUB_APP_CLIENT_SECRET` | Required when enabled; only for connecting |
 | `private-key-path` | `AEGIS_GITHUB_APP_PRIVATE_KEY_PATH` | Required when enabled; external PKCS#8 PEM |
+| `callback-url` | `AEGIS_GITHUB_CALLBACK_URL` | `http://localhost:3000/admin/integrations/github/callback` |
 | `hosts` | `AEGIS_GITHUB_HOSTS` | `github.com` |
-| `allowed-accounts` | `AEGIS_GITHUB_ALLOWED_ACCOUNTS` | Empty: refuse every operation |
 
-Comma-separated host and account lists are case-insensitive. An enabled provider requires a client ID,
-a valid API URL and a readable, unencrypted RSA PKCS#8 key of at least 2048 bits at startup. When off,
+Which installations each Aegis organization may use is **not configuration**: its organization admin
+connects them under Organization → Integrations (see "Tenant security" below), and aegis-core records them
+in `github_connections` (V22). `callback-url` must equal the App's registered callback URL. Comma-separated
+host lists are case-insensitive. An enabled provider requires a client ID, a client secret, valid API and
+web URLs and a readable, unencrypted RSA PKCS#8 key of at least 2048 bits at startup. When off,
 the configuration and provider beans are absent and no key is needed. `hosts` selects repository
 hosts; it does not choose an API origin from user input. This deployment uses one configured API
 origin, including an optional Enterprise `/api/v3` prefix. HTTPS is required except for loopback HTTP
@@ -47,9 +56,10 @@ Putting values in the root `.env` alone does not pass new variables through Comp
    See GitHub's [JWT requirements](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app).
 2. Look up `/repos/{owner}/{repo}/installation` using that JWT. A 404 reports that the Aegis App
    is not installed on the repository. Check `account.login` against the configured account allow-list.
-3. Request `/app/installations/{id}/access_tokens` with exactly one repository name and
-   `contents: write`, `pull_requests: write`. Cache only in memory by installation ID and repository
-   name; use `expires_at` and refresh below five minutes remaining. Recheck the installation account
+3. Request `/app/installations/{id}/access_tokens` with exactly one repository name and the least
+   permissions for the job: `contents: write`, `pull_requests: write` for a draft pull request, or only
+   `contents: read` for an SBOM import's clone. Cache only in memory by installation ID, repository name
+   and that access; use `expires_at` and refresh below five minutes remaining. Recheck the installation account
    even for a cache hit. Expired entries are discarded. GitHub tokens normally last one hour and are
    treated as opaque strings, without a fixed-length assumption. See
    [installation token scoping](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app).
@@ -74,20 +84,36 @@ repository settings. The contents API's changed directory-listing submodule type
 individual-file flow; non-file responses are refused. Response records ignore unknown properties.
 
 The Contents API makes **one commit per file** here. Atomic multi-file changes would need the Git Data
-API: blobs, tree, commit, then update the ref. A failure after branch creation may leave a branch or
-partial commits. The adapter does not delete them, force-push, retry writes, or reuse an existing
-branch. Inspect a failed attempt before retrying with a new unique `aegis/*` head. A timeout can mean a
-remote write succeeded without its response reaching Aegis; future execution needs idempotency and
-reconciliation. Rate-limit responses fail safely; scheduling/backoff belongs to that future executor.
+API: blobs, tree, commit, then update the ref. A failure after the adapter created its branch deletes
+that branch (best effort), so the same draft can be retried; a branch that already existed is never
+touched. It does not force-push, retry writes, or reuse an existing branch. A change that carries an
+expected revision (story 4 always does) is written only over that exact blob, so a file edited after
+Aegis read it is refused rather than overwritten. A timeout can still mean a remote write succeeded
+without its response reaching Aegis. Rate-limit responses fail safely; the proposal records the failure.
 
 ## Tenant security and key operations
 
-**The allow-list is a spike safeguard, not production tenant isolation.** With one App installed on
-multiple accounts, a tenant could otherwise link another tenant's repository and invoke the victim's
-installation. Empty lists refuse all operations; unmatched accounts are rejected before token minting.
-An allow-listed account can still be shared by multiple Aegis tenants.
+**Every installation is connected per organization.** GitHub knows only that the App is installed on an
+account, never which Aegis organization that installation is for. With one App installed on many
+accounts, a tenant could otherwise link another tenant's repository and have Aegis read it (an SBOM
+import) or propose changes to it through the victim's installation. So no installation token is minted —
+for pull requests and reads alike — unless the caller's organization has connected that installation.
 
-Before production, an org admin must explicitly verify and bind an installation to their Aegis org.
+Connecting (`GitHubConnections`, `/api/integrations/github`, organization admins only):
+
+1. Aegis records a one-time state bound to the admin and their organization (only its SHA-256 is stored;
+   it lives ten minutes and is consumed on use) and sends them to GitHub to sign in to the App.
+2. GitHub sends them back to `callback-url` with a code; aegis-core exchanges it (client ID + secret) for
+   a short-lived user token and asks GitHub which of the App's installations the admin can see.
+3. It connects only those the admin **controls**: one on their own account (the account is the signed-in
+   user), or on a GitHub organization they are an active **admin** of (`GET /user/memberships/orgs/{org}`,
+   which needs the App's read access to organization members). Seeing an installation is not enough —
+   every member of a GitHub organization can see its installations. The rest are reported with the reason.
+4. The user token is revoked and never stored or logged. Several Aegis organizations may each connect the
+   same installation, each proven separately; disconnecting is one organization's own.
+
+The operator-maintained binding is an interim. Before production, an org admin should explicitly verify
+and bind an installation to their Aegis org through the App's installation flow.
 Store that binding in a new table with `org_id`, scope it through `CurrentOrg`, and require every action
 to use a bound installation. Add cross-tenant denial tests, installation removal/suspension handling,
 and approval/audit enforcement before exposing any execution route or job. No binding migration is
@@ -111,11 +137,19 @@ configuration dumps, request headers or token responses.
 ## Later manual App setup (not performed)
 
 1. Go to Settings → Developer settings → GitHub Apps → New GitHub App. Choose the intended App owner
-   and installation visibility. Disable webhooks; this spike does not consume them.
+   and installation visibility. Disable webhooks; this spike does not consume them. The Homepage URL is
+   then the only required field, and GitHub only links it from the App's page, so the project
+   repository's URL will do. Set the **Callback URL** to the frontend page GitHub sends an organization
+   admin back to when they connect: `http://localhost:3000/admin/integrations/github/callback` locally
+   (it must equal `callback-url`). Leave "Request user authorization (OAuth) during installation" off —
+   Aegis starts that sign-in itself, with a state it can check. The Setup URL is optional; pointing it at
+   `http://localhost:3000/admin/integrations` brings people back to Aegis after installing.
 2. Grant repository **Contents: Read & write**, **Pull requests: Read & write**, and mandatory
-   **Metadata: Read**. Leave every other permission at No access, especially Workflows,
-   Administration and Actions.
-3. Install on **Only select repositories**, initially one disposable sandbox repository. Record its
+   **Metadata: Read**. To let admins connect installations on GitHub *organizations*, also grant
+   organization **Members: Read-only** (Aegis only asks whether the person connecting is an admin).
+   Leave every other permission at No access, especially Workflows, Administration and Actions.
+3. Install on **Only select repositories** (the App's settings → **Install App** → **Install** next to
+   the account that owns the repositories), initially one disposable sandbox repository. Record its
    owner/account login for the spike allow-list. See GitHub's
    [least-privilege guidance](https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/best-practices-for-creating-a-github-app).
 4. Generate and securely store the key outside the checkout, convert it as above, and mount it
@@ -125,6 +159,37 @@ configuration dumps, request headers or token responses.
    to `aegis/*` by GitHub; that restriction is enforced by this provider and proposal validation.
 6. Installation-token commits use the App's bot identity. The desired slug is `aegis`; names are
    globally unique, so record `aegis-cs203[bot]` as a fallback and verify the actual author in the sandbox.
+
+## Running it
+
+There is no GitHub token to create: the App's client ID and private key mint a short-lived installation
+token per repository. The App's **client secret** is used for one thing only: the organization admin's
+GitHub sign-in when they connect an installation. Generate one on the App's settings page and keep it
+out of the repository like the key. Keep the key **outside the repository**, converted once to PKCS#8
+(`openssl pkcs8 -topk8 -nocrypt -in app.pem -out app.pkcs8.pem`).
+
+Then, in Aegis, an organization admin opens **Organization → Integrations**, installs the App on the
+GitHub account that owns the repositories (choosing only those repositories), and clicks **Connect
+GitHub**. Until they do, every GitHub operation in that organization is refused with that hint.
+
+- **aegis-core run locally** (IDE or `./mvnw spring-boot:run`): Spring Boot does not read `.env` files,
+  so export `AEGIS_GITHUB_ENABLED=true`, `AEGIS_GITHUB_APP_CLIENT_ID`, `AEGIS_GITHUB_APP_CLIENT_SECRET` and
+  `AEGIS_GITHUB_APP_PRIVATE_KEY_PATH` (absolute path to the PKCS#8 file) in the shell or run configuration.
+- **docker compose**: put `AEGIS_GITHUB_ENABLED=true`, `AEGIS_GITHUB_APP_CLIENT_ID=…` and
+  `AEGIS_GITHUB_APP_CLIENT_SECRET=…` in the repo-root `.env`, and mount the key at the path compose
+  already points the container to, in a `docker-compose.override.yml` next to `docker-compose.yml`.
+  Both files are git-ignored, and compose merges the override automatically:
+
+  ```yaml
+  services:
+    aegis-core:
+      volumes:
+        - /absolute/path/outside/the/repo/app.pkcs8.pem:/run/secrets/github-app.pkcs8.pem:ro
+  ```
+
+With `AEGIS_GITHUB_ENABLED=true`, a missing or unreadable key stops aegis-core at startup with a clear
+message. Approving a proposal whose repository no enabled provider supports fails with a conflict,
+recorded on the proposal.
 
 ## Verification and future sandbox smoke test
 
@@ -143,7 +208,7 @@ Run from `backend/aegis-core` with Java 21, Maven and Docker available:
 mvn -B clean verify
 mvn -B verify -Dsurefire.runOrder=reversealphabetical
 # Focused, no database required:
-mvn -B -Dtest=GitHubAppPrProviderTest,GitHubPrConfigTest,PackageStructureArchTest test
+mvn -B -Dtest=GitHubAppPrProviderTest,GitHubAppConfigTest,PackageStructureArchTest test
 ```
 
 The local fake checks signed JWT claims, request headers, token scopes, cache reuse/refresh/isolation,
@@ -160,18 +225,18 @@ the particular Enterprise Server release before deployment.
 When an operator is ready for a **separately authorized** real sandbox exercise:
 
 1. Register/install the least-privilege App above, use a disposable repository containing one sample
-   file, and supply only that sandbox account in `allowed-accounts`.
-2. Enable the adapter in an isolated local environment with an external key. No UI action or HTTP
-   endpoint invokes it yet. A developer must use a temporary local harness calling `PrProvider`
-   directly, or the future human-approved executor. Do not add an unauthenticated test endpoint.
-3. Submit a `PullRequestDraft` with a unique `aegis/smoke-<timestamp>` head, null base, and one harmless
-   sample-file change. Verify the returned URL, draft state, default base, exact diff and bot author.
-   Check that the default branch and workflow files remain untouched.
-4. Repeat with a disallowed account to verify refusal, then disable the adapter, close the draft,
+   file, and connect only that sandbox account under Organization → Integrations.
+2. Enable the adapter in an isolated local environment with an external key (see "Running it" below).
+   Link a service to the sandbox repository, then draft and approve a safe-upgrade proposal through
+   `/api/actions/upgrade-proposals`. Do not add an unauthenticated test endpoint.
+3. Verify the returned URL, draft state, default base, exact diff (only the version changes) and bot
+   author. Check that the default branch and workflow files remain untouched.
+4. Repeat from an organization that has not connected the account to verify refusal, then disable the adapter, close the draft,
    remove the sandbox branch and uninstall the sandbox installation when finished. Record sanitized
    evidence without JWTs, installation tokens or key material.
 
-Open questions for production: org-installation verification UX; App ownership and final slug;
+Open questions for production: disconnecting automatically when the App is uninstalled on GitHub (needs
+webhooks); App ownership and final slug;
 approval permissions/audit schema; idempotency and partial-failure cleanup; atomic multi-file commits;
 cache invalidation on revocation; GitHub Enterprise versions; secret-manager and rotation ownership.
 

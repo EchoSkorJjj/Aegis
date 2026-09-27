@@ -1,5 +1,6 @@
 package com.aegis.core.matching;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
@@ -95,7 +96,7 @@ public final class MatchingDtos {
                     identityMatch, versionMatch);
         }
 
-        private static String describeRange(AffectedProduct affected) {
+        static String describeRange(AffectedProduct affected) {
             if (affected.affectsAllVersions()) {
                 return "*";
             }
@@ -128,6 +129,38 @@ public final class MatchingDtos {
         EXACT_PACKAGE,
         CPE_VENDOR_PRODUCT_ALIAS,
         AMBIGUOUS_NAME
+    }
+
+    /**
+     * A vulnerable component one service uses: directly ({@code via} null), or through the direct
+     * dependency {@code via}. {@code manifestPath} is the manifest declaring that direct dependency, where
+     * the SBOM import recorded one. {@code confidence} is CONFIRMED when any one vulnerability is.
+     */
+    public record VulnerableDependency(
+            UUID serviceId,
+            ComponentRef component,
+            ComponentRef via,
+            List<String> manifestPaths,
+            MatchConfidence confidence,
+            List<VulnerabilityRef> vulnerabilities) {
+
+        public VulnerableDependency {
+            manifestPaths = manifestPaths == null ? List.of() : List.copyOf(manifestPaths);
+        }
+    }
+
+    /**
+     * A vulnerability affecting a component: its canonical id (a CVE, or a GHSA with none), its change
+     * signal, how firmly it matched, and the feeds' own severity — the highest CVSS base score published,
+     * else a severity word.
+     */
+    public record VulnerabilityRef(
+            String id,
+            UUID changeSignalId,
+            MatchConfidence confidence,
+            String cvssVersion,
+            BigDecimal cvssBaseScore,
+            String severity) {
     }
 
     public record ComponentRef(UUID id, String ecosystem, String name, String version) {

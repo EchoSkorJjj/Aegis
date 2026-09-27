@@ -20,6 +20,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Repository
 class JpaAdvisoryStore implements AdvisoryStore {
 
+    /** Keeps each IN list well within the driver's bind-parameter limit. */
+    private static final int CANONICAL_IDS_PER_QUERY = 1_000;
+
     private final AdvisoryJpaRepository advisories;
     private final AffectedProductJpaRepository affectedProducts;
 
@@ -72,6 +75,34 @@ class JpaAdvisoryStore implements AdvisoryStore {
         List<AdvisoryEntity> entities = advisories.findByCanonicalId(canonicalId);
         Map<UUID, List<AffectedProduct>> affected = affectedFor(
                 entities.stream().map(AdvisoryEntity::getId).toList());
+        return entities.stream().map(entity -> toAdvisory(entity, affected.get(entity.getId()))).toList();
+    }
+
+    @Override
+    public List<Advisory> findByCanonicalIds(Collection<String> canonicalIds) {
+        List<String> ids = canonicalIds.stream().distinct().toList();
+        List<Advisory> found = new ArrayList<>();
+        for (int start = 0; start < ids.size(); start += CANONICAL_IDS_PER_QUERY) {
+            List<AdvisoryEntity> entities = advisories.findByCanonicalIdIn(
+                    ids.subList(start, Math.min(ids.size(), start + CANONICAL_IDS_PER_QUERY)));
+            Map<UUID, List<AffectedProduct>> affected = affectedFor(
+                    entities.stream().map(AdvisoryEntity::getId).toList());
+            entities.forEach(entity -> found.add(toAdvisory(entity, affected.get(entity.getId()))));
+        }
+        return found;
+    }
+
+    @Override
+    public List<Advisory> findNamingPackage(Collection<String> packageKeys, Collection<String> productKeys) {
+        // An empty IN () is invalid SQL; a key no row can hold keeps each side a no-op instead.
+        List<UUID> ids = affectedProducts.findAdvisoryIdsNaming(
+                packageKeys.isEmpty() ? List.of("") : packageKeys,
+                productKeys.isEmpty() ? List.of("") : productKeys);
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        List<AdvisoryEntity> entities = advisories.findAllById(ids);
+        Map<UUID, List<AffectedProduct>> affected = affectedFor(ids);
         return entities.stream().map(entity -> toAdvisory(entity, affected.get(entity.getId()))).toList();
     }
 

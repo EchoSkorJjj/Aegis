@@ -17,9 +17,9 @@ import com.aegis.core.advisories.AdvisoryStore;
 import com.aegis.core.advisories.AffectedProduct;
 import com.aegis.core.incidents.VendorIncident;
 import com.aegis.core.incidents.VendorIncidentStore;
+import com.aegis.core.inventory.DependencyGraph;
+import com.aegis.core.inventory.DependencyGraph.Use;
 import com.aegis.core.inventory.InventoryStore;
-import com.aegis.core.inventory.InventoryStore.ComponentDependencyLink;
-import com.aegis.core.inventory.InventoryStore.ServiceComponentLink;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.SoftwareComponent;
@@ -57,6 +57,7 @@ public class MatchingService {
     private final AdvisoryStore advisories;
     private final VendorIncidentStore incidents;
     private final InventoryStore inventory;
+    private final DependencyGraph graph;
     private final AdvisoryComponentMatcher componentMatcher;
 
     public MatchingService(
@@ -64,11 +65,13 @@ public class MatchingService {
             AdvisoryStore advisories,
             VendorIncidentStore incidents,
             InventoryStore inventory,
+            DependencyGraph graph,
             AdvisoryComponentMatcher componentMatcher) {
         this.signals = signals;
         this.advisories = advisories;
         this.incidents = incidents;
         this.inventory = inventory;
+        this.graph = graph;
         this.componentMatcher = componentMatcher;
     }
 
@@ -105,62 +108,54 @@ public class MatchingService {
         List<ComponentMatch> componentMatches = componentMatcher.match(
                 affected, inventory.findSoftwareComponentsForMatching());
 
-        // Reverse-dependency closure from each matched (vulnerable) component. Computed once per root
-        // (a component matched by two affected products does not traverse twice).
-        Map<UUID, Map<UUID, List<UUID>>> pathsByRoot = new LinkedHashMap<>();
-        Set<UUID> reachable = new LinkedHashSet<>();
+        // Who uses each matched (vulnerable) component, each service through its own dependency graph: one use per
+        // component the service links that reaches it, along the shortest path. Worked out once per component.
         Set<UUID> matchedComponentIds = new LinkedHashSet<>();
-        for (ComponentMatch match : componentMatches) {
-            UUID rootId = match.component().getId();
-            matchedComponentIds.add(rootId);
-            Map<UUID, List<UUID>> paths = pathsByRoot.computeIfAbsent(rootId, this::dependentPaths);
-            reachable.addAll(paths.keySet());
-        }
+        componentMatches.forEach(match -> matchedComponentIds.add(match.component().getId()));
+        Map<UUID, List<Use>> uses = graph.usesOf(matchedComponentIds);
 
-        // Every downstream lookup is batched once over the whole closure — not per matched component.
-        List<ServiceComponentLink> serviceLinks = inventory.findServiceComponentLinks(reachable);
-        Set<UUID> serviceIds = serviceLinks.stream()
-                .map(ServiceComponentLink::serviceId)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
+        // Every downstream lookup is batched once over all the uses — not per matched component.
+        Set<UUID> serviceIds = new LinkedHashSet<>();
+        Set<UUID> onPaths = new LinkedHashSet<>();
+        uses.values().forEach(found -> found.forEach(use -> {
+            serviceIds.add(use.serviceId());
+            onPaths.addAll(use.path());
+        }));
+        if (serviceIds.isEmpty()) {
+            return new ChangeMatchResponse(ChangeRef.from(signal), matchedComponentIds.size(), 0, List.of());
+        }
         Map<UUID, BusinessService> services = inventory.findBusinessServicesByIds(serviceIds);
         Map<UUID, List<Owner>> owners = inventory.findOwnersForServices(serviceIds);
-        Map<UUID, SoftwareComponent> components = inventory.findSoftwareComponentsByIds(reachable);
-        Map<UUID, List<ServiceComponentLink>> linksByComponent = serviceLinks.stream()
-                .collect(Collectors.groupingBy(ServiceComponentLink::componentId));
+        Map<UUID, SoftwareComponent> components = inventory.findSoftwareComponentsByIds(onPaths);
 
         Map<UUID, ServiceAccumulator> impacted = new LinkedHashMap<>();
+
         for (ComponentMatch match : componentMatches) {
-            Map<UUID, List<UUID>> paths = pathsByRoot.get(match.component().getId());
-            paths.keySet().stream()
-                    .flatMap(componentId -> linksByComponent.getOrDefault(componentId, List.of()).stream())
-                    .sorted(Comparator.comparing(ServiceComponentLink::serviceId)
-                            .thenComparing(ServiceComponentLink::componentId))
-                    .forEach(link -> {
-                        BusinessService service = services.get(link.serviceId());
-                        if (service == null) {
-                            return;
-                        }
-                        List<ComponentRef> componentPath = paths.get(link.componentId()).stream()
-                                .map(components::get)
-                                .filter(Objects::nonNull)
-                                .map(ComponentRef::from)
-                                .toList();
-                        if (componentPath.isEmpty()) {
-                            return; // never emit evidence we cannot describe
-                        }
-                        List<OwnerRef> ownerRefs = ownerRefs(owners.get(link.serviceId()));
-                        EvidenceChain evidence = new EvidenceChain(
-                                EvidenceKind.ADVISORY_COMPONENT,
-                                match.confidence(),
-                                advisoryExplanation(canonicalId, match, componentPath, service, ownerRefs),
-                                AffectedProductEvidence.from(
-                                        match.affectedProduct(), match.identityMatch(), match.versionMatch()),
-                                componentPath,
-                                null);
-                        impacted.computeIfAbsent(service.getId(), ignored ->
-                                        new ServiceAccumulator(service, ownerRefs))
-                                .evidence.add(evidence);
-                    });
+            for (Use use : uses.getOrDefault(match.component().getId(), List.of())) {
+                BusinessService service = services.get(use.serviceId());
+                if (service == null) {
+                    continue;
+                }
+                List<ComponentRef> componentPath = use.path().stream()
+                        .map(components::get)
+                        .filter(Objects::nonNull)
+                        .map(ComponentRef::from)
+                        .toList();
+                if (componentPath.isEmpty()) {
+                    continue; // never emit evidence we cannot describe
+                }
+                List<OwnerRef> ownerRefs = ownerRefs(owners.get(use.serviceId()));
+                EvidenceChain evidence = new EvidenceChain(
+                        EvidenceKind.ADVISORY_COMPONENT,
+                        match.confidence(),
+                        advisoryExplanation(canonicalId, match, componentPath, service, ownerRefs),
+                        AffectedProductEvidence.from(
+                                match.affectedProduct(), match.identityMatch(), match.versionMatch()),
+                        componentPath,
+                        null);
+                impacted.computeIfAbsent(service.getId(), ignored -> new ServiceAccumulator(service, ownerRefs))
+                        .evidence.add(evidence);
+            }
         }
 
         return new ChangeMatchResponse(
@@ -200,35 +195,6 @@ public class MatchingService {
         }
 
         return new ChangeMatchResponse(ChangeRef.from(signal), 0, matchedVendors.size(), toResponses(impacted));
-    }
-
-    /** Shortest reverse-dependency path from the vulnerable component to every dependent. */
-    private Map<UUID, List<UUID>> dependentPaths(UUID rootId) {
-        Map<UUID, List<UUID>> paths = new LinkedHashMap<>();
-        paths.put(rootId, List.of(rootId));
-        Set<UUID> frontier = Set.of(rootId);
-        while (!frontier.isEmpty()) {
-            Set<UUID> next = new LinkedHashSet<>();
-            List<ComponentDependencyLink> links = inventory.findComponentDependencyLinks(frontier).stream()
-                    .sorted(Comparator.comparing(ComponentDependencyLink::componentId)
-                            .thenComparing(ComponentDependencyLink::dependencyId))
-                    .toList();
-            for (ComponentDependencyLink link : links) {
-                if (paths.containsKey(link.componentId())) {
-                    continue;
-                }
-                List<UUID> prefix = paths.get(link.dependencyId());
-                if (prefix == null) {
-                    continue;
-                }
-                List<UUID> path = new ArrayList<>(prefix);
-                path.add(link.componentId());
-                paths.put(link.componentId(), List.copyOf(path));
-                next.add(link.componentId());
-            }
-            frontier = next;
-        }
-        return paths;
     }
 
     private static List<ImpactedServiceMatch> toResponses(Map<UUID, ServiceAccumulator> impacted) {

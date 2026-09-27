@@ -10,13 +10,13 @@ import jakarta.validation.Valid;
 import com.aegis.core.inventory.InventoryDtos.AssignOwnerRequest;
 import com.aegis.core.inventory.InventoryDtos.BusinessServiceRequest;
 import com.aegis.core.inventory.InventoryDtos.BusinessServiceResponse;
-import com.aegis.core.inventory.InventoryDtos.ComponentImpactResponse;
 import com.aegis.core.inventory.InventoryDtos.NamedInventoryRequest;
 import com.aegis.core.inventory.InventoryDtos.OwnerResponse;
+import com.aegis.core.inventory.InventoryDtos.PackageUsageResponse;
 import com.aegis.core.inventory.InventoryDtos.SoftwareComponentRequest;
 import com.aegis.core.inventory.InventoryDtos.SoftwareComponentResponse;
 import com.aegis.core.inventory.InventoryDtos.ThirdPartyVendorResponse;
-import com.aegis.core.inventory.InventoryDtos.VendorImpactResponse;
+import com.aegis.core.inventory.InventoryDtos.VendorUsageResponse;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import io.swagger.v3.oas.annotations.Operation;
@@ -44,9 +44,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class InventoryController {
 
     private final InventoryService inventory;
+    private final UsedByService usedBy;
 
-    public InventoryController(InventoryService inventory) {
+    public InventoryController(InventoryService inventory, UsedByService usedBy) {
         this.inventory = inventory;
+        this.usedBy = usedBy;
     }
 
     @PostMapping("/services")
@@ -329,19 +331,19 @@ public class InventoryController {
         return ResponseEntity.noContent().build();
     }
 
-    @GetMapping("/components/{componentId}/impact")
+    @GetMapping("/components/used-by")
     @PreAuthorize(InventoryRoles.READ)
-    @Operation(summary = "Get services and owners impacted by a component, "
-            + "including services reached through transitive dependencies")
-    public ComponentImpactResponse getComponentImpact(@PathVariable UUID componentId) {
-        return inventory.getComponentImpact(componentId);
+    @Operation(summary = "Every service using a package, any version of it, directly or through its dependencies — "
+            + "in each service's own dependency graph — with owners")
+    public PackageUsageResponse getPackageUsage(@RequestParam String ecosystem, @RequestParam String name) {
+        return usedBy.packageUsage(ecosystem, name);
     }
 
-    @GetMapping("/vendors/{vendorId}/impact")
+    @GetMapping("/vendors/{vendorId}/used-by")
     @PreAuthorize(InventoryRoles.READ)
-    @Operation(summary = "Get services and owners impacted by a vendor")
-    public VendorImpactResponse getVendorImpact(@PathVariable UUID vendorId) {
-        return inventory.getVendorImpact(vendorId);
+    @Operation(summary = "Every service using a vendor, with owners")
+    public VendorUsageResponse getVendorUsage(@PathVariable UUID vendorId) {
+        return usedBy.vendorUsage(vendorId);
     }
 
     private static ResponseEntity<Void> relationshipCreated(String path) {

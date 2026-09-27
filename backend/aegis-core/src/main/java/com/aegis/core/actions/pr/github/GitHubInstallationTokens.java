@@ -5,25 +5,55 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BooleanSupplier;
+import java.util.function.LongPredicate;
 
 import com.aegis.core.platform.common.ApiExceptions;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.http.HttpMethod;
 
+/**
+ * Installation access tokens, each narrowed to one repository and one {@link Access}: a draft pull
+ * request's write access is never handed to a read, and a read never gets more than the contents. Only an
+ * installation the caller's organization has connected ({@link GitHubConnections}) is used at all.
+ */
 final class GitHubInstallationTokens {
+
+    /** What a token may do in the one repository it is minted for. */
+    enum Access {
+        /** Branch, commit and draft pull request (actions.upgrade). */
+        PULL_REQUEST(Map.of("contents", "write", "pull_requests", "write")),
+        /** Clone only (the inventory's SBOM import). */
+        READ(Map.of("contents", "read"));
+
+        private final Map<String, String> permissions;
+
+        Access(Map<String, String> permissions) {
+            this.permissions = permissions;
+        }
+    }
+
+    static final String CONNECT_HINT = "an organization admin can connect it under Organization → Integrations";
+
     private final GitHubApi api;
     private final GitHubAppJwt jwt;
-    private final Set<String> allowedAccounts;
+    private final BooleanSupplier anyConnected;
+    private final LongPredicate connected;
     private final Clock clock;
     private final Map<CacheKey, Token> cache = new ConcurrentHashMap<>();
 
-    GitHubInstallationTokens(GitHubApi api, GitHubAppJwt jwt, Set<String> allowedAccounts, Clock clock) {
+    /**
+     * @param anyConnected whether the caller's organization has connected any installation
+     * @param connected    whether it has connected this installation
+     */
+    GitHubInstallationTokens(GitHubApi api, GitHubAppJwt jwt, BooleanSupplier anyConnected, LongPredicate connected,
+            Clock clock) {
         this.api = api;
         this.jwt = jwt;
-        this.allowedAccounts = allowedAccounts;
+        this.anyConnected = anyConnected;
+        this.connected = connected;
         this.clock = clock;
     }
 
@@ -33,9 +63,9 @@ final class GitHubInstallationTokens {
      * it is a concurrent map. Two concurrent misses for one repository may both mint a token; that is
      * harmless, since both are valid and the last one stored is reused.
      */
-    String forRepository(String repository) {
-        if (allowedAccounts.isEmpty()) {
-            throw new ApiExceptions.Forbidden("GitHub operations are disabled until allowed-accounts is configured");
+    String forRepository(String repository, Access access) {
+        if (!anyConnected.getAsBoolean()) {
+            throw new ApiExceptions.Forbidden("GitHub isn't connected to this organization; " + CONNECT_HINT);
         }
         String appJwt = jwt.create();
         var installation = api.call(HttpMethod.GET, api.uri("repos/" + repository + "/installation", null),
@@ -44,19 +74,19 @@ final class GitHubInstallationTokens {
         if (installation.id() <= 0 || installation.account() == null || installation.account().login() == null) {
             throw GitHubApi.invalidResponse();
         }
-        if (!allowedAccounts.contains(installation.account().login().toLowerCase(Locale.ROOT))) {
-            throw new ApiExceptions.Forbidden("GitHub installation account is not in allowed-accounts");
+        if (!connected.test(installation.id())) {
+            throw new ApiExceptions.Forbidden("The Aegis GitHub App on " + installation.account().login()
+                    + " isn't connected to this organization; " + CONNECT_HINT);
         }
-        // Lookup and account validation occur even on cache hits (installation access can change).
+        // Lookup and connection check occur even on cache hits (installation access can change).
         var now = clock.instant();
         cache.values().removeIf(value -> !value.expiresAt().isAfter(now));
         String repo = repository.split("/")[1];
-        var key = new CacheKey(installation.id(), repo.toLowerCase(Locale.ROOT));
+        var key = new CacheKey(installation.id(), repo.toLowerCase(Locale.ROOT), access);
         Token token = cache.get(key);
         if (token == null || token.expiresAt().isBefore(now.plusSeconds(5 * 60))) {
             token = api.post("app/installations/" + installation.id() + "/access_tokens", appJwt,
-                    Map.of("repositories", List.of(repo),
-                           "permissions", Map.of("contents", "write", "pull_requests", "write")), Token.class);
+                    Map.of("repositories", List.of(repo), "permissions", access.permissions), Token.class);
             if (token.token() == null || !token.token().matches("[\\x21-\\x7e]+") || token.expiresAt() == null
                     || !token.expiresAt().isAfter(now.plusSeconds(5 * 60))) {
                 throw GitHubApi.invalidResponse();
@@ -66,7 +96,7 @@ final class GitHubInstallationTokens {
         return token.token();
     }
 
-    private record CacheKey(long installation, String repository) { }
+    private record CacheKey(long installation, String repository, Access access) { }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record Installation(long id, Account account) { }

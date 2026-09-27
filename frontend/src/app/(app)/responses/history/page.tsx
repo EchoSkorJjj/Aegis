@@ -1,14 +1,9 @@
 import type { Metadata } from "next";
 
-import { PlaceholderPage } from "@/components/app/placeholder-page";
+import { ResponseQueue } from "@/components/app/responses/response-queue";
 
 export const metadata: Metadata = { title: "Response history" };
 
 export default function ResponseHistoryPage() {
-  return (
-    <PlaceholderPage
-      title="Response history"
-      description="Actions taken so far — pull requests, risk tickets, and notification memos."
-    />
-  );
+  return <ResponseQueue view="history" />;
 }

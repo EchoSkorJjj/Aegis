@@ -4,10 +4,12 @@ import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, Info } from "lucide-react";
 
+import { MemoAction, useLiveMemo } from "@/components/app/responses/memo-action";
+import { ResponseAction, useResponses } from "@/components/app/responses/response-action";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ApiError, scoringApi } from "@/lib/api";
-import { canReadInventory } from "@/lib/roles";
+import { canReadInventory, canRespondForService, respondsForAnyService } from "@/lib/roles";
 import type {
   AffectedProductEvidence,
   BusinessCriticality,
@@ -16,6 +18,7 @@ import type {
   IdentityMatch,
   ImpactTier,
   MatchConfidence,
+  RiskTicket,
   ScoredService,
   ScoreFactor,
   ScoreFactorKind,
@@ -105,6 +108,13 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
     };
   }, [authLoading, canRead, user?.orgId, signalId]);
 
+  // A vulnerability or a vendor outage gets a response per service (its risk ticket, and for a vulnerability
+  // the upgrade pull request), and a regulator notification when it is material.
+  const respondable =
+    status === "ok" && (data?.change.signalType === "VULNERABILITY" || data?.change.signalType === "VENDOR_OUTAGE");
+  const responses = useResponses(signalId, respondable);
+  const memo = useLiveMemo(signalId, respondable);
+
   const backLink = (
     <Link
       href="/advisories"
@@ -153,6 +163,8 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
   const { change, matchedComponentCount, matchedVendorCount, services } = data;
   const type = SIGNAL_TYPE[change.signalType];
   const needsReview = services.filter((s) => s.confidence === "POSSIBLE").length;
+  const materialCount = services.filter((s) => s.material).length;
+  const roles = user?.roles ?? [];
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6">
@@ -192,6 +204,16 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
         </span>
       </div>
 
+      {respondable && memo !== undefined && (memo || materialCount > 0) && (
+        <MemoAction
+          changeSignalId={signalId}
+          kind={change.signalType === "VENDOR_OUTAGE" ? "MAJOR_INCIDENT" : "CYBER_THREAT"}
+          materialCount={materialCount}
+          existing={memo}
+          canDraft={respondsForAnyService(roles)}
+        />
+      )}
+
       {services.length === 0 ? (
         <StateCard>
           {matchedComponentCount === 0 && matchedVendorCount === 0
@@ -203,16 +225,33 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
           <h2 className="text-sm font-medium text-muted-foreground">
             Impacted services ({services.length})
           </h2>
-          {services.map((scored) => (
-            <ServiceCard key={scored.service.id} scored={scored} />
-          ))}
+          {services.map((scored) => {
+            const canDraft = canRespondForService(roles, scored.owners.some((owner) => owner.userId === user?.id));
+            return (
+              <ServiceCard
+                key={scored.service.id}
+                scored={scored}
+                response={respondable ? { signalId, responses, canDraft } : null}
+              />
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
-function ServiceCard({ scored }: { scored: ScoredService }) {
+/**
+ * What a service card needs to offer a response: the change, the responses already drafted for it by service
+ * (null while loading), and whether the caller may draft one for this service.
+ */
+type ResponseContext = {
+  signalId: string;
+  responses: Map<string, RiskTicket> | null;
+  canDraft: boolean;
+};
+
+function ServiceCard({ scored, response }: { scored: ScoredService; response: ResponseContext | null }) {
   const confidence = CONFIDENCE[scored.confidence];
   return (
     <div className="rounded-lg border">
@@ -239,6 +278,14 @@ function ServiceCard({ scored }: { scored: ScoredService }) {
           <Evidence key={index} evidence={evidence} />
         ))}
       </div>
+      {response?.responses && (
+        <ResponseAction
+          changeSignalId={response.signalId}
+          serviceId={scored.service.id}
+          existing={response.responses.get(scored.service.id)}
+          canDraft={response.canDraft}
+        />
+      )}
     </div>
   );
 }

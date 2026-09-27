@@ -35,3 +35,19 @@ export function canWriteInventory(roles: readonly Role[]): boolean {
 export function canComposeService(roles: readonly Role[], isAssignedOwner: boolean): boolean {
   return canWriteInventory(roles) || (roles.includes("SERVICE_OWNER") && isAssignedOwner);
 }
+
+/**
+ * May the caller draft a response for one service, or decide one (approve / dismiss)? Mirrors
+ * aegis-core's `UpgradeRoles`: an ANALYST for any service, or a SERVICE_OWNER for a service they are an
+ * assigned owner of. A COMPLIANCE_ADMIN audits responses rather than drafting or deciding them, and
+ * whoever drafted a proposal never approves it. The backend enforces all of it; this only decides which
+ * controls to show.
+ */
+export function canRespondForService(roles: readonly Role[], isAssignedOwner: boolean): boolean {
+  return respondsForAnyService(roles) || (roles.includes("SERVICE_OWNER") && isAssignedOwner);
+}
+
+/** Drafts and decides responses for every service, with no ownership to check: an analyst. */
+export function respondsForAnyService(roles: readonly Role[]): boolean {
+  return roles.includes("ANALYST");
+}
