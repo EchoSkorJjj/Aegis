@@ -37,7 +37,32 @@ public final class AiDtos {
             String context) {
     }
 
+    /** A risk ticket's AI-drafted narrative fields; its priority, due date and facts are aegis-core's. */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record Draft(@JsonProperty("draft_type") String draftType, String content, List<String> citations) {
+    public record TicketSections(String summary, String risk, String impact, List<String> actions) {
+    }
+
+    /** A DORA notification memo's AI-drafted sections; the memo's template supplies every fact around them. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record MemoSections(
+            String summary, String impact, String measures, @JsonProperty("next_steps") String nextSteps) {
+    }
+
+    /**
+     * A draft: {@code content} is the whole of it as readable text; a risk ticket also carries
+     * {@code ticket} and a memo {@code memo}, the typed sections aegis-core assembles its document from.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Draft(
+            @JsonProperty("draft_type") String draftType,
+            String content,
+            TicketSections ticket,
+            MemoSections memo,
+            List<String> citations) {
+
+        /** A draft of text only, such as an upgrade's rationale. */
+        public Draft(String draftType, String content, List<String> citations) {
+            this(draftType, content, null, null, citations);
+        }
     }
 }

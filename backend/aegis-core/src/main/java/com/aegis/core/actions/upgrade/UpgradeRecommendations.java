@@ -5,6 +5,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -34,8 +35,8 @@ import org.springframework.stereotype.Service;
 
 /**
  * The upgrades Aegis recommends without anyone asking: every vulnerable dependency of the services the
- * caller can see, with the version that fixes it, how much it matters, and whether Aegis can draft the pull
- * request — highest impact first. Nobody has to know a CVE to find them; this is E9's queue of material
+ * caller can see, with the version that fixes it, how much it matters, whether Aegis can automate the pull
+ * request, and the response already drafted for it, if any — highest impact first. Nobody has to know a CVE to find them; this is E9's queue of material
  * items, for dependency vulnerabilities. Recomputed per request from matching ({@link VulnerableDependencies},
  * {@link UpgradeTargets}) and scoring ({@link ImpactScorer}); a proposal is only drafted when a person asks.
  *
@@ -58,13 +59,15 @@ public class UpgradeRecommendations {
     private final VulnerableDependencies vulnerable;
     private final ImpactScorer scorer;
     private final UpgradeProposalStore proposals;
+    private final ResponseDirectory responses;
 
     public UpgradeRecommendations(InventoryStore inventory, VulnerableDependencies vulnerable, ImpactScorer scorer,
-            UpgradeProposalStore proposals) {
+            UpgradeProposalStore proposals, ResponseDirectory responses) {
         this.inventory = inventory;
         this.vulnerable = vulnerable;
         this.scorer = scorer;
         this.proposals = proposals;
+        this.responses = responses;
     }
 
     /** Whether Aegis can draft the pull request now and, if not, what stands in the way. */
@@ -81,20 +84,23 @@ public class UpgradeRecommendations {
         NO_FIX
     }
 
-    /** The proposal already drafted for this dependency, if any. */
-    public record ProposalRef(UUID id, UpgradeProposalStatus status, String toVersion, String pullRequestUrl) {
+    /** The current pull request that upgrades this dependency, if any, and the response it belongs to. */
+    public record ProposalRef(UUID id, UpgradeProposalStatus status, String toVersion, String pullRequestUrl,
+                              UUID riskTicketId) {
     }
 
     /**
-     * One recommended upgrade. {@code changeSignalId} is the vulnerability a draft remediates — the most
-     * severe one a fixed version clears — and {@code toVersion} clears every other advisory with a fix too.
+     * One recommended upgrade. {@code changeSignalId} is the vulnerability a response answers — the most severe
+     * one a fixed version clears, else the most severe one — and {@code toVersion} clears every other advisory
+     * with a fix too. {@code response} is the response already drafted for it: the one whose pull request
+     * upgrades this dependency, else the one for {@code changeSignalId} in this service.
      */
     public record Recommendation(
             UUID serviceId,
             String serviceName,
             ComponentRef component,
             ComponentRef via,
-            String manifestPath,
+            List<String> manifestPaths,
             MatchConfidence confidence,
             List<VulnerabilityRef> vulnerabilities,
             double score,
@@ -104,7 +110,8 @@ public class UpgradeRecommendations {
             UUID changeSignalId,
             Readiness readiness,
             String reason,
-            ProposalRef proposal) {
+            ProposalRef proposal,
+            ResponseDirectory.ResponseRef response) {
     }
 
     /** Every service in the caller's organization, or only {@code serviceId} (404 if it isn't one). */
@@ -117,9 +124,13 @@ public class UpgradeRecommendations {
             throw new ApiExceptions.NotFound("Business service not found: " + serviceId);
         }
         Map<String, ProposalRef> current = currentProposals();
+        Map<ResponseDirectory.ServiceChange, ResponseDirectory.ResponseRef> byChange = responses.current(services.keySet());
+        Map<UUID, ResponseDirectory.ResponseRef> byTicket = new HashMap<>();
+        byChange.values().forEach(response -> byTicket.put(response.ticketId(), response));
         Found found = vulnerable.find(services.keySet());
         return found.dependencies().stream()
-                .map(dependency -> recommendation(dependency, services.get(dependency.serviceId()), current, found))
+                .map(dependency -> recommendation(dependency, services.get(dependency.serviceId()), current, found,
+                        byChange, byTicket))
                 .sorted(Comparator.comparingDouble(Recommendation::score).reversed()
                         .thenComparing(Recommendation::readiness)
                         .thenComparing(Recommendation::serviceName, String.CASE_INSENSITIVE_ORDER)
@@ -128,7 +139,9 @@ public class UpgradeRecommendations {
     }
 
     private Recommendation recommendation(VulnerableDependency dependency, BusinessService service,
-            Map<String, ProposalRef> current, Found found) {
+            Map<String, ProposalRef> current, Found found,
+            Map<ResponseDirectory.ServiceChange, ResponseDirectory.ResponseRef> byChange,
+            Map<UUID, ResponseDirectory.ResponseRef> byTicket) {
         ComponentRef component = dependency.component();
         ScoreBreakdown breakdown = scorer.breakdown(SignalType.VULNERABILITY,
                 severityFactor(dependency.vulnerabilities().getFirst()), service.getExposure(),
@@ -183,10 +196,18 @@ public class UpgradeRecommendations {
             readiness = Readiness.READY;
             reason = null;
         }
+        // Nothing to upgrade to still gets a response (a ticket alone): for the most severe vulnerability.
+        UUID answered = remediated != null ? remediated : dependency.vulnerabilities().stream()
+                .map(VulnerabilityRef::changeSignalId).filter(Objects::nonNull).findFirst().orElse(null);
+        ProposalRef proposal = current.get(key(service.getId(), component.id()));
+        ResponseDirectory.ResponseRef response = proposal != null && proposal.riskTicketId() != null
+                ? byTicket.get(proposal.riskTicketId()) : null;
+        if (response == null && answered != null) {
+            response = byChange.get(new ResponseDirectory.ServiceChange(service.getId(), answered));
+        }
         return new Recommendation(service.getId(), service.getName(), component, dependency.via(),
-                dependency.manifestPath(), dependency.confidence(), dependency.vulnerabilities(), score,
-                scorer.tier(score), scorer.material(score), toVersion, remediated, readiness, reason,
-                current.get(key(service.getId(), component.id())));
+                dependency.manifestPaths(), dependency.confidence(), dependency.vulnerabilities(), score,
+                scorer.tier(score), scorer.material(score), toVersion, answered, readiness, reason, proposal, response);
     }
 
     /** The severity term of the most severe vulnerability: its CVSS score, else its feed's severity word. */
@@ -197,14 +218,14 @@ public class UpgradeRecommendations {
                 : scorer.severityFromLabel(vulnerability.severity()).factor();
     }
 
-    /** The newest current proposal per service and component. */
+    /** The newest current proposal upgrading each service's component, in any of its manifests. */
     private Map<String, ProposalRef> currentProposals() {
         Map<String, ProposalRef> byKey = new HashMap<>();
-        proposals.findPage(null, null, CURRENT,
+        proposals.findPage(null, null, CURRENT, false,
                         PageRequest.of(0, MAX_PROPOSALS, Sort.by(Sort.Direction.DESC, "createdAt")))
-                .forEach(proposal -> byKey.putIfAbsent(key(proposal.serviceId(), proposal.componentId()),
-                        new ProposalRef(proposal.id(), proposal.status(), proposal.toVersion(),
-                                proposal.pullRequestUrl())));
+                .forEach(proposal -> proposal.edits().forEach(edit ->
+                        byKey.putIfAbsent(key(proposal.serviceId(), edit.componentId()), new ProposalRef(proposal.id(),
+                                proposal.status(), edit.toVersion(), proposal.pullRequestUrl(), proposal.riskTicketId()))));
         return byKey;
     }
 

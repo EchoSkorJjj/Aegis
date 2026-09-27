@@ -95,25 +95,25 @@ public final class InventoryDtos {
     public record AssignOwnerRequest(@NotNull UUID userId) {
     }
 
-    /** A service impacted through a direct relationship only (e.g. via a vendor). */
-    public record ImpactedServiceResponse(BusinessServiceResponse service, List<OwnerResponse> owners) {
+    /** A service using something, with the people accountable for it. */
+    public record UsingServiceResponse(BusinessServiceResponse service, List<OwnerResponse> owners) {
+    }
+
+    /** Every service linking a vendor; vendors are linked directly. */
+    public record VendorUsageResponse(ThirdPartyVendorResponse vendor, List<UsingServiceResponse> services) {
     }
 
     /**
-     * A service impacted by a component, direct or transitive. {@code viaComponent} is the
-     * component the service actually depends on directly; {@code direct} is true only when that
-     * is the queried component itself, false when it was reached through a dependency chain.
+     * One service using one version of a package. {@code direct} when the service links that version itself;
+     * otherwise {@code through} is how the service's own dependency graph reaches it, the shortest way: from the
+     * component the service links down to the one that depends on this version.
      */
-    public record ComponentImpactedServiceResponse(
-            BusinessServiceResponse service, List<OwnerResponse> owners, boolean direct,
-            SoftwareComponentResponse viaComponent) {
+    public record PackageUseResponse(
+            BusinessServiceResponse service, List<OwnerResponse> owners, SoftwareComponentResponse component,
+            boolean direct, List<SoftwareComponentResponse> through) {
     }
 
-    public record ComponentImpactResponse(
-            SoftwareComponentResponse component, List<ComponentImpactedServiceResponse> services) {
-    }
-
-    public record VendorImpactResponse(
-            ThirdPartyVendorResponse vendor, List<ImpactedServiceResponse> services) {
+    /** Every service using a package — any version of it — by service, then version. */
+    public record PackageUsageResponse(String ecosystem, String name, List<PackageUseResponse> uses) {
     }
 }

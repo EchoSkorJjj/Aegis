@@ -1,24 +1,8 @@
 package com.aegis.core.inventory;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
-import com.aegis.core.inventory.InventoryDtos.BusinessServiceResponse;
-import com.aegis.core.inventory.InventoryDtos.ComponentImpactResponse;
-import com.aegis.core.inventory.InventoryDtos.ComponentImpactedServiceResponse;
-import com.aegis.core.inventory.InventoryDtos.ImpactedServiceResponse;
-import com.aegis.core.inventory.InventoryDtos.OwnerResponse;
-import com.aegis.core.inventory.InventoryDtos.SoftwareComponentResponse;
-import com.aegis.core.inventory.InventoryDtos.ThirdPartyVendorResponse;
-import com.aegis.core.inventory.InventoryDtos.VendorImpactResponse;
-import com.aegis.core.inventory.InventoryStore.ServiceComponentLink;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.Owner;
@@ -331,89 +315,6 @@ public class InventoryService {
     public Page<SoftwareComponent> listComponentDependencies(UUID componentId, Pageable pageable) {
         getSoftwareComponent(componentId);
         return store.findComponentDependencies(componentId, pageable);
-    }
-
-    /**
-     * Services (and their owners) impacted by a component: those using it directly, plus those
-     * using some other component that depends on it, directly or transitively.
-     */
-    @Transactional(readOnly = true)
-    public ComponentImpactResponse getComponentImpact(UUID componentId) {
-        SoftwareComponent target = getSoftwareComponent(componentId);
-        Set<UUID> closure = resolveDependentClosure(componentId);
-        List<ServiceComponentLink> links = store.findServiceComponentLinks(closure);
-        if (links.isEmpty()) {
-            return new ComponentImpactResponse(SoftwareComponentResponse.from(target), List.of());
-        }
-
-        Map<UUID, List<ServiceComponentLink>> linksByService = new LinkedHashMap<>();
-        for (ServiceComponentLink link : links) {
-            linksByService.computeIfAbsent(link.serviceId(), key -> new ArrayList<>()).add(link);
-        }
-
-        Map<UUID, BusinessService> servicesById = store.findBusinessServicesByIds(linksByService.keySet());
-        Map<UUID, SoftwareComponent> componentsById = store.findSoftwareComponentsByIds(
-                links.stream().map(ServiceComponentLink::componentId).collect(Collectors.toSet()));
-        Map<UUID, List<Owner>> ownersByService = store.findOwnersForServices(linksByService.keySet());
-
-        List<ComponentImpactedServiceResponse> services = new ArrayList<>();
-        for (Map.Entry<UUID, List<ServiceComponentLink>> entry : linksByService.entrySet()) {
-            ServiceComponentLink chosen = entry.getValue().stream()
-                    .filter(link -> link.componentId().equals(componentId))
-                    .findFirst()
-                    .orElseGet(() -> entry.getValue().get(0));
-            services.add(new ComponentImpactedServiceResponse(
-                    BusinessServiceResponse.from(servicesById.get(entry.getKey())),
-                    toOwnerResponses(ownersByService.get(entry.getKey())),
-                    chosen.componentId().equals(componentId),
-                    SoftwareComponentResponse.from(componentsById.get(chosen.componentId()))));
-        }
-        services.sort(Comparator.comparing(response -> response.service().name(), String.CASE_INSENSITIVE_ORDER));
-
-        return new ComponentImpactResponse(SoftwareComponentResponse.from(target), services);
-    }
-
-    /** Services (and their owners) impacted by a vendor: those using it directly. */
-    @Transactional(readOnly = true)
-    public VendorImpactResponse getVendorImpact(UUID vendorId) {
-        ThirdPartyVendor vendor = getThirdPartyVendor(vendorId);
-        List<UUID> serviceIds = store.findServiceIdsForVendor(vendorId);
-        if (serviceIds.isEmpty()) {
-            return new VendorImpactResponse(ThirdPartyVendorResponse.from(vendor), List.of());
-        }
-
-        Map<UUID, BusinessService> servicesById = store.findBusinessServicesByIds(serviceIds);
-        Map<UUID, List<Owner>> ownersByService = store.findOwnersForServices(serviceIds);
-
-        List<ImpactedServiceResponse> services = serviceIds.stream()
-                .map(serviceId -> new ImpactedServiceResponse(
-                        BusinessServiceResponse.from(servicesById.get(serviceId)),
-                        toOwnerResponses(ownersByService.get(serviceId))))
-                .sorted(Comparator.comparing(response -> response.service().name(), String.CASE_INSENSITIVE_ORDER))
-                .toList();
-
-        return new VendorImpactResponse(ThirdPartyVendorResponse.from(vendor), services);
-    }
-
-    /** BFS over dependency edges: the component itself plus every component that depends on it. */
-    private Set<UUID> resolveDependentClosure(UUID componentId) {
-        Set<UUID> closure = new LinkedHashSet<>();
-        closure.add(componentId);
-        Set<UUID> frontier = Set.of(componentId);
-        while (!frontier.isEmpty()) {
-            Set<UUID> next = new LinkedHashSet<>();
-            for (UUID dependent : store.findComponentIdsDependingOn(frontier)) {
-                if (closure.add(dependent)) {
-                    next.add(dependent);
-                }
-            }
-            frontier = next;
-        }
-        return closure;
-    }
-
-    private static List<OwnerResponse> toOwnerResponses(List<Owner> owners) {
-        return owners == null ? List.of() : owners.stream().map(OwnerResponse::from).toList();
     }
 
     private void rejectDuplicateBusinessServiceName(String name, UUID excludingId) {

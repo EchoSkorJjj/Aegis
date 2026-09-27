@@ -265,6 +265,57 @@ class RepoSbomGeneratorTest {
     }
 
     @Test
+    void fetchesOnlyWhatSyftCanReadTheTreeFirstThenEveryFileButMediaInOneBatch() {
+        FakeCommandRunner runner = new FakeCommandRunner();
+
+        generate(runner, "https://github.com/acme/widgets", null, "ghp_token");
+
+        List<List<String>> git = runner.commandsStartingWith("git");
+        assertThat(git).hasSize(3);
+        assertThat(git.get(0)).contains("clone", "--filter=blob:none", "--no-checkout");
+        String checkout = git.get(0).getLast();
+        assertThat(git.get(1)).containsSequence("-C", checkout, "sparse-checkout", "set", "--no-cone", "/*")
+                .contains("!*.[pP][nN][gG]", "!*.[jJ][pP][gG]", "!*.[mM][pP]4", "!*.[wW][oO][fF][fF]2", "!*.[pP][dD][fF]")
+                .doesNotContain("!*.[jJ][aA][rR]", "!*.[zZ][iI][pP]");
+        assertThat(git.get(2)).endsWith("-C", checkout, "checkout");
+        // Every step is hardened alike, and the checkout fetches contents with the clone's credential.
+        for (List<String> step : git) {
+            assertThat(step).containsSequence("-c", "protocol.file.allow=never", "-c", "protocol.ext.allow=never",
+                    "-c", "core.symlinks=false", "-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=30");
+        }
+        assertThat(runner.envs.get(2)).containsEntry("AEGIS_GIT_TOKEN", "ghp_token")
+                .containsEntry("GIT_TERMINAL_PROMPT", "0");
+        assertThat(runner.lastWorkingDir).doesNotExist();
+    }
+
+    @Test
+    void aCheckoutThatFailsIsReportedAsTheCloneWouldBeAndTheTimeoutCoversEveryStep() {
+        FakeCommandRunner refused = new FakeCommandRunner();
+        refused.checkoutResult = new CommandResult(128, "", "remote: Invalid username or token.\n"
+                + "fatal: Authentication failed for 'https://github.com/acme/private.git/'", false);
+        RepositoryUrl repo = RepositoryUrl.parse("https://github.com/acme/private", properties.allowedHosts());
+        assertThatThrownBy(() -> generator(refused).generate(repo, null,
+                CloneAccess.integration(new CloneCredential("x-access-token", "ghs_app"), "the Aegis GitHub App")))
+                .hasMessageStartingWith("https://github.com/acme/private could not be read with the Aegis GitHub App");
+        assertThat(refused.lastWorkingDir).doesNotExist();
+
+        FakeCommandRunner slow = new FakeCommandRunner();
+        slow.checkoutResult = new CommandResult(-1, "", "", true);
+        assertThatThrownBy(() -> generate(slow, "https://github.com/acme/widgets", null, null))
+                .hasMessage("Cloning https://github.com/acme/widgets timed out after 90 seconds; github.com may be "
+                        + "slow or unreachable, so try again");
+        assertThat(slow.commands).noneMatch(command -> command.get(0).equals("syft"));
+    }
+
+    @Test
+    void aPatternMatchesAnExtensionInAnyCase() {
+        assertThat(RepoSbomGenerator.anyCase("png")).isEqualTo("[pP][nN][gG]");
+        assertThat(RepoSbomGenerator.anyCase("mp4")).isEqualTo("[mM][pP]4");
+        assertThat(RepoSbomGenerator.SPARSE_PATTERNS).first().isEqualTo("/*");
+        assertThat(RepoSbomGenerator.SPARSE_PATTERNS).hasSize(RepoSbomGenerator.NOT_SCANNED.size() + 1);
+    }
+
+    @Test
     void surfacesAMissingSyftBinaryAsAClearBadRequest() {
         FakeCommandRunner runner = new FakeCommandRunner();
         runner.throwOn = "syft";
@@ -278,7 +329,9 @@ class RepoSbomGeneratorTest {
     private static final class FakeCommandRunner implements CommandRunner {
         final List<List<String>> commands = new ArrayList<>();
         final List<Map<String, String>> envs = new ArrayList<>();
+        /** The clone's result; {@link #checkoutResult} is the sparse checkout's and the checkout's. */
         CommandResult gitResult = new CommandResult(0, "", "", false);
+        CommandResult checkoutResult = new CommandResult(0, "", "", false);
         CommandResult syftResult = new CommandResult(0, "", "", false);
         Path lastWorkingDir;
         String throwOn;
@@ -294,6 +347,9 @@ class RepoSbomGeneratorTest {
                 throw new java.io.IOException("Cannot run program \"" + tool + "\": No such file or directory");
             }
             if (tool.equals("git")) {
+                if (!command.contains("clone")) {
+                    return checkoutResult;
+                }
                 if (gitResult.succeeded()) {
                     Path checkout = Path.of(command.get(command.size() - 1));
                     Files.createDirectories(checkout);
@@ -322,6 +378,10 @@ class RepoSbomGeneratorTest {
 
         List<String> commandStartingWith(String tool) {
             return commands.get(indexOf(tool));
+        }
+
+        List<List<String>> commandsStartingWith(String tool) {
+            return commands.stream().filter(command -> command.get(0).equals(tool)).toList();
         }
 
         Map<String, String> envStartingWith(String tool) {

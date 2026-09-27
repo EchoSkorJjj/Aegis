@@ -5,8 +5,11 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The integration suite's {@link CommandRunner}: fabricates git's checkout and syft's CycloneDX output
@@ -15,7 +18,7 @@ import java.util.Map;
  * refused; the generated SBOM holds one npm component named after the repository ({@code <repo>-lib}).
  * A repository whose name contains {@code monorepo} gets syft's real shape instead: an npm project
  * ({@code web/package-lock.json}) and a Maven module ({@code svc/pom.xml}) as components, each declaring
- * libraries — see {@link RepositoryLayout}.
+ * libraries — see {@link RepositoryLayout}. A test can change what a repository holds ({@link #willScan}).
  */
 public class FakeGitAndSyft implements CommandRunner {
 
@@ -27,10 +30,19 @@ public class FakeGitAndSyft implements CommandRunner {
     }
 
     private final List<Clone> clones = Collections.synchronizedList(new ArrayList<>());
+    private final Map<String, String> scans = new ConcurrentHashMap<>();
+
+    /** From now on syft reports {@code sbom} for the repository named {@code name}: the repository changed. */
+    public void willScan(String name, String sbom) {
+        scans.put(name, sbom);
+    }
 
     @Override
     public CommandResult run(List<String> command, Path workingDir, Map<String, String> env, Duration timeout)
             throws Exception {
+        if (command.get(0).equals("git") && !command.contains("clone")) {
+            return new CommandResult(0, "", "", false); // the sparse checkout and the checkout
+        }
         if (command.get(0).equals("git")) {
             Clone clone = new Clone(List.copyOf(command), Map.copyOf(env));
             clones.add(clone);
@@ -51,7 +63,9 @@ public class FakeGitAndSyft implements CommandRunner {
         String name = Files.readString(workingDir.resolve("repo").resolve("repository-name"));
         String target = command.stream().filter(argument -> argument.startsWith("cyclonedx-json="))
                 .findFirst().orElseThrow().substring("cyclonedx-json=".length());
-        Files.writeString(Path.of(target), name.contains("monorepo") ? monorepo(name)
+        Files.writeString(Path.of(target), scans.containsKey(name) ? scans.get(name)
+                : name.contains("monorepo") ? monorepo(name)
+                : name.contains("twolocks") ? twoLockfiles(name)
                 : "{\"bomFormat\":\"CycloneDX\",\"specVersion\":\"1.5\",\"components\":["
                         + "{\"type\":\"library\",\"name\":\"" + name + "-lib\",\"version\":\"1.0.0\","
                         + "\"purl\":\"pkg:npm/" + name + "-lib@1.0.0\"}]}");
@@ -84,10 +98,81 @@ public class FakeGitAndSyft implements CommandRunner {
                         .replace("\"purl\"", "\"version\":\"UNKNOWN\",\"purl\""));
     }
 
+    /**
+     * syft's shape for a repository with two npm projects that pin the same library version: {@code <name>-http}
+     * 1.0.0 is reported once, found in both lockfiles, and both project roots depend on it.
+     */
+    static String twoLockfiles(String name) {
+        return """
+                {"bomFormat":"CycloneDX","specVersion":"1.6",
+                 "metadata":{"component":{"bom-ref":"dir","type":"file","name":"/scan/repo"}},
+                 "components":[%s, %s, %s],
+                 "dependencies":[
+                  {"ref":"client","dependsOn":["http"]},
+                  {"ref":"server","dependsOn":["http"]}]}
+                """.formatted(
+                component("client", "pkg:npm/" + name + "-client@0.0.0", "javascript-lock-cataloger",
+                        "/client/package-lock.json"),
+                component("server", "pkg:npm/" + name + "-server@0.0.0", "javascript-lock-cataloger",
+                        "/server/package-lock.json"),
+                component("http", "pkg:npm/" + name + "-http@1.0.0", "javascript-lock-cataloger",
+                        List.of("/client/package-lock.json", "/server/package-lock.json")));
+    }
+
+    /**
+     * syft's shape for npm projects whose lockfiles each pin a version of {@code <name>-http}, by the project's
+     * directory ({@code client} → {@code 1.5.0}): a version pinned in several lockfiles is reported once, found
+     * in each.
+     */
+    public static String npmProjects(String name, Map<String, String> httpVersionByProject) {
+        List<String> components = new ArrayList<>();
+        List<String> dependencies = new ArrayList<>();
+        Map<String, List<String>> lockfilesByVersion = new LinkedHashMap<>();
+        // By path, as syft reports them — Map.of's own order changes from one JVM to the next.
+        new TreeMap<>(httpVersionByProject).forEach((project, version) -> {
+            String lockfile = "/" + project + "/package-lock.json";
+            components.add(component(project, "pkg:npm/" + name + "-" + project + "@0.0.0", "javascript-lock-cataloger",
+                    lockfile));
+            dependencies.add("{\"ref\":\"" + project + "\",\"dependsOn\":[\"http-" + version + "\"]}");
+            lockfilesByVersion.computeIfAbsent(version, pinned -> new ArrayList<>()).add(lockfile);
+        });
+        lockfilesByVersion.forEach((version, lockfiles) -> components.add(component("http-" + version,
+                "pkg:npm/" + name + "-http@" + version, "javascript-lock-cataloger", lockfiles)));
+        return "{\"bomFormat\":\"CycloneDX\",\"specVersion\":\"1.6\","
+                + "\"metadata\":{\"component\":{\"bom-ref\":\"dir\",\"type\":\"file\",\"name\":\"/scan/repo\"}},"
+                + "\"components\":[" + String.join(",", components) + "],"
+                + "\"dependencies\":[" + String.join(",", dependencies) + "]}";
+    }
+
+    /**
+     * syft's shape for one npm project whose lockfile pins {@code <name>-http} 1.0.0 and, below it,
+     * {@code <name>-redirects} at {@code redirects}: refreshing the lockfile moves the transitive one only.
+     */
+    public static String httpWithRedirects(String name, String redirects) {
+        return """
+                {"bomFormat":"CycloneDX","specVersion":"1.6",
+                 "metadata":{"component":{"bom-ref":"dir","type":"file","name":"/scan/repo"}},
+                 "components":[%s, %s, %s],
+                 "dependencies":[{"ref":"app","dependsOn":["http"]},{"ref":"http","dependsOn":["redirects"]}]}
+                """.formatted(
+                component("app", "pkg:npm/" + name + "-app@0.0.0", "javascript-lock-cataloger", "/package-lock.json"),
+                component("http", "pkg:npm/" + name + "-http@1.0.0", "javascript-lock-cataloger", "/package-lock.json"),
+                component("redirects", "pkg:npm/" + name + "-redirects@" + redirects, "javascript-lock-cataloger",
+                        "/package-lock.json"));
+    }
+
     private static String component(String ref, String purl, String foundBy, String location) {
+        return component(ref, purl, foundBy, List.of(location));
+    }
+
+    private static String component(String ref, String purl, String foundBy, List<String> locations) {
+        StringBuilder properties = new StringBuilder("{\"name\":\"syft:package:foundBy\",\"value\":\"" + foundBy + "\"}");
+        for (int i = 0; i < locations.size(); i++) {
+            properties.append(",{\"name\":\"syft:location:").append(i).append(":path\",\"value\":\"")
+                    .append(locations.get(i)).append("\"}");
+        }
         return "{\"bom-ref\":\"" + ref + "\",\"type\":\"library\",\"name\":\"" + ref + "\",\"purl\":\"" + purl
-                + "\",\"properties\":[{\"name\":\"syft:package:foundBy\",\"value\":\"" + foundBy + "\"},"
-                + "{\"name\":\"syft:location:0:path\",\"value\":\"" + location + "\"}]}";
+                + "\",\"properties\":[" + properties + "]}";
     }
 
     /** The latest clone of a URL containing {@code fragment} (a test's own unique repository name). */

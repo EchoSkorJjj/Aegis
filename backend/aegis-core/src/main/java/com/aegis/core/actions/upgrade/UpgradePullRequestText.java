@@ -1,13 +1,19 @@
 package com.aegis.core.actions.upgrade;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import com.aegis.core.actions.upgrade.UpgradeProposal.Edit;
+
 /**
  * The title and Markdown body of a safe-upgrade pull request, written once when the proposal is drafted
- * so the approver reviews exactly what will be posted.
+ * so the approver reviews exactly what will be posted. A response's pull request is opened with its risk
+ * ticket's key in front of the title and at the foot of the body ({@link #titled}, {@link #tracking}), so the
+ * tracker links the two.
  *
  * <p>The facts (versions, the ranges checked, the score) are deterministic. The rationale, when the
  * ai-service supplied one, sits in its own quoted, labelled section. Everything a feed or a model wrote
@@ -26,7 +32,11 @@ final class UpgradePullRequestText {
     private UpgradePullRequestText() {
     }
 
-    /** What the body states. {@code notCleared} and {@code followUps} may be empty; score may be null. */
+    /**
+     * What the body states: every edit, in order. {@code notCleared} and {@code followUps} may be empty; score
+     * may be null. {@code followUps} are Markdown the editors wrote, each checklist item's text, with anything taken
+     * from the repository in code spans.
+     */
     record Facts(
             UUID proposalId,
             String vulnerabilityId,
@@ -37,13 +47,14 @@ final class UpgradePullRequestText {
             String exposure,
             Double score,
             String tier,
-            String packageName,
-            String fromVersion,
-            String toVersion,
-            String manifestPath,
+            List<Edit> edits,
             String matchConfidence,
             String evidence,
             List<String> followUps) {
+
+        Facts {
+            edits = List.copyOf(edits);
+        }
     }
 
     /** The ai-service's draft, or why there is none. */
@@ -59,19 +70,71 @@ final class UpgradePullRequestText {
     }
 
     static String title(String packageName, String fromVersion, String toVersion, String vulnerabilityId) {
-        String title = "Upgrade " + packageName + " from " + fromVersion + " to " + toVersion + " (" + vulnerabilityId + ")";
-        return (title.length() <= MAX_TITLE ? title : title.substring(0, MAX_TITLE - 1) + "…")
-                .replaceAll("\\p{Cntrl}", " ");
+        return bounded("Upgrade " + packageName + " from " + fromVersion + " to " + toVersion + " (" + vulnerabilityId + ")");
+    }
+
+    /**
+     * One edit keeps its versions in the title. Several name the package and, when they share it, the version —
+     * "Upgrade axios to 1.8.2 in 2 manifests" — or the packages when there are more than one.
+     */
+    static String title(List<Edit> edits, String vulnerabilityId) {
+        if (edits.size() == 1) {
+            Edit edit = edits.getFirst();
+            return title(edit.packageName(), edit.fromVersion(), edit.toVersion(), vulnerabilityId);
+        }
+        List<String> packages = edits.stream().map(Edit::packageName).distinct().toList();
+        Set<String> targets = edits.stream().map(Edit::toVersion).collect(Collectors.toCollection(LinkedHashSet::new));
+        long manifests = edits.stream().map(Edit::manifestPath).distinct().count();
+        String change;
+        if (packages.size() == 1) {
+            change = "Upgrade " + packages.getFirst() + (targets.size() == 1 ? " to " + targets.iterator().next() : "")
+                    + (manifests > 1 ? " in " + manifests + " manifests" : "");
+        } else {
+            change = "Upgrade " + packages.getFirst() + (packages.size() == 2 ? " and " + packages.get(1)
+                    : " and " + (packages.size() - 1) + " more packages");
+        }
+        return bounded(change + " (" + vulnerabilityId + ")");
+    }
+
+    /** The title a response's pull request opens with: its risk ticket's key first, once. */
+    static String titled(String issueKey, String title) {
+        String prefix = issueKey.replaceAll("\\p{Cntrl}", "") + ": ";
+        return title.startsWith(prefix) ? title : bounded(prefix + title);
+    }
+
+    /** The body a response's pull request opens with: the reviewed body, then the risk ticket it tracks. */
+    static String tracking(String issueKey, String body) {
+        return body + "\nTracks risk ticket **" + inline(issueKey) + "** in the organization's issue tracker.\n";
     }
 
     static String body(Facts facts, Rationale rationale) {
+        List<Edit> edits = facts.edits();
+        boolean single = edits.size() == 1;
         StringBuilder body = new StringBuilder();
-        body.append("## Safe upgrade proposed by Aegis\n\n")
-                .append("Upgrades ").append(code(facts.packageName()))
-                .append(" from **").append(inline(facts.fromVersion())).append("** to **")
-                .append(inline(facts.toVersion())).append("** in ").append(code(facts.manifestPath()))
-                .append(" to remediate **").append(inline(facts.vulnerabilityId())).append("** for the ")
-                .append(inline(facts.serviceName())).append(" service.\n\n");
+        body.append("## Safe upgrade proposed by Aegis\n\n");
+        if (single) {
+            Edit edit = edits.getFirst();
+            body.append("Upgrades ").append(code(edit.packageName()))
+                    .append(" from **").append(inline(edit.fromVersion())).append("** to **")
+                    .append(inline(edit.toVersion())).append("** in ").append(code(edit.manifestPath()))
+                    .append(" to remediate **").append(inline(facts.vulnerabilityId())).append("** for the ")
+                    .append(inline(facts.serviceName())).append(" service.\n\n");
+        } else {
+            body.append("Remediates **").append(inline(facts.vulnerabilityId())).append("** for the ")
+                    .append(inline(facts.serviceName())).append(" service by upgrading every declaration below.\n\n")
+                    .append("| Package | Manifest | From | To |\n|---|---|---|---|\n");
+            for (Edit edit : edits) {
+                body.append("| ").append(cellCode(edit.packageName())).append(" | ").append(cellCode(edit.manifestPath()))
+                        .append(" | ").append(cell(edit.fromVersion())).append(" | ").append(cell(edit.toVersion()))
+                        .append(" |\n");
+            }
+            body.append('\n');
+        }
+
+        if (!facts.followUps().isEmpty()) {
+            body.append("**Finish it before merging:** Aegis edits the manifests only, so do the first steps under ")
+                    .append("*Before merging* on this branch.\n\n");
+        }
 
         body.append("| | |\n|---|---|\n")
                 .append("| Service | ").append(cell(facts.serviceName())).append(" (")
@@ -84,8 +147,14 @@ final class UpgradePullRequestText {
         body.append("| Match confidence | ").append(label(facts.matchConfidence())).append(" |\n")
                 .append("| Checked against | ").append(cell(list(facts.checked()))).append(" |\n\n");
 
-        body.append("**Why ").append(inline(facts.toVersion())).append(":** it is the lowest version outside every ")
-                .append("published affected range Aegis holds for this package that has a fix.\n\n");
+        if (single) {
+            body.append("**Why ").append(inline(edits.getFirst().toVersion()))
+                    .append(":** it is the lowest version outside every ")
+                    .append("published affected range Aegis holds for this package that has a fix.\n\n");
+        } else {
+            body.append("**Why these versions:** each is the lowest version outside every published affected range ")
+                    .append("Aegis holds for its package that has a fix.\n\n");
+        }
         if (!facts.notCleared().isEmpty()) {
             body.append("**Not cleared by this upgrade:** ").append(inline(list(facts.notCleared())))
                     .append(". No fixed version is published, the match is by name only, or the version cannot ")
@@ -99,13 +168,20 @@ final class UpgradePullRequestText {
             body.append("**Evidence:** ").append(inline(bounded(facts.evidence(), MAX_EXPLANATION))).append("\n\n");
         }
 
-        body.append("### Before merging\n\n")
-                .append("- [ ] The build and tests pass with ").append(code(facts.packageName())).append(" ")
-                .append(inline(facts.toVersion())).append(".\n")
-                .append("- [ ] The release notes up to ").append(inline(facts.toVersion()))
-                .append(" contain no breaking change for this service.\n");
+        body.append("### Before merging\n\n");
         for (String followUp : facts.followUps()) {
             body.append("- [ ] ").append(followUp).append('\n');
+        }
+        if (single) {
+            Edit edit = edits.getFirst();
+            body.append("- [ ] The build and tests pass with ").append(code(edit.packageName())).append(" ")
+                    .append(inline(edit.toVersion())).append(".\n")
+                    .append("- [ ] The release notes up to ").append(inline(edit.toVersion()))
+                    .append(" contain no breaking change for this service.\n");
+        } else {
+            body.append("- [ ] The build and tests pass with the upgraded versions.\n")
+                    .append("- [ ] The release notes up to each new version contain no breaking change for this ")
+                    .append("service.\n");
         }
         body.append('\n');
 
@@ -149,8 +225,13 @@ final class UpgradePullRequestText {
         return inline(text).replace("|", "\\|");
     }
 
+    /** A code span inside a table cell, where a pipe would end the cell. */
+    private static String cellCode(String text) {
+        return code(text).replace("|", "\\|");
+    }
+
     /** A code span: Markdown processes no mentions, references or HTML inside one. */
-    private static String code(String text) {
+    static String code(String text) {
         return "`" + (text == null ? "" : text.replace("`", "'").replaceAll("\\p{Cntrl}", " ")) + "`";
     }
 
@@ -162,6 +243,12 @@ final class UpgradePullRequestText {
         return value == null ? "unknown" : inline(value.replace('_', '-').toLowerCase(Locale.ROOT));
     }
 
+    /** "a", "a and b", "a, b and c". */
+    static String and(List<String> items) {
+        return items.size() <= 1 ? String.join("", items)
+                : String.join(", ", items.subList(0, items.size() - 1)) + " and " + items.getLast();
+    }
+
     /** At most {@value #MAX_LISTED} ids, then how many more. */
     private static String list(List<String> ids) {
         return ids.size() <= MAX_LISTED
@@ -171,5 +258,11 @@ final class UpgradePullRequestText {
 
     private static String bounded(String text, int max) {
         return text.length() <= max ? text : text.substring(0, max) + "…";
+    }
+
+    /** A title within GitHub's limit, on one line. */
+    private static String bounded(String title) {
+        return (title.length() <= MAX_TITLE ? title : title.substring(0, MAX_TITLE - 1) + "…")
+                .replaceAll("\\p{Cntrl}", " ");
     }
 }

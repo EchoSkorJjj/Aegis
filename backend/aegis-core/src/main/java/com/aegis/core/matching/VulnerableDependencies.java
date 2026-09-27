@@ -17,8 +17,9 @@ import java.util.UUID;
 import com.aegis.core.advisories.Advisory;
 import com.aegis.core.advisories.AdvisoryStore;
 import com.aegis.core.advisories.AffectedProduct;
+import com.aegis.core.inventory.DependencyGraph;
+import com.aegis.core.inventory.DependencyGraph.ServiceGraph;
 import com.aegis.core.inventory.InventoryStore;
-import com.aegis.core.inventory.InventoryStore.ComponentDependencyLink;
 import com.aegis.core.inventory.InventoryStore.ServiceComponentLink;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.matching.AdvisoryComponentMatcher.ComponentMatch;
@@ -32,28 +33,28 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Every vulnerable dependency of the given services, found from the services' side — nobody has to know
- * which advisory to look up. From the components each service uses directly it walks their dependency
- * graph, asks the advisory store which advisories name any of those packages (the same prefilter the
- * upgrade target uses), and applies matching's own identity and version rules
+ * which advisory to look up. It walks each service's own dependency graph ({@link DependencyGraph}) from the
+ * components the service uses directly, asks the advisory store which advisories name any of those packages
+ * (the same prefilter the upgrade target uses), and applies matching's own identity and version rules
  * ({@link AdvisoryComponentMatcher}), so a dependency is listed here exactly when that advisory's impact
  * page would list the service. Read-only and recomputed per request, like the rest of matching.
  */
 @Service
 public class VulnerableDependencies {
 
-    /** Bound on the downward walk; real dependency graphs are far shallower. */
-    static final int MAX_DEPTH = 32;
     /** Package names per advisory-store query, keeping each IN list well within bind-parameter limits. */
     private static final int NAMES_PER_QUERY = 250;
 
     private final InventoryStore inventory;
+    private final DependencyGraph graph;
     private final AdvisoryStore advisories;
     private final ChangeSignalStore signals;
     private final AdvisoryComponentMatcher matcher;
 
-    public VulnerableDependencies(InventoryStore inventory, AdvisoryStore advisories, ChangeSignalStore signals,
-            AdvisoryComponentMatcher matcher) {
+    public VulnerableDependencies(InventoryStore inventory, DependencyGraph graph, AdvisoryStore advisories,
+            ChangeSignalStore signals, AdvisoryComponentMatcher matcher) {
         this.inventory = inventory;
+        this.graph = graph;
         this.advisories = advisories;
         this.signals = signals;
         this.matcher = matcher;
@@ -122,14 +123,12 @@ public class VulnerableDependencies {
         if (serviceIds.isEmpty()) {
             return Found.NONE;
         }
-        List<ServiceComponentLink> direct = inventory.findServiceComponentLinksForServices(serviceIds);
-        if (direct.isEmpty()) {
+        Map<UUID, ServiceGraph> graphs = graph.graphsOf(serviceIds);
+        Set<UUID> reachable = new LinkedHashSet<>();
+        graphs.values().forEach(serviceGraph -> reachable.addAll(serviceGraph.components()));
+        if (reachable.isEmpty()) {
             return Found.NONE;
         }
-        Map<UUID, List<UUID>> dependsOn = dependencyGraph(direct);
-        Set<UUID> reachable = new LinkedHashSet<>();
-        direct.forEach(link -> reachable.add(link.componentId()));
-        dependsOn.values().forEach(reachable::addAll);
         Map<UUID, SoftwareComponent> components = inventory.findSoftwareComponentsByIds(reachable);
 
         Matched matched = vulnerabilities(components.values());
@@ -139,14 +138,12 @@ public class VulnerableDependencies {
         }
 
         List<VulnerableDependency> found = new ArrayList<>();
-        Map<UUID, Set<UUID>> below = new HashMap<>();
-        Map<UUID, List<ServiceComponentLink>> byService = new LinkedHashMap<>();
-        direct.stream()
-                .sorted(Comparator.comparing(ServiceComponentLink::serviceId)
-                        .thenComparing(link -> nameOf(components.get(link.componentId())))
-                        .thenComparing(ServiceComponentLink::componentId))
-                .forEach(link -> byService.computeIfAbsent(link.serviceId(), id -> new ArrayList<>()).add(link));
-        for (List<ServiceComponentLink> links : byService.values()) {
+        for (UUID serviceId : graphs.keySet().stream().sorted().toList()) {
+            ServiceGraph serviceGraph = graphs.get(serviceId);
+            List<ServiceComponentLink> links = serviceGraph.direct().stream()
+                    .sorted(Comparator.comparing((ServiceComponentLink link) -> nameOf(components.get(link.componentId())))
+                            .thenComparing(ServiceComponentLink::componentId))
+                    .toList();
             Set<UUID> usedDirectly = new HashSet<>();
             links.forEach(link -> usedDirectly.add(link.componentId()));
             Set<UUID> reported = new HashSet<>();
@@ -162,7 +159,7 @@ public class VulnerableDependencies {
                 if (via == null) {
                     continue;
                 }
-                for (UUID id : closure(link.componentId(), dependsOn, below)) {
+                for (UUID id : serviceGraph.below(link.componentId())) {
                     SoftwareComponent component = components.get(id);
                     if (component != null && vulnerable.containsKey(id) && !usedDirectly.contains(id)
                             && reported.add(id)) {
@@ -187,44 +184,7 @@ public class VulnerableDependencies {
                 .anyMatch(vulnerability -> vulnerability.confidence() == MatchConfidence.CONFIRMED)
                 ? MatchConfidence.CONFIRMED : MatchConfidence.POSSIBLE;
         return new VulnerableDependency(link.serviceId(), ComponentRef.from(component),
-                via == null ? null : ComponentRef.from(via), link.manifestPath(), confidence, vulnerabilities);
-    }
-
-    /** What each reachable component depends on, walked level by level from the direct components. */
-    private Map<UUID, List<UUID>> dependencyGraph(List<ServiceComponentLink> direct) {
-        Map<UUID, List<UUID>> dependsOn = new HashMap<>();
-        Set<UUID> seen = new HashSet<>();
-        direct.forEach(link -> seen.add(link.componentId()));
-        Set<UUID> frontier = new HashSet<>(seen);
-        for (int depth = 0; depth < MAX_DEPTH && !frontier.isEmpty(); depth++) {
-            Set<UUID> next = new HashSet<>();
-            for (ComponentDependencyLink link : inventory.findDependenciesOf(frontier)) {
-                dependsOn.computeIfAbsent(link.componentId(), id -> new ArrayList<>()).add(link.dependencyId());
-                if (seen.add(link.dependencyId())) {
-                    next.add(link.dependencyId());
-                }
-            }
-            frontier = next;
-        }
-        return dependsOn;
-    }
-
-    /** Everything below {@code root}, memoised per root (services share their libraries' subtrees). */
-    private static Set<UUID> closure(UUID root, Map<UUID, List<UUID>> dependsOn, Map<UUID, Set<UUID>> below) {
-        Set<UUID> cached = below.get(root);
-        if (cached != null) {
-            return cached;
-        }
-        Set<UUID> reached = new LinkedHashSet<>();
-        List<UUID> pending = new ArrayList<>(dependsOn.getOrDefault(root, List.of()));
-        while (!pending.isEmpty()) {
-            UUID next = pending.removeLast();
-            if (!next.equals(root) && reached.add(next)) {
-                pending.addAll(dependsOn.getOrDefault(next, List.of()));
-            }
-        }
-        below.put(root, reached);
-        return reached;
+                via == null ? null : ComponentRef.from(via), link.manifestPaths(), confidence, vulnerabilities);
     }
 
     /**

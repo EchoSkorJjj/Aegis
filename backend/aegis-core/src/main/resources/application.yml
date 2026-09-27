@@ -65,6 +65,21 @@ aegis:
       # Must equal the App's registered callback URL: the frontend page GitHub sends the admin back to.
       callback-url: ${AEGIS_GITHUB_CALLBACK_URL:http://localhost:3000/admin/integrations/github/callback}
       hosts: ${AEGIS_GITHUB_HOSTS:github.com}
+    # Jira (JIRA.md): where approved risk tickets are filed, through the site each organization's admin
+    # connected under Organization > Integrations (V24). Its tokens are sealed with aegis.secrets.key.
+    jira:
+      enabled: ${AEGIS_JIRA_ENABLED:false}
+      client-id: ${AEGIS_JIRA_CLIENT_ID:}
+      # Only for exchanging the admin's consent and renewing tokens; never logged.
+      client-secret: ${AEGIS_JIRA_CLIENT_SECRET:}
+      # Must equal the Atlassian app's callback URL: the frontend page Atlassian sends the admin back to.
+      callback-url: ${AEGIS_JIRA_CALLBACK_URL:http://localhost:3000/admin/integrations/jira/callback}
+      auth-base-url: ${AEGIS_JIRA_AUTH_URL:https://auth.atlassian.com}
+      api-base-url: ${AEGIS_JIRA_API_URL:https://api.atlassian.com}
+  # Seals the integration credentials Aegis keeps (Jira's tokens): base64 of 32 random bytes
+  # (openssl rand -base64 32). Required when Jira is enabled; keep it out of the repository.
+  secrets:
+    key: ${AEGIS_SECRETS_KEY:}
   # identity-service's member directory — e.g. to verify that a service's assigned owner is a member of
   # the caller's organization holding the SERVICE_OWNER role. Called with the CALLER's own access token
   # (token relay), so identity-service applies the caller's org scope; never with a service credential.

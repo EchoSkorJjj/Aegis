@@ -140,9 +140,13 @@ public final class MatchingDtos {
             UUID serviceId,
             ComponentRef component,
             ComponentRef via,
-            String manifestPath,
+            List<String> manifestPaths,
             MatchConfidence confidence,
             List<VulnerabilityRef> vulnerabilities) {
+
+        public VulnerableDependency {
+            manifestPaths = manifestPaths == null ? List.of() : List.copyOf(manifestPaths);
+        }
     }
 
     /**

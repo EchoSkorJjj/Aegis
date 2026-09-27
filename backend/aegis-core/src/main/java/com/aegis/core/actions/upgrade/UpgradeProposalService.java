@@ -2,14 +2,20 @@ package com.aegis.core.actions.upgrade;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import com.aegis.core.actions.pr.FileChange;
 import com.aegis.core.actions.pr.PrProvider;
@@ -18,6 +24,7 @@ import com.aegis.core.actions.pr.PullRequestDraft;
 import com.aegis.core.actions.pr.PullRequestRef;
 import com.aegis.core.actions.pr.RepositoryFile;
 import com.aegis.core.actions.pr.RepositoryRef;
+import com.aegis.core.actions.upgrade.UpgradeProposal.Edit;
 import com.aegis.core.actions.upgrade.UpgradePullRequestText.Facts;
 import com.aegis.core.actions.upgrade.UpgradePullRequestText.Rationale;
 import com.aegis.core.advisories.Advisory;
@@ -32,6 +39,7 @@ import com.aegis.core.inventory.sbom.SbomGenerationProperties;
 import com.aegis.core.matching.MatchingDtos.ChangeRef;
 import com.aegis.core.matching.MatchingDtos.ComponentRef;
 import com.aegis.core.matching.MatchingDtos.EvidenceChain;
+import com.aegis.core.matching.MatchingDtos.MatchConfidence;
 import com.aegis.core.matching.UpgradeTargets;
 import com.aegis.core.matching.UpgradeTargets.UpgradeTarget;
 import com.aegis.core.platform.common.ApiExceptions;
@@ -47,14 +55,16 @@ import org.springframework.stereotype.Service;
 
 /**
  * Safe-upgrade draft pull requests (E8 story 4) with the decision step they need (an early slice of E9).
+ * Each is part of a response (E8 story 5): drafted with the risk ticket for the same vulnerability and
+ * service, and approved with it.
  *
- * <p><b>Propose</b> turns "this CVE reaches this service through this component" into a reviewed plan:
- * the safe version (deterministic, {@link UpgradeTargets}), the manifest to edit, and the exact PR title
- * and body, with an AI-drafted rationale when the ai-service can supply one. It writes nothing outside
- * Aegis. <b>Approve</b> is the trust boundary: a second person's decision — never the drafter's own — and
- * the only thing that opens a pull request, always a draft, from an {@code aegis/} branch, never merged by
- * Aegis. <b>Dismiss</b> declines with a reason; the drafter may withdraw their own draft this way, since
- * that opens nothing and the vulnerability stays recommended.
+ * <p><b>Plan</b> and <b>draft</b> turn "this CVE reaches this service" into one reviewed pull request: every
+ * direct dependency it matches, in every manifest that declares it, moved to the safe version (deterministic,
+ * {@link UpgradeTargets}), with the exact PR title and body and an AI-drafted rationale when the ai-service can
+ * supply one. Nothing is written outside Aegis. <b>Approve</b> is the trust boundary: a second person's
+ * decision — never the drafter's own — and the only thing that opens a pull request, always a draft, from an
+ * {@code aegis/} branch, never merged by Aegis. <b>Dismiss</b> declines with a reason; the drafter may
+ * withdraw their own draft this way, since that opens nothing.
  *
  * <p>The repository is always the service's own link, never a caller's input. At approval the manifest
  * is re-read and the edit re-applied, and the write is pinned to the revision just read, so a manifest
@@ -101,68 +111,166 @@ public class UpgradeProposalService {
         this.repositoryHosts = repositoryHosts;
     }
 
-    public UpgradeProposal propose(
-            UUID changeSignalId, UUID serviceId, UUID componentId, String manifestPath, UUID proposer) {
+    /**
+     * What the upgrade pull request of a response to this change in this service would edit: every direct
+     * dependency the change matches, in every manifest the SBOM import found it declared in (the ecosystem's
+     * manifest at the repository root when it found none), each moved to the lowest version that clears every
+     * advisory with a fix for its package ({@link UpgradeTargets}). A dependency another current pull request
+     * already upgrades is left to that one. What can't be automated — pulled in by another package, an
+     * ecosystem whose manifest Aegis doesn't edit, no fixed version, no linked repository — is listed with why.
+     * Deterministic, and writes nothing.
+     */
+    public UpgradePlan plan(UUID changeSignalId, UUID serviceId) {
         BusinessService service = inventory.getBusinessService(serviceId);
-        if (service.getRepositoryUrl() == null) {
-            throw new ApiExceptions.Conflict("Link the service's repository before drafting an upgrade pull request");
-        }
         ChangeImpactResponse impact = scoring.scoreChange(changeSignalId);
         if (impact.change().signalType() != ChangeSignal.SignalType.VULNERABILITY) {
-            throw new ApiExceptions.BadRequest("Only a vulnerability can be remediated by an upgrade");
+            return UpgradePlan.none(changeSignalId, serviceId, impact.change());
         }
         ScoredService scored = impact.services().stream()
                 .filter(candidate -> candidate.service().id().equals(serviceId))
                 .findFirst()
                 .orElseThrow(() -> new ApiExceptions.Conflict("This change does not reach the service"));
-        // The component must be one this change matched for this service; a direct use wins over a transitive one.
-        EvidenceChain evidence = scored.evidence().stream()
-                .filter(chain -> !chain.componentPath().isEmpty()
-                        && chain.componentPath().getFirst().id().equals(componentId))
-                .min(Comparator.comparingInt(chain -> chain.componentPath().size()))
-                .orElseThrow(() -> new ApiExceptions.Conflict(
-                        "The component is not one this change matches for the service"));
-        ComponentRef component = evidence.componentPath().getFirst();
-        if (evidence.componentPath().size() > 1) {
-            String direct = evidence.componentPath().getLast().name();
-            throw new ApiExceptions.Conflict(component.name() + " reaches the service through " + direct
-                    + "; transitive upgrades are not automated yet, so upgrade " + direct + " or pin "
-                    + component.name() + " by hand");
-        }
-        ManifestEditor editor = ManifestEditor.forEcosystem(component.ecosystem())
-                .orElseThrow(() -> new ApiExceptions.Conflict(
-                        "Automated upgrades support Maven, npm and PyPI manifests, not " + component.ecosystem()));
-        String manifest = manifestPath(manifestPath, recordedManifest(serviceId, componentId), editor);
-        store.findLive(serviceId, changeSignalId, componentId).ifPresent(live -> {
-            throw new ApiExceptions.Conflict("This upgrade is already " + live.status().name().toLowerCase(Locale.ROOT)
-                    + " as proposal " + live.id());
-        });
-        UpgradeTarget target = targets.resolve(changeSignalId, component);
 
-        UUID id = UUID.randomUUID();
-        Facts facts = new Facts(id, target.vulnerabilityId(), target.checked(), target.notCleared(), service.getName(),
-                service.getCriticality().name(), service.getExposure().name(), scored.score(), scored.tier().name(),
-                component.name(), component.version(), target.toVersion(), manifest, evidence.confidence().name(),
-                evidence.explanation(), editor.followUps());
-        String body = UpgradePullRequestText.body(facts, rationale(id, impact.change(), facts));
-        return store.create(new UpgradeProposal(
-                id, serviceId, changeSignalId, target.vulnerabilityId(), componentId, component.ecosystem(),
-                component.name(), component.version(), target.toVersion(), manifest, service.getRepositoryUrl(),
-                service.getRepositoryBranch(), headBranch(component.name(), target.toVersion(), id),
-                evidence.confidence(),
-                UpgradePullRequestText.title(component.name(), component.version(), target.toVersion(),
-                        target.vulnerabilityId()),
-                body, UpgradeProposalStatus.PROPOSED, proposer, null, null, null, null, null, null, null, 0));
+        // Each component this change matched for the service, once; a direct use wins over a transitive one.
+        Map<UUID, EvidenceChain> byComponent = new LinkedHashMap<>();
+        for (EvidenceChain chain : scored.evidence()) {
+            if (chain.componentPath() == null || chain.componentPath().isEmpty()) {
+                continue;
+            }
+            byComponent.merge(chain.componentPath().getFirst().id(), chain,
+                    (kept, other) -> other.componentPath().size() < kept.componentPath().size() ? other : kept);
+        }
+        Map<UUID, List<String>> declaredIn = new HashMap<>();
+        inventoryStore.findServiceComponentLinksForServices(List.of(serviceId))
+                .forEach(link -> declaredIn.put(link.componentId(), link.manifestPaths()));
+        Set<String> claimed = new HashSet<>();
+        store.findCurrent(serviceId).forEach(current -> current.edits()
+                .forEach(edit -> claimed.add(claim(edit.componentId(), edit.manifestPath()))));
+
+        String vulnerabilityId = null;
+        List<Edit> edits = new ArrayList<>();
+        List<String> notAutomated = new ArrayList<>();
+        Set<String> checked = new LinkedHashSet<>();
+        Set<String> notCleared = new LinkedHashSet<>();
+        Map<String, ManifestEditor> editors = new LinkedHashMap<>();
+        Map<String, Set<String>> edited = new LinkedHashMap<>();
+        Set<String> evidence = new LinkedHashSet<>();
+        MatchConfidence confidence = MatchConfidence.CONFIRMED;
+        for (EvidenceChain chain : byComponent.values()) {
+            ComponentRef component = chain.componentPath().getFirst();
+            if (chain.componentPath().size() > 1) {
+                String direct = chain.componentPath().getLast().name();
+                notAutomated.add(component.name() + " " + component.version() + " comes in through " + direct
+                        + "; upgrade " + direct + ", or pin " + component.name() + " by hand");
+                continue;
+            }
+            Optional<ManifestEditor> editor = ManifestEditor.forEcosystem(component.ecosystem());
+            if (editor.isEmpty()) {
+                notAutomated.add("Aegis drafts upgrades for Maven, npm and PyPI manifests; upgrade " + component.name()
+                        + " (" + component.ecosystem() + ") by hand");
+                continue;
+            }
+            UpgradeTarget target;
+            try {
+                target = targets.resolve(changeSignalId, component);
+            } catch (ApiExceptions.Conflict unresolved) {
+                notAutomated.add(component.name() + " " + component.version() + ": " + unresolved.getMessage());
+                continue;
+            }
+            vulnerabilityId = target.vulnerabilityId();
+            boolean added = false;
+            for (String manifest : manifests(declaredIn.getOrDefault(component.id(), List.of()), editor.get())) {
+                if (claimed.contains(claim(component.id(), manifest))) {
+                    notAutomated.add(component.name() + " in " + manifest
+                            + " is already being upgraded by another upgrade pull request");
+                    continue;
+                }
+                edits.add(new Edit(component.id(), component.ecosystem(), component.name(), component.version(),
+                        target.toVersion(), manifest));
+                editors.putIfAbsent(editor.get().fileName(), editor.get());
+                edited.computeIfAbsent(editor.get().fileName(), file -> new LinkedHashSet<>()).add(manifest);
+                added = true;
+            }
+            if (added) {
+                checked.addAll(target.checked());
+                notCleared.addAll(target.notCleared());
+                if (chain.explanation() != null && !chain.explanation().isBlank()) {
+                    evidence.add(chain.explanation());
+                }
+                if (chain.confidence() != MatchConfidence.CONFIRMED) {
+                    confidence = MatchConfidence.POSSIBLE;
+                }
+            }
+        }
+        List<String> followUps = new ArrayList<>();
+        edited.forEach((file, manifests) -> followUps.addAll(editors.get(file).followUps(List.copyOf(manifests))));
+        if (!edits.isEmpty() && service.getRepositoryUrl() == null) {
+            notAutomated.addFirst("Link the service's repository so Aegis can draft the upgrade pull request for "
+                    + edits.stream().map(Edit::packageName).distinct().collect(Collectors.joining(", ")));
+            edits.clear();
+        }
+        return new UpgradePlan(changeSignalId, serviceId, impact.change(),
+                vulnerabilityId == null ? impact.change().externalId() : vulnerabilityId, edits, notAutomated,
+                new UpgradePlan.Facts(service.getName(), service.getCriticality().name(),
+                        service.getExposure().name(), scored.score(), scored.tier().name(), service.getRepositoryUrl(),
+                        service.getRepositoryBranch(), confidence, List.copyOf(checked), List.copyOf(notCleared),
+                        List.copyOf(evidence), List.copyOf(followUps)));
     }
 
     /**
-     * A person's approval: open the draft pull request. The approver is never the drafter — retrying a
-     * failed opening is approving too. The proposal is claimed first (so a second, concurrent approval gets
-     * a conflict, not a second pull request); a failure is recorded on the proposal, which can then be
-     * approved again or dismissed, and is rethrown to the approver.
+     * Draft the pull request a plan describes, as part of the response (risk ticket) {@code riskTicketId}: the
+     * exact title and body, with an AI-drafted rationale when the ai-service can supply one. Writes nothing
+     * outside Aegis. Empty when the plan has nothing Aegis can automate.
+     */
+    public Optional<UpgradeProposal> draft(UpgradePlan plan, UUID riskTicketId, UUID drafter) {
+        if (!plan.automatable()) {
+            return Optional.empty();
+        }
+        UpgradePlan.Facts planned = plan.facts();
+        UUID id = UUID.randomUUID();
+        Facts facts = new Facts(id, plan.vulnerabilityId(), planned.checked(), planned.notCleared(),
+                planned.serviceName(), planned.criticality(), planned.exposure(), planned.score(), planned.tier(),
+                plan.edits(), planned.confidence().name(), String.join(" ", planned.evidence()), planned.followUps());
+        String body = UpgradePullRequestText.body(facts, rationale(id, plan.change(), facts));
+        Edit first = plan.edits().getFirst();
+        return Optional.of(store.create(new UpgradeProposal(
+                id, plan.serviceId(), plan.changeSignalId(), plan.vulnerabilityId(), riskTicketId, plan.edits(),
+                planned.repositoryUrl(), planned.baseBranch(), headBranch(first.packageName(), first.toVersion(), id),
+                planned.confidence(), UpgradePullRequestText.title(plan.edits(), plan.vulnerabilityId()), body,
+                UpgradeProposalStatus.PROPOSED, drafter, null, null, null, null, null, null, null, 0)));
+    }
+
+    /**
+     * A person's approval of a proposal drafted on its own, before responses: open its draft pull request.
+     * A response's pull request is decided on the response instead ({@link #approveForResponse}).
      */
     public UpgradeProposal approve(UUID proposalId, UUID approver) {
         UpgradeProposal proposal = get(proposalId);
+        if (proposal.riskTicketId() != null) {
+            throw new ApiExceptions.Conflict("This pull request is part of a response; decide it on the response");
+        }
+        return open(proposal, approver, null);
+    }
+
+    /**
+     * A person's approval of a response's pull request, once its risk ticket is filed: open it with the
+     * ticket's key in front of its title, so the tracker links the two.
+     */
+    public UpgradeProposal approveForResponse(UUID proposalId, UUID riskTicketId, UUID approver, String issueKey) {
+        UpgradeProposal proposal = get(proposalId);
+        if (!riskTicketId.equals(proposal.riskTicketId())) {
+            throw new ApiExceptions.NotFound("Upgrade proposal not found in this response: " + proposalId);
+        }
+        return open(proposal, approver, issueKey);
+    }
+
+    /**
+     * Open the draft pull request. The approver is never the drafter — retrying a failed opening is approving
+     * too. The proposal is claimed first (so a second, concurrent approval gets a conflict, not a second pull
+     * request); a failure is recorded on the proposal, which can then be approved again or dismissed, and is
+     * rethrown to the approver.
+     */
+    private UpgradeProposal open(UpgradeProposal proposal, UUID approver, String issueKey) {
         if (proposal.createdBy().equals(approver)) {
             throw new ApiExceptions.Forbidden("You drafted this proposal, so someone else has to approve it");
         }
@@ -180,9 +288,10 @@ public class UpgradeProposalService {
             throw new ApiExceptions.Conflict("The service's repository link changed after this proposal was drafted; "
                     + "dismiss it and draft a new one");
         }
-        UpgradeProposal opening = store.update(proposal.opening(approver, now));
+        String title = issueKey == null ? proposal.title() : UpgradePullRequestText.titled(issueKey, proposal.title());
+        UpgradeProposal opening = store.update(proposal.opening(approver, now, title));
         try {
-            return store.update(opening.opened(openDraftPullRequest(opening)));
+            return store.update(opening.opened(openDraftPullRequest(opening, issueKey)));
         } catch (RuntimeException failure) {
             try {
                 store.update(opening.failed(failureMessage(failure)));
@@ -207,9 +316,14 @@ public class UpgradeProposalService {
                 .orElseThrow(() -> new ApiExceptions.NotFound("Upgrade proposal not found: " + proposalId));
     }
 
-    public Page<UpgradeProposal> list(
-            UUID serviceId, UUID changeSignalId, Collection<UpgradeProposalStatus> statuses, Pageable pageable) {
-        return store.findPage(serviceId, changeSignalId, statuses, pageable);
+    public Page<UpgradeProposal> list(UUID serviceId, UUID changeSignalId, Collection<UpgradeProposalStatus> statuses,
+            boolean standaloneOnly, Pageable pageable) {
+        return store.findPage(serviceId, changeSignalId, statuses, standaloneOnly, pageable);
+    }
+
+    /** Every pull request of these responses, newest first. */
+    public List<UpgradeProposal> forTickets(Collection<UUID> riskTicketIds) {
+        return store.findForTickets(riskTicketIds);
     }
 
     /** The current names of these services (org-scoped), for display next to their proposals. */
@@ -222,18 +336,54 @@ public class UpgradeProposalService {
         return names;
     }
 
-    private PullRequestRef openDraftPullRequest(UpgradeProposal proposal) {
+    /**
+     * Re-read every manifest the proposal edits, apply its edits to each (several in one file in turn), and open
+     * the draft pull request with each write pinned to the revision just read.
+     */
+    private PullRequestRef openDraftPullRequest(UpgradeProposal proposal, String issueKey) {
         RepositoryUrl url = RepositoryUrl.parse(proposal.repositoryUrl(), repositoryHosts.allowedHosts());
         RepositoryRef repository = new RepositoryRef(url.host(), url.path());
         PrProvider provider = providers.forRepository(repository);
-        ManifestEditor editor = ManifestEditor.forEcosystem(proposal.ecosystem())
-                .orElseThrow(() -> new ApiExceptions.Conflict("No manifest editor for " + proposal.ecosystem()));
-        RepositoryFile manifest = provider.readFile(repository, proposal.baseBranch(), proposal.manifestPath());
-        String upgraded = editor.upgrade(
-                manifest.content(), proposal.packageName(), proposal.fromVersion(), proposal.toVersion());
-        return provider.openDraftPullRequest(new PullRequestDraft(
-                repository, proposal.baseBranch(), proposal.headBranch(), proposal.title(), proposal.body(),
-                proposal.title(), List.of(new FileChange(proposal.manifestPath(), upgraded, manifest.revision()))));
+        Map<String, List<Edit>> byManifest = new LinkedHashMap<>();
+        proposal.edits().forEach(edit -> byManifest.computeIfAbsent(edit.manifestPath(), path -> new ArrayList<>())
+                .add(edit));
+        List<FileChange> changes = new ArrayList<>();
+        for (Map.Entry<String, List<Edit>> manifest : byManifest.entrySet()) {
+            RepositoryFile file = provider.readFile(repository, proposal.baseBranch(), manifest.getKey());
+            String content = file.content();
+            boolean edited = false;
+            Set<String> moved = new HashSet<>();
+            for (Edit edit : manifest.getValue()) {
+                ManifestEditor editor = ManifestEditor.forEcosystem(edit.ecosystem())
+                        .orElseThrow(() -> new ApiExceptions.Conflict("No manifest editor for " + edit.ecosystem()));
+                if (!moved.add(edit.packageName() + " " + edit.toVersion())) {
+                    continue; // two versions of one package in one file: the first edit moved every declaration
+                }
+                try {
+                    content = editor.upgrade(content, edit.packageName(), edit.fromVersion(), edit.toVersion());
+                    edited = true;
+                } catch (ApiExceptions.Conflict refused) {
+                    // Two packages sharing one version property: the first edit already moved it.
+                    if (!edited || !alreadyAt(editor, content, edit)) {
+                        throw refused;
+                    }
+                }
+            }
+            changes.add(new FileChange(manifest.getKey(), content, file.revision()));
+        }
+        String body = issueKey == null ? proposal.body() : UpgradePullRequestText.tracking(issueKey, proposal.body());
+        return provider.openDraftPullRequest(new PullRequestDraft(repository, proposal.baseBranch(),
+                proposal.headBranch(), proposal.title(), body, proposal.title(), changes));
+    }
+
+    /** Whether the manifest already declares the edit's package at its target version. */
+    private static boolean alreadyAt(ManifestEditor editor, String content, Edit edit) {
+        try {
+            editor.upgrade(content, edit.packageName(), edit.toVersion(), edit.toVersion());
+            return true;
+        } catch (ApiExceptions.Conflict notThere) {
+            return false;
+        }
     }
 
     private Rationale rationale(UUID proposalId, ChangeRef change, Facts facts) {
@@ -254,48 +404,43 @@ public class UpgradeProposalService {
                 .filter(text -> text != null && !text.isBlank())
                 .map(text -> text.length() <= MAX_ADVISORY_CONTEXT ? text : text.substring(0, MAX_ADVISORY_CONTEXT))
                 .orElse("(the advisory publishes no description)");
+        String upgrades = facts.edits().stream()
+                .map(edit -> edit.packageName() + " " + edit.fromVersion() + " to " + edit.toVersion() + " in "
+                        + edit.manifestPath())
+                .collect(Collectors.joining("; "));
         return """
                 Vulnerability %s: %s
-                Affected package: %s, installed version %s.
-                Proposed upgrade: %s, the lowest version outside every published affected range with a fix \
-                (checked against %s).
+                Proposed upgrades: %s. Each target is the lowest version outside every published affected range \
+                with a fix (checked against %s).
                 Service: %s (%s criticality, %s), impact score %s (%s).
                 Evidence: %s
-                """.formatted(facts.vulnerabilityId(), description, facts.packageName(), facts.fromVersion(),
-                facts.toVersion(), String.join(", ", facts.checked()), facts.serviceName(), facts.criticality(),
-                facts.exposure(), facts.score(), facts.tier(), facts.evidence());
-    }
-
-    /** The manifest the SBOM import recorded as declaring this dependency (client/package.json), if any. */
-    private String recordedManifest(UUID serviceId, UUID componentId) {
-        return inventoryStore.findServiceComponentLinksForServices(List.of(serviceId)).stream()
-                .filter(link -> link.componentId().equals(componentId) && link.manifestPath() != null)
-                .map(InventoryStore.ServiceComponentLink::manifestPath)
-                .findFirst().orElse(null);
+                """.formatted(facts.vulnerabilityId(), description, upgrades, String.join(", ", facts.checked()),
+                facts.serviceName(), facts.criticality(), facts.exposure(), facts.score(), facts.tier(),
+                facts.evidence());
     }
 
     /**
-     * The caller's manifest path, else the one the import recorded, else the ecosystem's at the root. A
-     * caller's unusable path is refused; a recorded one that doesn't fit this editor is simply not used.
+     * The manifests to edit: those the SBOM import recorded that fit this editor, else the ecosystem's
+     * manifest at the repository root.
      */
-    private static String manifestPath(String requested, String recorded, ManifestEditor editor) {
-        if (requested == null || requested.isBlank()) {
+    private static List<String> manifests(List<String> recorded, ManifestEditor editor) {
+        List<String> usable = new ArrayList<>();
+        for (String path : recorded) {
+            String trimmed = path == null ? "" : path.trim();
             try {
-                return recorded == null ? editor.fileName() : checkedManifest(recorded, editor);
-            } catch (ApiExceptions.BadRequest unusable) {
-                return editor.fileName();
+                FileChange.requireSafePath(trimmed);
+            } catch (ApiExceptions.BadRequest unsafe) {
+                continue;
+            }
+            if (trimmed.equals(editor.fileName()) || trimmed.endsWith("/" + editor.fileName())) {
+                usable.add(trimmed);
             }
         }
-        return checkedManifest(requested, editor);
+        return usable.isEmpty() ? List.of(editor.fileName()) : usable;
     }
 
-    private static String checkedManifest(String requested, ManifestEditor editor) {
-        String path = requested.trim();
-        FileChange.requireSafePath(path);
-        if (!path.equals(editor.fileName()) && !path.endsWith("/" + editor.fileName())) {
-            throw new ApiExceptions.BadRequest("This component's manifest must be a " + editor.fileName());
-        }
-        return path;
+    private static String claim(UUID componentId, String manifestPath) {
+        return componentId + " " + manifestPath;
     }
 
     /** {@code aegis/upgrade-log4j-core-2.17.1-1a2b3c4d}: readable, unique per proposal, a safe Git ref. */

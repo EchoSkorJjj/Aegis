@@ -3,6 +3,7 @@ package com.aegis.core.inventory.sbom;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -14,8 +15,11 @@ import java.util.UUID;
 
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
+import com.aegis.core.inventory.InventoryStore.ComponentDependencyLink;
+import com.aegis.core.inventory.InventoryStore.DependencyChanges;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
+import com.aegis.core.inventory.domain.SbomImportSource;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.sbom.CycloneDxBom.Component;
 import com.aegis.core.inventory.sbom.CycloneDxBom.Dependency;
@@ -27,9 +31,14 @@ import tools.jackson.databind.json.JsonMapper;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -59,22 +68,29 @@ class SbomImportServiceTest {
                     key(component.getEcosystem(), component.getName(), component.getVersion()), component);
             return component;
         });
-        when(store.componentDependencyExists(any(), any()))
-                .thenAnswer(call -> dependencyEdges.contains(List.of(call.getArgument(0), call.getArgument(1))));
-        doAnswer(call -> dependencyEdges.add(List.of(call.getArgument(0), call.getArgument(1))))
-                .when(store).addComponentDependency(any(), any());
+        // The service's own edges: an upload only adds (removing is for imports from the repository).
+        when(store.recordServiceDependencies(any(), any(), anyBoolean())).thenAnswer(call -> {
+            Collection<ComponentDependencyLink> declared = call.getArgument(1);
+            int added = 0;
+            for (ComponentDependencyLink edge : declared) {
+                if (dependencyEdges.add(List.of(edge.componentId(), edge.dependencyId()))) {
+                    added++;
+                }
+            }
+            return new DependencyChanges(added, 0);
+        });
         when(store.serviceComponentExists(any(), any()))
                 .thenAnswer(call -> serviceComponents.contains((UUID) call.getArgument(1)));
         doAnswer(call -> serviceComponents.add(call.getArgument(1))).when(store).addServiceComponent(any(), any());
         doAnswer(call -> serviceComponents.add(call.getArgument(1)))
-                .when(store).linkServiceComponent(any(), any(), any());
+                .when(store).linkRepositoryComponent(any(), any(), any());
     }
 
     @Test
     void importsFixtureLinkingOnlyTopLevelComponentsToTheService() {
         SbomImportResult result = importer.importSbom(serviceId, fixture());
 
-        assertThat(result).isEqualTo(new SbomImportResult(serviceId, 4, 0, 1, 2, 2));
+        assertThat(result).isEqualTo(new SbomImportResult(serviceId, 4, 0, 1, 2, 0, 2, 0));
         SoftwareComponent web = component("npm", "fixture-web-framework", "2.0.0");
         SoftwareComponent http = component("npm", "@fixture/http-client", "1.1.0");
         SoftwareComponent redirects = component("npm", "fixture-redirects", "0.9.0");
@@ -95,10 +111,30 @@ class SbomImportServiceTest {
 
         SbomImportResult second = importer.importSbom(serviceId, fixture());
 
-        assertThat(second).isEqualTo(new SbomImportResult(serviceId, 0, 4, 1, 0, 0));
+        assertThat(second).isEqualTo(new SbomImportResult(serviceId, 0, 4, 1, 0, 0, 0, 0));
         assertThat(componentsByCoordinates).hasSize(4);
         assertThat(dependencyEdges).isEqualTo(edgesAfterFirstImport);
         assertThat(serviceComponents).hasSize(2);
+        // An upload only adds: unlinking what a repository no longer declares is for imports from the repository.
+        verify(store, never()).unlinkRepositoryComponentsExcept(any(), any());
+        verify(store, times(2)).recordServiceDependencies(eq(serviceId), any(), eq(false));
+    }
+
+    @Test
+    void anImportFromTheRepositoryRecordsItsEdgesAsTheRepositorysAndReportsWhatItRemoved() {
+        CycloneDxBom bom = bom(new Component("app", "application", null, "app", "1", null, null),
+                List.of(library("framework", "pkg:npm/framework@1"), library("util", "pkg:npm/util@1")),
+                List.of(new Dependency("app", List.of("framework")), new Dependency("framework", List.of("util"))));
+        doReturn(new DependencyChanges(1, 3)).when(store).recordServiceDependencies(eq(serviceId), any(), eq(true));
+
+        SbomImportResult result = importer.importRepository(serviceId, RepositoryLayout.of(bom), SbomImportSource.PUBLIC);
+
+        assertThat(result.dependenciesCreated()).isEqualTo(1);
+        assertThat(result.dependenciesRemoved()).isEqualTo(3);
+        List<ComponentDependencyLink> declared = List.of(new ComponentDependencyLink(
+                component("npm", "framework", "1").getId(), component("npm", "util", "1").getId(), serviceId));
+        verify(store).recordServiceDependencies(eq(serviceId),
+                argThat(edges -> List.copyOf(edges).equals(declared)), eq(true));
     }
 
     @Test

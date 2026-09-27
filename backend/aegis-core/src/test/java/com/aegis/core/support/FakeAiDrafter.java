@@ -15,6 +15,12 @@ import com.aegis.core.platform.common.ApiExceptions;
 public class FakeAiDrafter implements AiDrafter {
 
     public static final String CONTENT = "Upgrading removes the vulnerable code path.";
+    public static final AiDtos.TicketSections TICKET = new AiDtos.TicketSections(
+            "The service runs a vulnerable library.", "Remote code execution through crafted input.",
+            "An attacker could take over the service.", List.of("Upgrade the library.", "Check the other services."));
+    public static final AiDtos.MemoSections MEMO = new AiDtos.MemoSections(
+            "A vulnerability affects a critical service.", "Clients affected: [To be confirmed].",
+            "The library is being upgraded.", "Confirm exposure before the next report.");
 
     private final List<AiDtos.DraftRequest> requests = Collections.synchronizedList(new ArrayList<>());
     private volatile boolean unavailable;
@@ -36,6 +42,10 @@ public class FakeAiDrafter implements AiDrafter {
         if (unavailable) {
             throw new ApiExceptions.UpstreamUnavailable("The AI service could not complete the request (HTTP 503)");
         }
-        return new AiDtos.Draft(request.draftType(), CONTENT, List.of("C1 quoted context"));
+        return switch (request.draftType()) {
+            case "risk_ticket" -> new AiDtos.Draft(request.draftType(), CONTENT, TICKET, null, List.of("C1 quoted context"));
+            case "memo" -> new AiDtos.Draft(request.draftType(), CONTENT, null, MEMO, List.of("C1 quoted context"));
+            default -> new AiDtos.Draft(request.draftType(), CONTENT, List.of("C1 quoted context"));
+        };
     }
 }

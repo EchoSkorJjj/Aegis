@@ -12,6 +12,7 @@ import com.aegis.core.advisories.AdvisoryStore;
 import com.aegis.core.advisories.AffectedProduct;
 import com.aegis.core.incidents.VendorIncident;
 import com.aegis.core.incidents.VendorIncidentStore;
+import com.aegis.core.inventory.DependencyGraph;
 import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.InventoryStore.ComponentDependencyLink;
 import com.aegis.core.inventory.InventoryStore.ServiceComponentLink;
@@ -55,7 +56,7 @@ class MatchingServiceTest {
     @BeforeEach
     void setUp() {
         matching = new MatchingService(
-                signals, advisories, incidents, inventory, new AdvisoryComponentMatcher());
+                signals, advisories, incidents, inventory, new DependencyGraph(inventory), new AdvisoryComponentMatcher());
     }
 
     @Test
@@ -216,8 +217,8 @@ class MatchingServiceTest {
         when(inventory.findBusinessServicesByIds(Set.of(service.getId())))
                 .thenReturn(Map.of(service.getId(), service));
         when(inventory.findOwnersForServices(Set.of(service.getId()))).thenReturn(Map.of());
-        when(inventory.findSoftwareComponentsByIds(Set.of(a.getId(), b.getId(), c.getId(), d.getId())))
-                .thenReturn(Map.of(a.getId(), a, b.getId(), b, c.getId(), c, d.getId(), d));
+        when(inventory.findSoftwareComponentsByIds(Set.of(a.getId(), d.getId())))
+                .thenReturn(Map.of(a.getId(), a, d.getId(), d));
 
         var response = matching.matchChange(signalId);
 

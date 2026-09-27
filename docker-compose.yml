@@ -111,6 +111,13 @@ services:
       AEGIS_GITHUB_APP_CLIENT_ID: ${AEGIS_GITHUB_APP_CLIENT_ID:-}
       AEGIS_GITHUB_APP_CLIENT_SECRET: ${AEGIS_GITHUB_APP_CLIENT_SECRET:-}
       AEGIS_GITHUB_CALLBACK_URL: ${AEGIS_GITHUB_CALLBACK_URL:-http://localhost:3000/admin/integrations/github/callback}
+      # Jira (off by default): where approved risk tickets are filed, through the site each organization's
+      # admin connects. Set these and AEGIS_SECRETS_KEY in .env; see backend/aegis-core/JIRA.md.
+      AEGIS_JIRA_ENABLED: ${AEGIS_JIRA_ENABLED:-false}
+      AEGIS_JIRA_CLIENT_ID: ${AEGIS_JIRA_CLIENT_ID:-}
+      AEGIS_JIRA_CLIENT_SECRET: ${AEGIS_JIRA_CLIENT_SECRET:-}
+      AEGIS_JIRA_CALLBACK_URL: ${AEGIS_JIRA_CALLBACK_URL:-http://localhost:3000/admin/integrations/jira/callback}
+      AEGIS_SECRETS_KEY: ${AEGIS_SECRETS_KEY:-}
       AEGIS_GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/github-app.pkcs8.pem
     ports:
       - "8082:8082"
@@ -180,6 +187,10 @@ services:
       # authenticates it and routes to identity-service (/auth,/oauth2,/users) or aegis-core (/api).
       # Must be the service name — "localhost" would be the frontend container itself.
       - GATEWAY_URL=http://gateway:8080
+      # Shown on the public /privacy page (the link Atlassian shows when someone grants Aegis access to
+      # Jira): who runs this deployment, and an email address or https link to reach them. Set in .env.
+      - PRIVACY_OPERATOR=${PRIVACY_OPERATOR:-}
+      - PRIVACY_CONTACT=${PRIVACY_CONTACT:-}
     restart: always
     networks: [edge]
 

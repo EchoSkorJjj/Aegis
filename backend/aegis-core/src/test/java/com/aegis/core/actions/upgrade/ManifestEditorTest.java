@@ -1,5 +1,7 @@
 package com.aegis.core.actions.upgrade;
 
+import java.util.List;
+
 import com.aegis.core.platform.common.ApiExceptions;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -124,7 +126,19 @@ class ManifestEditorTest {
                     .isEqualTo(manifest.replace("\"^0.21.1\"", "\"^0.21.2\"").replace("\"0.21.1\"", "\"0.21.2\""));
             assertThat(editor.upgrade(manifest, "@babel/traverse", "7.23.0", "7.23.2"))
                     .contains("\"@babel/traverse\":   \"~7.23.2\"");
-            assertThat(editor.followUps()).singleElement().asString().contains("package-lock.json");
+        }
+
+        @Test
+        void theLockfileBesideEachEditedManifestIsLeftToTheReviewerByName() {
+            assertThat(editor.followUps(List.of("package.json"))).singleElement().asString()
+                    .startsWith("Refresh the lockfile in the repository root and commit it to this branch: run `npm install`")
+                    .contains("`npm ci` refuses to install");
+            assertThat(editor.followUps(List.of("web/app`x/package.json", "server/package.json", "client/package.json",
+                    "package.json")))
+                    .singleElement().asString()
+                    .startsWith("Refresh the lockfiles in the repository root, `client/`, `server/` and `web/app'x/` "
+                            + "and commit them");
+            assertThat(new MavenPomEditor().followUps(List.of("pom.xml"))).isEmpty();
         }
 
         @Test

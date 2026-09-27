@@ -21,10 +21,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * The upgrades Aegis recommends for the caller's organization — or one service — highest impact first,
- * with no CVE to look up. Reading them takes any domain role; drafting one is the upgrade proposals
- * endpoint, under its own rules ({@link UpgradeRoles#PROPOSE}). {@code canDraft} says whether this caller may
- * draft that one — an analyst, or the service's assigned owner — so the page offers the button only where
- * it would work.
+ * with no CVE to look up. Reading them takes any domain role; drafting a response to one is the risk tickets
+ * endpoint, under its own rules. {@code canDraft} says whether this caller may draft it — an analyst, or the
+ * service's assigned owner — so the page offers the button only where it would work.
  */
 @RestController
 @RequestMapping("/api/actions/upgrade-recommendations")

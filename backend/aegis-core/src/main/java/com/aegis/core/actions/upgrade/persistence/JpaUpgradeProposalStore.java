@@ -17,11 +17,14 @@ import com.aegis.core.platform.tenant.CurrentOrg;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * JPA adapter for {@link UpgradeProposalStore}. Every method resolves the caller's org through
@@ -31,43 +34,58 @@ import org.springframework.transaction.annotation.Transactional;
 @Repository
 class JpaUpgradeProposalStore implements UpgradeProposalStore {
 
-    private static final List<UpgradeProposalStatus> LIVE =
-            List.of(UpgradeProposalStatus.PROPOSED, UpgradeProposalStatus.OPENING, UpgradeProposalStatus.OPENED);
+    private static final List<UpgradeProposalStatus> CURRENT = List.of(UpgradeProposalStatus.PROPOSED,
+            UpgradeProposalStatus.OPENING, UpgradeProposalStatus.OPENED, UpgradeProposalStatus.FAILED);
+    private static final TypeReference<List<UpgradeProposal.Edit>> EDITS = new TypeReference<>() { };
 
     @PersistenceContext
     private EntityManager entityManager;
 
     private final CurrentOrg currentOrg;
     private final UpgradeProposalJpaRepository proposals;
+    private final ObjectMapper mapper;
 
-    JpaUpgradeProposalStore(CurrentOrg currentOrg, UpgradeProposalJpaRepository proposals) {
+    JpaUpgradeProposalStore(CurrentOrg currentOrg, UpgradeProposalJpaRepository proposals, ObjectMapper mapper) {
         this.currentOrg = currentOrg;
         this.proposals = proposals;
+        this.mapper = mapper;
     }
 
     @Override
     @Transactional
     public UpgradeProposal create(UpgradeProposal proposal) {
-        return proposals.saveAndFlush(UpgradeProposalEntity.create(scope(), proposal)).toDomain();
+        return domain(proposals.saveAndFlush(
+                UpgradeProposalEntity.create(scope(), proposal, mapper.writeValueAsString(proposal.edits()))));
     }
 
     @Override
     @Transactional(readOnly = true)
     public Optional<UpgradeProposal> find(UUID id) {
-        return proposals.findByIdAndOrgId(id, scope()).map(UpgradeProposalEntity::toDomain);
+        return proposals.findByIdAndOrgId(id, scope()).map(this::domain);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public Optional<UpgradeProposal> findLive(UUID serviceId, UUID changeSignalId, UUID componentId) {
-        return proposals.findFirstByOrgIdAndServiceIdAndChangeSignalIdAndComponentIdAndStatusIn(
-                scope(), serviceId, changeSignalId, componentId, LIVE).map(UpgradeProposalEntity::toDomain);
+    public List<UpgradeProposal> findCurrent(UUID serviceId) {
+        return proposals.findByOrgIdAndServiceIdAndStatusIn(scope(), serviceId, CURRENT).stream()
+                .map(this::domain).toList();
     }
 
     @Override
     @Transactional(readOnly = true)
-    public Page<UpgradeProposal> findPage(
-            UUID serviceId, UUID changeSignalId, Collection<UpgradeProposalStatus> statuses, Pageable pageable) {
+    public List<UpgradeProposal> findForTickets(Collection<UUID> riskTicketIds) {
+        if (riskTicketIds.isEmpty()) {
+            return List.of();
+        }
+        return proposals.findByOrgIdAndRiskTicketIdIn(scope(), riskTicketIds,
+                        Sort.by(Sort.Direction.DESC, "createdAt")).stream()
+                .map(this::domain).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<UpgradeProposal> findPage(UUID serviceId, UUID changeSignalId,
+            Collection<UpgradeProposalStatus> statuses, boolean standaloneOnly, Pageable pageable) {
         UUID org = scope();
         List<Specification<UpgradeProposalEntity>> specs = new ArrayList<>();
         specs.add((root, query, cb) -> cb.equal(root.get("orgId"), org));
@@ -80,7 +98,10 @@ class JpaUpgradeProposalStore implements UpgradeProposalStore {
         if (statuses != null && !statuses.isEmpty()) {
             specs.add((root, query, cb) -> root.get("status").in(statuses));
         }
-        return proposals.findAll(Specification.allOf(specs), pageable).map(UpgradeProposalEntity::toDomain);
+        if (standaloneOnly) {
+            specs.add((root, query, cb) -> cb.isNull(root.get("riskTicketId")));
+        }
+        return proposals.findAll(Specification.allOf(specs), pageable).map(this::domain);
     }
 
     @Override
@@ -93,10 +114,14 @@ class JpaUpgradeProposalStore implements UpgradeProposalStore {
         }
         entity.applyDecision(proposal);
         try {
-            return proposals.saveAndFlush(entity).toDomain();
+            return domain(proposals.saveAndFlush(entity));
         } catch (OptimisticLockingFailureException concurrentDecision) {
             throw changedMeanwhile();
         }
+    }
+
+    private UpgradeProposal domain(UpgradeProposalEntity entity) {
+        return entity.toDomain(mapper.readValue(entity.edits(), EDITS));
     }
 
     private static ApiExceptions.Conflict changedMeanwhile() {
@@ -117,6 +142,8 @@ interface UpgradeProposalJpaRepository
 
     Optional<UpgradeProposalEntity> findByIdAndOrgId(UUID id, UUID orgId);
 
-    Optional<UpgradeProposalEntity> findFirstByOrgIdAndServiceIdAndChangeSignalIdAndComponentIdAndStatusIn(
-            UUID orgId, UUID serviceId, UUID changeSignalId, UUID componentId, List<UpgradeProposalStatus> statuses);
+    List<UpgradeProposalEntity> findByOrgIdAndServiceIdAndStatusIn(
+            UUID orgId, UUID serviceId, List<UpgradeProposalStatus> statuses);
+
+    List<UpgradeProposalEntity> findByOrgIdAndRiskTicketIdIn(UUID orgId, Collection<UUID> riskTicketIds, Sort sort);
 }

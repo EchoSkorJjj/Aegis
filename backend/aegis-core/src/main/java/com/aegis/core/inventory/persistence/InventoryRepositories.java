@@ -43,6 +43,7 @@ interface SoftwareComponentJpaRepository
     List<SoftwareComponent> findByIdInAndOrgId(Collection<UUID> ids, UUID orgId);
     Optional<SoftwareComponent> findByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCaseAndOrgId(
             String ecosystem, String name, String version, UUID orgId);
+    List<SoftwareComponent> findByEcosystemIgnoreCaseAndNameIgnoreCaseAndOrgId(String ecosystem, String name, UUID orgId);
     boolean existsByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCaseAndOrgId(
             String ecosystem, String name, String version, UUID orgId);
     boolean existsByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCaseAndOrgIdAndIdNot(
@@ -54,9 +55,12 @@ interface SoftwareComponentJpaRepository
     Page<SoftwareComponent> findForService(
             @Param("serviceId") UUID serviceId, @Param("orgId") UUID orgId, Pageable pageable);
 
-    @Query("select c from SoftwareComponent c where c.orgId = :orgId and c.id in "
+    /** What the component depends on anywhere: edges added by hand, and every service's own. */
+    @Query("select c from SoftwareComponent c where c.orgId = :orgId and (c.id in "
             + "(select r.dependencyId from ComponentDependencyEntity r "
-            + "where r.componentId = :componentId and r.orgId = :orgId)")
+            + "where r.componentId = :componentId and r.orgId = :orgId) or c.id in "
+            + "(select s.dependencyId from ServiceDependencyEntity s "
+            + "where s.componentId = :componentId and s.orgId = :orgId))")
     Page<SoftwareComponent> findDependencies(
             @Param("componentId") UUID componentId, @Param("orgId") UUID orgId, Pageable pageable);
 }
@@ -123,4 +127,15 @@ interface ComponentDependencyJpaRepository extends JpaRepository<ComponentDepend
 
     /** Direct dependencies (one BFS level, forward): edges out of the given components. */
     List<ComponentDependencyEntity> findByComponentIdInAndOrgId(Collection<UUID> componentIds, UUID orgId);
+}
+
+interface ServiceDependencyJpaRepository extends JpaRepository<ServiceDependencyEntity, ServiceDependencyEntity.Key> {
+    /** Every service's edges into the given components (one reverse level). */
+    List<ServiceDependencyEntity> findByDependencyIdInAndOrgId(Collection<UUID> dependencyIds, UUID orgId);
+
+    /** These services' edges out of the given components (one forward level). */
+    List<ServiceDependencyEntity> findByComponentIdInAndBusinessServiceIdInAndOrgId(
+            Collection<UUID> componentIds, Collection<UUID> businessServiceIds, UUID orgId);
+
+    List<ServiceDependencyEntity> findByBusinessServiceIdAndOrgId(UUID businessServiceId, UUID orgId);
 }

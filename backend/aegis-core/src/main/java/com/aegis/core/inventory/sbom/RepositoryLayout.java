@@ -8,10 +8,14 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.aegis.core.inventory.sbom.CycloneDxBom.Component;
 import com.aegis.core.inventory.sbom.CycloneDxBom.Dependency;
 import com.aegis.core.inventory.sbom.CycloneDxBom.Metadata;
+import com.aegis.core.inventory.sbom.CycloneDxBom.Property;
 
 /**
  * A scanned repository's layout, read from syft's SBOM. Syft scans a directory, so it reports the
@@ -22,19 +26,22 @@ import com.aegis.core.inventory.sbom.CycloneDxBom.Metadata;
  *
  * <p>{@link #of} turns them back into what they are, the repository itself: a project package leaves the
  * components, what it declares becomes a direct dependency of the service, and each direct dependency
- * remembers the manifest that declares it ({@code client/package.json}, {@code service/pom.xml}) for an
- * upgrade to edit. A project package is a dependency-graph root that depends on something, found by syft's
+ * remembers every manifest that declares it ({@code client/package.json}, {@code service/pom.xml}) for an
+ * upgrade to edit — the same library version in two manifests is one component, which syft reports once
+ * with a location for each. A project package is a dependency-graph root that depends on something, found by syft's
  * Maven cataloger at a {@code pom.xml} or its npm lockfile cataloger at a {@code package-lock.json} /
  * {@code npm-shrinkwrap.json}. (pnpm and yarn lockfiles name no project, so their direct dependencies are
  * roots already; syft leaves dev dependencies out, so a dev tool is never mistaken for a project.)
  *
  * @param bom            the SBOM with the project packages removed and their dependencies hung on the root
- * @param manifestsByRef the manifest declaring each direct dependency, by bom-ref, where it is known
+ * @param manifestsByRef the manifests declaring each direct dependency, by bom-ref, where they are known
  * @param projects       the project packages removed — a re-import unlinks them from the service
  */
-record RepositoryLayout(CycloneDxBom bom, Map<String, String> manifestsByRef, List<Component> projects) {
+record RepositoryLayout(CycloneDxBom bom, Map<String, List<String>> manifestsByRef, List<Component> projects) {
 
     private static final String LOCATION = "syft:location:0:path";
+    /** Syft numbers a package's locations, one for every file it was found in. */
+    private static final Pattern LOCATION_PATH = Pattern.compile("syft:location:(\\d+):path");
     private static final String FOUND_BY = "syft:package:foundBy";
     /** The repository itself, when the SBOM names no root to hang the direct dependencies on. */
     static final String SYNTHETIC_ROOT = "aegis:repository";
@@ -63,14 +70,14 @@ record RepositoryLayout(CycloneDxBom bom, Map<String, String> manifestsByRef, Li
         projects.forEach(project -> projectRefs.add(project.ref()));
 
         Set<String> direct = new LinkedHashSet<>(edges.getOrDefault(rootRef, List.of()));
-        Map<String, String> manifests = new LinkedHashMap<>();
+        Map<String, Set<String>> manifests = new LinkedHashMap<>();
         for (Component project : projects) {
             String manifest = manifestOf(project);
             for (String dependency : edges.get(project.ref())) {
                 if (dependency != null && !projectRefs.contains(dependency)) {
                     direct.add(dependency);
                     if (manifest != null) {
-                        manifests.putIfAbsent(dependency, manifest);
+                        manifests.computeIfAbsent(dependency, ref -> new LinkedHashSet<>()).add(manifest);
                     }
                 }
             }
@@ -79,14 +86,15 @@ record RepositoryLayout(CycloneDxBom bom, Map<String, String> manifestsByRef, Li
         for (Component component : components) {
             if (component != null && component.ref() != null && !projectRefs.contains(component.ref())
                     && !dependedOn.contains(component.ref())) {
-                String manifest = manifestOf(component);
-                if (manifest != null) {
-                    manifests.putIfAbsent(component.ref(), manifest);
+                for (String manifest : manifestsOf(component)) {
+                    manifests.computeIfAbsent(component.ref(), ref -> new LinkedHashSet<>()).add(manifest);
                 }
             }
         }
+        Map<String, List<String>> manifestsByRef = new LinkedHashMap<>();
+        manifests.forEach((ref, paths) -> manifestsByRef.put(ref, List.copyOf(paths)));
         if (projects.isEmpty() && root != null && root.ref() != null) {
-            return new RepositoryLayout(bom, Map.copyOf(manifests), List.of());
+            return new RepositoryLayout(bom, Map.copyOf(manifestsByRef), List.of());
         }
 
         List<Dependency> dependencies = new ArrayList<>();
@@ -104,7 +112,7 @@ record RepositoryLayout(CycloneDxBom bom, Map<String, String> manifestsByRef, Li
                 .toList();
         return new RepositoryLayout(
                 new CycloneDxBom(bom.bomFormat(), bom.specVersion(), new Metadata(repository), remaining, dependencies),
-                Map.copyOf(manifests), projects);
+                Map.copyOf(manifestsByRef), projects);
     }
 
     private static boolean isProjectManifest(Component component) {
@@ -121,7 +129,30 @@ record RepositoryLayout(CycloneDxBom bom, Map<String, String> manifestsByRef, Li
      * {@code requirements.txt}. Repository-relative, without a leading slash; null otherwise.
      */
     static String manifestOf(Component component) {
-        String location = component.property(LOCATION);
+        return manifestAt(component.property(LOCATION));
+    }
+
+    /** The manifests at every location syft found this package, in its order, each once. */
+    static List<String> manifestsOf(Component component) {
+        Map<Integer, String> byIndex = new TreeMap<>();
+        for (Property property : component.properties() == null ? List.<Property>of() : component.properties()) {
+            Matcher location = property == null || property.name() == null ? null
+                    : LOCATION_PATH.matcher(property.name());
+            if (location != null && location.matches()) {
+                byIndex.putIfAbsent(Integer.parseInt(location.group(1)), property.value());
+            }
+        }
+        Set<String> manifests = new LinkedHashSet<>();
+        for (String location : byIndex.values()) {
+            String manifest = manifestAt(location);
+            if (manifest != null) {
+                manifests.add(manifest);
+            }
+        }
+        return List.copyOf(manifests);
+    }
+
+    private static String manifestAt(String location) {
         if (location == null || location.isBlank()) {
             return null;
         }

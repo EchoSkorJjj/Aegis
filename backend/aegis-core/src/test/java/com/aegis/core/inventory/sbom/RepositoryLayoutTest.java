@@ -42,12 +42,44 @@ class RepositoryLayoutTest {
     void eachDirectDependencyRemembersTheManifestThatDeclaresIt() throws Exception {
         RepositoryLayout layout = RepositoryLayout.of(fixture());
 
-        Map<String, String> byName = layout.manifestsByRef().entrySet().stream()
+        Map<String, List<String>> byName = layout.manifestsByRef().entrySet().stream()
                 .collect(Collectors.toMap(entry -> name(layout, entry.getKey()), Map.Entry::getValue));
-        assertThat(byName).containsEntry("axios", "client/package.json")
-                .containsEntry("log4j-core", "service/pom.xml")
-                .containsEntry("spring-boot-starter-web", "service/pom.xml")
+        assertThat(byName).containsEntry("axios", List.of("client/package.json"))
+                .containsEntry("log4j-core", List.of("service/pom.xml"))
+                .containsEntry("spring-boot-starter-web", List.of("service/pom.xml"))
                 .doesNotContainKey("follow-redirects");
+    }
+
+    @Test
+    void theSameVersionInTwoProjectsRemembersBothManifests() {
+        // syft reports axios 1.6.0 once, found in both lockfiles; both projects depend on it.
+        Component client = syft("pkg:npm/client@0.0.0", "client", "0.0.0", "javascript-lock-cataloger",
+                "/client/package-lock.json");
+        Component server = syft("pkg:npm/server@0.0.0", "server", "0.0.0", "javascript-lock-cataloger",
+                "/server/package-lock.json");
+        Component axios = new Component("pkg:npm/axios@1.6.0", "library", null, "axios", "1.6.0",
+                "pkg:npm/axios@1.6.0", null, List.of(new Property("syft:package:foundBy", "javascript-lock-cataloger"),
+                        new Property("syft:location:0:path", "/client/package-lock.json"),
+                        new Property("syft:location:1:path", "/server/package-lock.json")));
+        CycloneDxBom bom = new CycloneDxBom("CycloneDX", "1.6", new Metadata(directory()), List.of(client, server, axios),
+                List.of(new Dependency(client.ref(), List.of(axios.ref())),
+                        new Dependency(server.ref(), List.of(axios.ref()))));
+
+        RepositoryLayout layout = RepositoryLayout.of(bom);
+
+        assertThat(layout.manifestsByRef())
+                .containsOnly(Map.entry(axios.ref(), List.of("client/package.json", "server/package.json")));
+    }
+
+    @Test
+    void aLibraryFoundAtSeveralLocationsIsDeclaredInEach() {
+        Component lib = new Component("lib", "library", null, "lib", "1.0.0", "pkg:npm/lib@1.0.0", null, List.of(
+                new Property("syft:location:1:path", "/web/yarn.lock"),
+                new Property("syft:location:0:path", "/api/package-lock.json"),
+                new Property("syft:location:2:path", "/api/package-lock.json"),
+                new Property("syft:location:3:path", "/docs/build.gradle")));
+
+        assertThat(RepositoryLayout.manifestsOf(lib)).containsExactly("api/package.json", "web/package.json");
     }
 
     @Test
@@ -63,7 +95,7 @@ class RepositoryLayoutTest {
 
         assertThat(layout.projects()).isEmpty();
         assertThat(layout.bom()).isSameAs(bom);
-        assertThat(layout.manifestsByRef()).containsOnly(Map.entry(next.ref(), "frontend/package.json"));
+        assertThat(layout.manifestsByRef()).containsOnly(Map.entry(next.ref(), List.of("frontend/package.json")));
     }
 
     @Test
@@ -96,7 +128,7 @@ class RepositoryLayoutTest {
         // No root in the document: the repository gets one, and the module's dependency hangs on it.
         assertThat(layout.bom().metadata().component().ref()).isEqualTo(RepositoryLayout.SYNTHETIC_ROOT);
         assertThat(dependsOn(layout, RepositoryLayout.SYNTHETIC_ROOT)).containsExactly(lib.ref());
-        assertThat(layout.manifestsByRef()).containsEntry(lib.ref(), "api/pom.xml");
+        assertThat(layout.manifestsByRef()).containsEntry(lib.ref(), List.of("api/pom.xml"));
     }
 
     @Test

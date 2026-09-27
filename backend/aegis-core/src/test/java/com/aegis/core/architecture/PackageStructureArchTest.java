@@ -127,6 +127,12 @@ class PackageStructureArchTest {
             .should().dependOnClassesThat().resideInAPackage("..actions.pr.github..")
             .because("the GitHub adapter is optional, reached only through its ports (PrProvider, RepositoryReadAccess)");
 
+    @ArchTest
+    static final ArchRule jira_is_only_reached_through_the_tracker_port = noClasses()
+            .that().resideOutsideOfPackage("..actions.tracker.jira..")
+            .should().dependOnClassesThat().resideInAPackage("..actions.tracker.jira..")
+            .because("the Jira adapter is optional, reached only through the IssueTracker port");
+
     /**
      * The public web API belongs to the domains. After lifting advisories/incidents/news/signals out
      * of {@code ingestion}, no REST controller should live under the ingestion framework again.

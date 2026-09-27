@@ -19,8 +19,12 @@ interface ManifestEditor {
     /** The rewritten manifest. Throws {@code ApiExceptions.Conflict} naming why when it cannot be. */
     String upgrade(String manifest, String packageName, String fromVersion, String toVersion);
 
-    /** What a reviewer must still do by hand after this edit (for example, refresh a lockfile). */
-    default List<String> followUps() {
+    /**
+     * What someone must still do by hand, on the pull request's branch, once these manifests are edited — refresh
+     * the lockfile beside each, say — as Markdown for the pull request's checklist. Empty when the edits are
+     * complete on their own.
+     */
+    default List<String> followUps(List<String> manifestPaths) {
         return List.of();
     }
 

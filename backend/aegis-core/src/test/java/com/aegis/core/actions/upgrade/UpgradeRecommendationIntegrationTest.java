@@ -67,7 +67,7 @@ class UpgradeRecommendationIntegrationTest extends AbstractInventoryIntegrationT
         Map<String, Object> lib = items.getFirst();
         assertThat(lib).containsEntry("readiness", "READY").containsEntry("toVersion", "1.2.0")
                 .containsEntry("changeSignalId", estate.advisory().id().toString())
-                .containsEntry("manifestPath", "svc/pom.xml").containsEntry("canDraft", true)
+                .containsEntry("manifestPaths", List.of("svc/pom.xml")).containsEntry("canDraft", true)
                 .containsEntry("serviceName", estate.service().getName()).containsEntry("reason", null);
         assertThat(JsonPath.<String>read(lib, "$.vulnerabilities[0].id")).isEqualTo("CVE-2099-" + estate.tag() + "1");
         assertThat(JsonPath.<Double>read(lib, "$.score")).isPositive();
@@ -127,22 +127,48 @@ class UpgradeRecommendationIntegrationTest extends AbstractInventoryIntegrationT
     }
 
     @Test
-    void draftingARecommendationUsesItsManifestAndTheRecommendationThenShowsTheDraft() throws Exception {
+    void draftingAResponseUsesTheRecordedManifestAndTheRecommendationThenShowsIt() throws Exception {
         Estate estate = estate();
-        Map<String, Object> lib = recommendations(estate.service().getId(), as("ANALYST", UUID.randomUUID())).getFirst();
+        List<Map<String, Object>> before = recommendations(estate.service().getId(), as("ANALYST", UUID.randomUUID()));
+        assertThat(before).allSatisfy(item -> assertThat(item).containsEntry("response", null));
+        Map<String, Object> lib = before.getFirst();
 
-        String body = "{\"changeSignalId\":\"%s\",\"serviceId\":\"%s\",\"componentId\":\"%s\"}".formatted(
-                lib.get("changeSignalId"), estate.service().getId(), estate.libId());
-        String created = mvc.perform(post("/api/actions/upgrade-proposals").with(as("ANALYST", UUID.randomUUID()))
-                        .contentType(MediaType.APPLICATION_JSON).content(body))
+        String created = mvc.perform(post("/api/actions/risk-tickets").with(as("ANALYST", UUID.randomUUID()))
+                        .contentType(MediaType.APPLICATION_JSON).content(response(lib.get("changeSignalId"), estate)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.manifestPath").value("svc/pom.xml"))
-                .andExpect(jsonPath("$.toVersion").value("1.2.0"))
+                .andExpect(jsonPath("$.pullRequests[0].edits[0].manifestPath").value("svc/pom.xml"))
+                .andExpect(jsonPath("$.pullRequests[0].edits[0].toVersion").value("1.2.0"))
                 .andReturn().getResponse().getContentAsString();
 
         Map<String, Object> after = recommendations(estate.service().getId(), as("ANALYST", UUID.randomUUID())).getFirst();
-        assertThat(JsonPath.<String>read(after, "$.proposal.id")).isEqualTo(JsonPath.<String>read(created, "$.id"));
+        assertThat(JsonPath.<String>read(after, "$.proposal.id"))
+                .isEqualTo(JsonPath.<String>read(created, "$.pullRequests[0].id"));
         assertThat(JsonPath.<String>read(after, "$.proposal.status")).isEqualTo("PROPOSED");
+        assertThat(JsonPath.<String>read(after, "$.response.ticketId")).isEqualTo(JsonPath.<String>read(created, "$.id"));
+        assertThat(JsonPath.<String>read(after, "$.response.status")).isEqualTo("PROPOSED");
+    }
+
+    @Test
+    void whatCannotBeUpgradedStillGetsAResponseATicketAlone() throws Exception {
+        Estate estate = estate();
+        Map<String, Object> crate = recommendations(estate.service().getId(), as("ANALYST", UUID.randomUUID())).stream()
+                .filter(item -> "UNSUPPORTED".equals(item.get("readiness"))).findFirst().orElseThrow();
+        assertThat(crate.get("changeSignalId")).as("a vulnerability to respond to").isNotNull();
+
+        String created = mvc.perform(post("/api/actions/risk-tickets").with(as("ANALYST", UUID.randomUUID()))
+                        .contentType(MediaType.APPLICATION_JSON).content(response(crate.get("changeSignalId"), estate)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.pullRequests").isEmpty())
+                .andReturn().getResponse().getContentAsString();
+
+        Map<String, Object> after = recommendations(estate.service().getId(), as("ANALYST", UUID.randomUUID())).stream()
+                .filter(item -> "UNSUPPORTED".equals(item.get("readiness"))).findFirst().orElseThrow();
+        assertThat(after).containsEntry("proposal", null);
+        assertThat(JsonPath.<String>read(after, "$.response.ticketId")).isEqualTo(JsonPath.<String>read(created, "$.id"));
+    }
+
+    private static String response(Object changeSignalId, Estate estate) {
+        return "{\"changeSignalId\":\"%s\",\"serviceId\":\"%s\"}".formatted(changeSignalId, estate.service().getId());
     }
 
     /**
@@ -232,7 +258,7 @@ class UpgradeRecommendationIntegrationTest extends AbstractInventoryIntegrationT
         SoftwareComponent deepComponent = inventory.createSoftwareComponent("maven", deep, "2.0.0");
         SoftwareComponent crateComponent = inventory.createSoftwareComponent("cargo", crate, "0.1.0");
         SoftwareComponent stuckComponent = inventory.createSoftwareComponent("maven", stuck, "1.0.0");
-        store.linkServiceComponent(service.getId(), libComponent.getId(), "svc/pom.xml");
+        store.linkRepositoryComponent(service.getId(), libComponent.getId(), List.of("svc/pom.xml"));
         inventory.addComponentDependency(libComponent.getId(), deepComponent.getId());
         inventory.addServiceComponent(service.getId(), crateComponent.getId());
         inventory.addServiceComponent(service.getId(), stuckComponent.getId());

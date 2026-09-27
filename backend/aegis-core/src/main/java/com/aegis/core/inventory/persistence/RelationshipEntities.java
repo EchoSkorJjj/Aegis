@@ -2,6 +2,7 @@ package com.aegis.core.inventory.persistence;
 
 import java.io.Serializable;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -12,7 +13,9 @@ import jakarta.persistence.IdClass;
 import jakarta.persistence.Table;
 
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.SourceType;
+import org.hibernate.type.SqlTypes;
 
 // Relationship rows carry org_id (ADR §6) so tenant scoping and RLS reach the edges too, not just the
 // entities. Both endpoints of an edge are always in the same org, so it equals either endpoint's org.
@@ -24,7 +27,9 @@ class ServiceComponentEntity {
     @Id @Column(name = "business_service_id") private UUID businessServiceId;
     @Id @Column(name = "component_id") private UUID componentId;
     @Column(name = "org_id", nullable = false) private UUID orgId;
-    @Column(name = "manifest_path", length = 400) private String manifestPath;
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "manifest_paths", nullable = false, columnDefinition = "text[]") private String[] manifestPaths = new String[0];
+    @Column(name = "from_repository", nullable = false) private boolean fromRepository;
     @CreationTimestamp(source = SourceType.DB)
     @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
 
@@ -45,12 +50,21 @@ class ServiceComponentEntity {
         return componentId;
     }
 
-    String getManifestPath() {
-        return manifestPath;
+    List<String> getManifestPaths() {
+        return manifestPaths == null ? List.of() : List.of(manifestPaths);
     }
 
-    void setManifestPath(String manifestPath) {
-        this.manifestPath = manifestPath;
+    void setManifestPaths(List<String> manifestPaths) {
+        this.manifestPaths = manifestPaths.toArray(String[]::new);
+    }
+
+    /** An import from the service's repository linked it, so a later one unlinks it once the repository drops it. */
+    boolean isFromRepository() {
+        return fromRepository;
+    }
+
+    void markFromRepository() {
+        this.fromRepository = true;
     }
 
     static final class Key implements Serializable {
@@ -184,5 +198,83 @@ class ComponentDependencyEntity {
         Key(UUID componentId, UUID dependencyId) { this.componentId = componentId; this.dependencyId = dependencyId; }
         @Override public boolean equals(Object o) { return o instanceof Key key && Objects.equals(componentId, key.componentId) && Objects.equals(dependencyId, key.dependencyId); }
         @Override public int hashCode() { return Objects.hash(componentId, dependencyId); }
+    }
+}
+
+/**
+ * A dependency edge one service's SBOM declared: that service's resolution, which another service's lockfile may
+ * resolve differently. Edges added by hand, which hold in every service, are {@link ComponentDependencyEntity}.
+ */
+@Entity
+@Table(name = "business_service_component_dependencies")
+@IdClass(ServiceDependencyEntity.Key.class)
+class ServiceDependencyEntity {
+    @Id @Column(name = "business_service_id") private UUID businessServiceId;
+    @Id @Column(name = "component_id") private UUID componentId;
+    @Id @Column(name = "dependency_id") private UUID dependencyId;
+    @Column(name = "org_id", nullable = false) private UUID orgId;
+    @Column(name = "from_repository", nullable = false) private boolean fromRepository;
+    @CreationTimestamp(source = SourceType.DB)
+    @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
+
+    protected ServiceDependencyEntity() {
+    }
+
+    ServiceDependencyEntity(UUID businessServiceId, UUID componentId, UUID dependencyId, UUID orgId,
+            boolean fromRepository) {
+        this.businessServiceId = businessServiceId;
+        this.componentId = componentId;
+        this.dependencyId = dependencyId;
+        this.orgId = orgId;
+        this.fromRepository = fromRepository;
+    }
+
+    UUID getBusinessServiceId() {
+        return businessServiceId;
+    }
+
+    UUID getComponentId() {
+        return componentId;
+    }
+
+    UUID getDependencyId() {
+        return dependencyId;
+    }
+
+    /** An import from the service's repository declared it, so a later one removes it once no longer declared. */
+    boolean isFromRepository() {
+        return fromRepository;
+    }
+
+    void markFromRepository() {
+        this.fromRepository = true;
+    }
+
+    Key key() {
+        return new Key(businessServiceId, componentId, dependencyId);
+    }
+
+    static final class Key implements Serializable {
+        private UUID businessServiceId;
+        private UUID componentId;
+        private UUID dependencyId;
+
+        public Key() {
+        }
+
+        Key(UUID businessServiceId, UUID componentId, UUID dependencyId) {
+            this.businessServiceId = businessServiceId;
+            this.componentId = componentId;
+            this.dependencyId = dependencyId;
+        }
+
+        @Override public boolean equals(Object o) {
+            return o instanceof Key key && Objects.equals(businessServiceId, key.businessServiceId)
+                    && Objects.equals(componentId, key.componentId) && Objects.equals(dependencyId, key.dependencyId);
+        }
+
+        @Override public int hashCode() {
+            return Objects.hash(businessServiceId, componentId, dependencyId);
+        }
     }
 }

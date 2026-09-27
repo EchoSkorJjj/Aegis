@@ -31,9 +31,27 @@ final class NpmPackageJsonEditor implements ManifestEditor {
         return "package.json";
     }
 
+    /**
+     * The lockfile: Aegis edits {@code package.json} only, and the lockfile beside it keeps pinning the old version
+     * until someone refreshes it — which is what installs read, and what the next SBOM import reports.
+     */
     @Override
-    public List<String> followUps() {
-        return List.of("Run `npm install` so `package-lock.json` resolves the new version.");
+    public List<String> followUps(List<String> manifestPaths) {
+        // In path order, the repository root first, however the edits happen to be ordered.
+        List<String> directories = manifestPaths.stream()
+                .map(path -> path.substring(0, path.lastIndexOf('/') + 1))
+                .distinct()
+                .sorted()
+                .map(directory -> directory.isEmpty() ? "the repository root" : UpgradePullRequestText.code(directory))
+                .toList();
+        if (directories.isEmpty()) {
+            return List.of();
+        }
+        boolean several = directories.size() > 1;
+        return List.of("Refresh the lockfile" + (several ? "s" : "") + " in " + UpgradePullRequestText.and(directories)
+                + " and commit " + (several ? "them" : "it") + " to this branch: run `npm install` there (`yarn install` "
+                + "or `pnpm install` in a yarn or pnpm project). Until then the lockfile still pins the old version, so "
+                + "`npm ci` refuses to install and Aegis keeps reporting the vulnerability.");
     }
 
     @Override

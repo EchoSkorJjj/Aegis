@@ -1,6 +1,7 @@
 package com.aegis.core.actions.upgrade.persistence;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import jakarta.persistence.Column;
@@ -18,7 +19,10 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.SourceType;
 import org.hibernate.annotations.UpdateTimestamp;
 
-/** Row for {@code upgrade_proposals} (V18). The plan is immutable once written; only the decision moves. */
+/**
+ * Row for {@code upgrade_proposals} (V18, V27). The plan is immutable once written; only the decision moves,
+ * and the title once, when a response's pull request is opened under its risk ticket's key.
+ */
 @Entity
 @Table(name = "upgrade_proposals")
 class UpgradeProposalEntity {
@@ -39,23 +43,12 @@ class UpgradeProposalEntity {
     @Column(name = "vulnerability_id", nullable = false, updatable = false, length = 64)
     private String vulnerabilityId;
 
-    @Column(name = "component_id", nullable = false, updatable = false)
-    private UUID componentId;
+    @Column(name = "risk_ticket_id", updatable = false)
+    private UUID riskTicketId;
 
-    @Column(name = "component_ecosystem", nullable = false, updatable = false, length = 64)
-    private String ecosystem;
-
-    @Column(name = "component_name", nullable = false, updatable = false, length = 255)
-    private String packageName;
-
-    @Column(name = "from_version", nullable = false, updatable = false, length = 128)
-    private String fromVersion;
-
-    @Column(name = "to_version", nullable = false, updatable = false, length = 128)
-    private String toVersion;
-
-    @Column(name = "manifest_path", nullable = false, updatable = false, length = 400)
-    private String manifestPath;
+    /** The edits as JSON (V27); the store maps them. */
+    @Column(name = "edits", nullable = false, updatable = false, columnDefinition = "text")
+    private String edits;
 
     @Column(name = "repository_url", nullable = false, updatable = false, length = 400)
     private String repositoryUrl;
@@ -70,7 +63,8 @@ class UpgradeProposalEntity {
     @Column(name = "match_confidence", nullable = false, updatable = false, length = 16)
     private MatchConfidence matchConfidence;
 
-    @Column(name = "title", nullable = false, updatable = false, length = 256)
+    /** Updatable: opening a response's pull request puts its risk ticket's key in front. */
+    @Column(name = "title", nullable = false, length = 256)
     private String title;
 
     @Column(name = "body", nullable = false, updatable = false, columnDefinition = "text")
@@ -117,19 +111,15 @@ class UpgradeProposalEntity {
         // Required by JPA.
     }
 
-    static UpgradeProposalEntity create(UUID orgId, UpgradeProposal proposal) {
+    static UpgradeProposalEntity create(UUID orgId, UpgradeProposal proposal, String editsJson) {
         UpgradeProposalEntity entity = new UpgradeProposalEntity();
         entity.id = proposal.id();
         entity.orgId = orgId;
         entity.serviceId = proposal.serviceId();
         entity.changeSignalId = proposal.changeSignalId();
         entity.vulnerabilityId = proposal.vulnerabilityId();
-        entity.componentId = proposal.componentId();
-        entity.ecosystem = proposal.ecosystem();
-        entity.packageName = proposal.packageName();
-        entity.fromVersion = proposal.fromVersion();
-        entity.toVersion = proposal.toVersion();
-        entity.manifestPath = proposal.manifestPath();
+        entity.riskTicketId = proposal.riskTicketId();
+        entity.edits = editsJson;
         entity.repositoryUrl = proposal.repositoryUrl();
         entity.baseBranch = proposal.baseBranch();
         entity.headBranch = proposal.headBranch();
@@ -143,6 +133,7 @@ class UpgradeProposalEntity {
 
     /** Copy the parts of a proposal that a decision changes. */
     void applyDecision(UpgradeProposal proposal) {
+        this.title = proposal.title();
         this.status = proposal.status();
         this.decidedBy = proposal.decidedBy();
         this.decidedAt = proposal.decidedAt();
@@ -152,11 +143,14 @@ class UpgradeProposalEntity {
         this.failureMessage = proposal.failureMessage();
     }
 
-    UpgradeProposal toDomain() {
-        return new UpgradeProposal(id, serviceId, changeSignalId, vulnerabilityId, componentId, ecosystem, packageName,
-                fromVersion, toVersion, manifestPath, repositoryUrl, baseBranch, headBranch, matchConfidence, title, body,
-                status, createdBy, createdAt, decidedBy, decidedAt, dismissReason, pullRequestUrl, pullRequestNumber,
-                failureMessage, version);
+    UpgradeProposal toDomain(List<UpgradeProposal.Edit> parsedEdits) {
+        return new UpgradeProposal(id, serviceId, changeSignalId, vulnerabilityId, riskTicketId, parsedEdits,
+                repositoryUrl, baseBranch, headBranch, matchConfidence, title, body, status, createdBy, createdAt,
+                decidedBy, decidedAt, dismissReason, pullRequestUrl, pullRequestNumber, failureMessage, version);
+    }
+
+    String edits() {
+        return edits;
     }
 
     long getVersion() {

@@ -5,6 +5,8 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -45,6 +47,10 @@ import tools.jackson.databind.ObjectMapper;
  *   <li>{@code git} is invoked shallow, single-branch, with file/ext protocols disabled and terminal
  *       credential prompts off (so a wrong/absent token fails fast rather than hanging), and gives up on a
  *       transfer that stalls below 1 KB/s for 30 s instead of waiting out the clone timeout;</li>
+ *   <li>it fetches only what syft could read: a partial clone brings the file tree without contents, and a
+ *       sparse checkout then fetches every file except images, video, audio, fonts and documents
+ *       ({@link #NOT_SCANNED}), in one batch — an application's assets are most of its weight (21 of one
+ *       repository's 23 MB were images, and the full clone outran the timeout on a slow link);</li>
  *   <li>the checkout is size-capped before syft walks it, syft's output is size-capped before it is
  *       parsed, and both steps run under hard timeouts, in a fresh temp directory that is always deleted.</li>
  * </ul>
@@ -54,6 +60,21 @@ import tools.jackson.databind.ObjectMapper;
 class RepoSbomGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(RepoSbomGenerator.class);
+
+    /**
+     * File extensions syft never reads packages from: images, video, audio, fonts and documents. Archives stay
+     * (syft looks inside them for Java packages), and so does everything else, so no ecosystem goes missing.
+     */
+    static final List<String> NOT_SCANNED = List.of(
+            "png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp", "ico", "icns", "heic", "heif", "avif", "svg",
+            "psd", "ai", "sketch", "fig", "xcf",
+            "mp4", "mov", "avi", "mkv", "webm", "m4v", "wmv", "flv", "mp3", "wav", "ogg", "flac", "aac", "m4a",
+            "woff", "woff2", "ttf", "otf", "eot",
+            "pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "key", "numbers", "pages");
+
+    /** The sparse checkout: everything, except {@link #NOT_SCANNED} in any case ({@code !*.[pP][nN][gG]}). */
+    static final List<String> SPARSE_PATTERNS = Stream.concat(Stream.of("/*"),
+            NOT_SCANNED.stream().map(extension -> "!*." + anyCase(extension))).toList();
 
     private final SbomGenerationProperties properties;
     private final CommandRunner commands;
@@ -100,22 +121,6 @@ class RepoSbomGenerator {
         String cloneUrl = credential == null ? repo.canonical() + ".git"
                 : "https://" + credential.username() + "@" + repo.host() + "/" + repo.path() + ".git";
 
-        List<String> command = new ArrayList<>(List.of(
-                properties.gitPath(),
-                "-c", "protocol.file.allow=never",
-                "-c", "protocol.ext.allow=never",
-                "-c", "core.symlinks=false",
-                // A stalled connection fails in 30 s rather than holding the request for the whole timeout.
-                "-c", "http.lowSpeedLimit=1000",
-                "-c", "http.lowSpeedTime=30",
-                "clone", "--depth", "1", "--single-branch", "--no-tags"));
-        if (branch != null) {
-            command.add("--branch");
-            command.add(branch);
-        }
-        command.add(cloneUrl);
-        command.add(checkout.toString());
-
         Map<String, String> env = new HashMap<>(Map.of(
                 "GIT_TERMINAL_PROMPT", "0", // never hang on a prompt; askpass (if any) supplies the credential
                 "GIT_CONFIG_NOSYSTEM", "1",
@@ -125,16 +130,67 @@ class RepoSbomGenerator {
             env.put("GIT_ASKPASS", writeAskpass(work).toString());
             env.put("AEGIS_GIT_TOKEN", token);
         }
+        // One deadline for all three steps: the clone timeout covers getting the files, however it's done.
+        Instant deadline = Instant.now().plus(properties.cloneTimeout());
 
-        CommandResult result = run(command, work, env, properties.cloneTimeout(), "git");
-        if (result.timedOut()) {
+        // The file tree only: contents come with the checkout, and only for what syft can read. A host that
+        // can't filter sends everything, as a plain shallow clone would.
+        List<String> command = git("clone", "--depth", "1", "--single-branch", "--no-tags", "--filter=blob:none",
+                "--no-checkout");
+        if (branch != null) {
+            command.add("--branch");
+            command.add(branch);
+        }
+        command.add(cloneUrl);
+        command.add(checkout.toString());
+        runGit(command, work, env, deadline, repo, branch, access, token);
+
+        List<String> sparse = git("-C", checkout.toString(), "sparse-checkout", "set", "--no-cone");
+        sparse.addAll(SPARSE_PATTERNS);
+        runGit(sparse, work, env, deadline, repo, branch, access, token);
+        // Fetches the contents of every file the patterns keep, in one batch, with the clone's credential.
+        runGit(git("-C", checkout.toString(), "checkout"), work, env, deadline, repo, branch, access, token);
+        if (!Files.isDirectory(checkout)) {
+            throw cloneFailure("", repo, branch, access);
+        }
+    }
+
+    /** A git command with the hardening every step gets. */
+    private List<String> git(String... arguments) {
+        List<String> command = new ArrayList<>(List.of(
+                properties.gitPath(),
+                "-c", "protocol.file.allow=never",
+                "-c", "protocol.ext.allow=never",
+                "-c", "core.symlinks=false",
+                // A stalled connection fails in 30 s rather than holding the request for the whole timeout.
+                "-c", "http.lowSpeedLimit=1000",
+                "-c", "http.lowSpeedTime=30"));
+        command.addAll(List.of(arguments));
+        return command;
+    }
+
+    private void runGit(List<String> command, Path work, Map<String, String> env, Instant deadline,
+            RepositoryUrl repo, String branch, CloneAccess access, String token) {
+        Duration left = Duration.between(Instant.now(), deadline);
+        CommandResult result = left.isNegative() || left.isZero() ? null : run(command, work, env, left, "git");
+        if (result == null || result.timedOut()) {
             throw new ApiExceptions.BadRequest("Cloning " + repo.canonical() + " timed out after "
                     + properties.cloneTimeout().toSeconds() + " seconds; " + repo.host()
                     + " may be slow or unreachable, so try again");
         }
-        if (!result.succeeded() || !Files.isDirectory(checkout)) {
+        if (!result.succeeded()) {
             throw cloneFailure(scrub(result.stderr(), token), repo, branch, access);
         }
+    }
+
+    /** A wildmatch pattern matching {@code text} in any case: {@code mp4} → {@code [mM][pP]4}. */
+    static String anyCase(String text) {
+        StringBuilder pattern = new StringBuilder();
+        for (char c : text.toCharArray()) {
+            pattern.append(Character.isLetter(c)
+                    ? "[" + Character.toLowerCase(c) + Character.toUpperCase(c) + "]" : String.valueOf(c));
+        }
+        return pattern.toString();
     }
 
     /** Turn git's stderr into what the person importing can act on; the raw detail only when nothing fits. */
@@ -240,7 +296,7 @@ class RepoSbomGenerator {
         }
     }
 
-    private CommandResult run(List<String> command, Path work, Map<String, String> env, java.time.Duration timeout,
+    private CommandResult run(List<String> command, Path work, Map<String, String> env, Duration timeout,
             String tool) {
         try {
             return commands.run(command, work, env, timeout);

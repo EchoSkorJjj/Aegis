@@ -21,4 +21,9 @@ public class ActionsTestConfig {
     public FakeAiDrafter fakeAiDrafter() {
         return new FakeAiDrafter();
     }
+
+    @Bean
+    public FakeIssueTracker fakeIssueTracker() {
+        return new FakeIssueTracker();
+    }
 }

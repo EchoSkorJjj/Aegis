@@ -17,6 +17,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.startsWith;
@@ -77,14 +78,15 @@ class SbomImportApiIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.content[*].name", containsInAnyOrder("fixture-web-framework", "fixture-logger")));
         assertThat(store.findSoftwareComponentByCoordinates("npm", "@fixture/http-client", "1.1.0")).isPresent();
 
-        UUID redirects = store.findSoftwareComponentByCoordinates("npm", "fixture-redirects", "0.9.0")
-                .orElseThrow().getId();
-        mvc.perform(get("/api/inventory/components/{id}/impact", redirects).with(role("SERVICE_OWNER")))
+        // The fixture's edges are this service's own: another service importing the same fixture resolves nothing
+        // for it, so the use below is this service's alone.
+        String ours = "$.uses[?(@.service.id == '" + serviceId + "')]";
+        mvc.perform(get("/api/inventory/components/used-by").param("ecosystem", "npm").param("name", "fixture-redirects")
+                        .with(role("SERVICE_OWNER")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.services.length()").value(1))
-                .andExpect(jsonPath("$.services[0].service.id").value(serviceId.toString()))
-                .andExpect(jsonPath("$.services[0].direct").value(false))
-                .andExpect(jsonPath("$.services[0].viaComponent.name").value("fixture-web-framework"));
+                .andExpect(jsonPath(ours + ".component.version", contains("0.9.0")))
+                .andExpect(jsonPath(ours + ".direct", contains(false)))
+                .andExpect(jsonPath(ours + ".through[0].name", contains("fixture-web-framework")));
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.aegis.core.actions.upgrade;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -18,12 +19,18 @@ public interface UpgradeProposalStore {
 
     Optional<UpgradeProposal> find(UUID id);
 
-    /** The live (proposed, opening or opened) proposal for this service, change and component, if any. */
-    Optional<UpgradeProposal> findLive(UUID serviceId, UUID changeSignalId, UUID componentId);
+    /** The service's proposals that are not dismissed: awaiting a decision, opening, open, or failed. */
+    List<UpgradeProposal> findCurrent(UUID serviceId);
 
-    /** Any filter may be null (or empty, for {@code statuses}): no restriction on that field. */
-    Page<UpgradeProposal> findPage(
-            UUID serviceId, UUID changeSignalId, Collection<UpgradeProposalStatus> statuses, Pageable pageable);
+    /** Every proposal of these responses (risk tickets), newest first. */
+    List<UpgradeProposal> findForTickets(Collection<UUID> riskTicketIds);
+
+    /**
+     * Any filter may be null (or empty, for {@code statuses}): no restriction on that field. With
+     * {@code standaloneOnly}, only proposals that belong to no response.
+     */
+    Page<UpgradeProposal> findPage(UUID serviceId, UUID changeSignalId, Collection<UpgradeProposalStatus> statuses,
+            boolean standaloneOnly, Pageable pageable);
 
     /**
      * Persist a state change. {@code ApiExceptions.Conflict} if the proposal changed after it was read,

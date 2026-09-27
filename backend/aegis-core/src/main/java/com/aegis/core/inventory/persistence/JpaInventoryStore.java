@@ -57,6 +57,7 @@ public class JpaInventoryStore implements InventoryStore {
     private final ServiceVendorJpaRepository serviceVendors;
     private final ServiceOwnerJpaRepository serviceOwners;
     private final ComponentDependencyJpaRepository componentDependencies;
+    private final ServiceDependencyJpaRepository serviceDependencies;
 
     public JpaInventoryStore(
             CurrentOrg currentOrg,
@@ -67,7 +68,8 @@ public class JpaInventoryStore implements InventoryStore {
             ServiceComponentJpaRepository serviceComponents,
             ServiceVendorJpaRepository serviceVendors,
             ServiceOwnerJpaRepository serviceOwners,
-            ComponentDependencyJpaRepository componentDependencies) {
+            ComponentDependencyJpaRepository componentDependencies,
+            ServiceDependencyJpaRepository serviceDependencies) {
         this.currentOrg = currentOrg;
         this.services = services;
         this.components = components;
@@ -77,6 +79,7 @@ public class JpaInventoryStore implements InventoryStore {
         this.serviceVendors = serviceVendors;
         this.serviceOwners = serviceOwners;
         this.componentDependencies = componentDependencies;
+        this.serviceDependencies = serviceDependencies;
     }
 
     /**
@@ -188,6 +191,11 @@ public class JpaInventoryStore implements InventoryStore {
     public Optional<SoftwareComponent> findSoftwareComponentByCoordinates(String ecosystem, String name, String version) {
         return components.findByEcosystemIgnoreCaseAndNameIgnoreCaseAndVersionIgnoreCaseAndOrgId(
                 ecosystem, name, version, scope());
+    }
+
+    @Override
+    public List<SoftwareComponent> findSoftwareComponentsByPackage(String ecosystem, String name) {
+        return components.findByEcosystemIgnoreCaseAndNameIgnoreCaseAndOrgId(ecosystem, name, scope());
     }
 
     @Override
@@ -311,14 +319,26 @@ public class JpaInventoryStore implements InventoryStore {
     }
 
     @Override
-    public void linkServiceComponent(UUID serviceId, UUID componentId, String manifestPath) {
+    public void linkRepositoryComponent(UUID serviceId, UUID componentId, List<String> manifestPaths) {
         UUID org = scope();
         ServiceComponentEntity link = serviceComponents.findById(new ServiceComponentEntity.Key(serviceId, componentId))
                 .orElseGet(() -> new ServiceComponentEntity(serviceId, componentId, org));
-        if (manifestPath != null) {
-            link.setManifestPath(manifestPath);
+        if (manifestPaths != null && !manifestPaths.isEmpty()) {
+            link.setManifestPaths(manifestPaths);
         }
+        link.markFromRepository();
         serviceComponents.save(link);
+    }
+
+    @Override
+    public int unlinkRepositoryComponentsExcept(UUID serviceId, Collection<UUID> declared) {
+        Set<UUID> keep = Set.copyOf(declared);
+        List<ServiceComponentEntity> stale = serviceComponents.findByBusinessServiceIdInAndOrgId(List.of(serviceId), scope())
+                .stream()
+                .filter(link -> link.isFromRepository() && !keep.contains(link.getComponentId()))
+                .toList();
+        serviceComponents.deleteAll(stale);
+        return stale.size();
     }
 
     @Override
@@ -419,24 +439,52 @@ public class JpaInventoryStore implements InventoryStore {
     }
 
     @Override
-    public Set<UUID> findComponentIdsDependingOn(Collection<UUID> dependencyIds) {
-        return componentDependencies.findByDependencyIdInAndOrgId(dependencyIds, scope()).stream()
-                .map(ComponentDependencyEntity::getComponentId)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
+    public DependencyChanges recordServiceDependencies(
+            UUID serviceId, Collection<ComponentDependencyLink> declared, boolean fromRepository) {
+        UUID org = scope();
+        Map<ServiceDependencyEntity.Key, ServiceDependencyEntity> recorded = new LinkedHashMap<>();
+        serviceDependencies.findByBusinessServiceIdAndOrgId(serviceId, org).forEach(edge -> recorded.put(edge.key(), edge));
+        Set<ServiceDependencyEntity.Key> kept = new LinkedHashSet<>();
+        int added = 0;
+        for (ComponentDependencyLink link : declared) {
+            ServiceDependencyEntity.Key key =
+                    new ServiceDependencyEntity.Key(serviceId, link.componentId(), link.dependencyId());
+            if (!kept.add(key)) {
+                continue;
+            }
+            ServiceDependencyEntity edge = recorded.get(key);
+            if (edge == null) {
+                // New by construction (it wasn't among the service's edges), so persist rather than merge.
+                entityManager.persist(new ServiceDependencyEntity(
+                        serviceId, link.componentId(), link.dependencyId(), org, fromRepository));
+                added++;
+            } else if (fromRepository && !edge.isFromRepository()) {
+                edge.markFromRepository();
+            }
+        }
+        List<ServiceDependencyEntity> dropped = !fromRepository ? List.of() : recorded.values().stream()
+                .filter(edge -> edge.isFromRepository() && !kept.contains(edge.key()))
+                .toList();
+        serviceDependencies.deleteAll(dropped);
+        return new DependencyChanges(added, dropped.size());
     }
 
     @Override
     public List<ComponentDependencyLink> findComponentDependencyLinks(Collection<UUID> dependencyIds) {
-        return componentDependencies.findByDependencyIdInAndOrgId(dependencyIds, scope()).stream()
-                .map(link -> new ComponentDependencyLink(link.getComponentId(), link.getDependencyId()))
-                .toList();
+        UUID org = scope();
+        List<ComponentDependencyLink> links = new ArrayList<>();
+        componentDependencies.findByDependencyIdInAndOrgId(dependencyIds, org).forEach(edge ->
+                links.add(new ComponentDependencyLink(edge.getComponentId(), edge.getDependencyId())));
+        serviceDependencies.findByDependencyIdInAndOrgId(dependencyIds, org).forEach(edge -> links.add(
+                new ComponentDependencyLink(edge.getComponentId(), edge.getDependencyId(), edge.getBusinessServiceId())));
+        return links;
     }
 
     @Override
     public List<ServiceComponentLink> findServiceComponentLinks(Collection<UUID> componentIds) {
         return serviceComponents.findByComponentIdInAndOrgId(componentIds, scope()).stream()
                 .map(link -> new ServiceComponentLink(
-                        link.getBusinessServiceId(), link.getComponentId(), link.getManifestPath()))
+                        link.getBusinessServiceId(), link.getComponentId(), link.getManifestPaths()))
                 .toList();
     }
 
@@ -444,15 +492,22 @@ public class JpaInventoryStore implements InventoryStore {
     public List<ServiceComponentLink> findServiceComponentLinksForServices(Collection<UUID> serviceIds) {
         return serviceComponents.findByBusinessServiceIdInAndOrgId(serviceIds, scope()).stream()
                 .map(link -> new ServiceComponentLink(
-                        link.getBusinessServiceId(), link.getComponentId(), link.getManifestPath()))
+                        link.getBusinessServiceId(), link.getComponentId(), link.getManifestPaths()))
                 .toList();
     }
 
     @Override
-    public List<ComponentDependencyLink> findDependenciesOf(Collection<UUID> componentIds) {
-        return componentDependencies.findByComponentIdInAndOrgId(componentIds, scope()).stream()
-                .map(link -> new ComponentDependencyLink(link.getComponentId(), link.getDependencyId()))
-                .toList();
+    public List<ComponentDependencyLink> findDependenciesOf(Collection<UUID> componentIds, Collection<UUID> serviceIds) {
+        UUID org = scope();
+        List<ComponentDependencyLink> links = new ArrayList<>();
+        componentDependencies.findByComponentIdInAndOrgId(componentIds, org).forEach(edge ->
+                links.add(new ComponentDependencyLink(edge.getComponentId(), edge.getDependencyId())));
+        if (!serviceIds.isEmpty()) {
+            serviceDependencies.findByComponentIdInAndBusinessServiceIdInAndOrgId(componentIds, serviceIds, org)
+                    .forEach(edge -> links.add(new ComponentDependencyLink(
+                            edge.getComponentId(), edge.getDependencyId(), edge.getBusinessServiceId())));
+        }
+        return links;
     }
 
     @Override

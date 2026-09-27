@@ -8,8 +8,8 @@ See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../..
 
 > **Status:** the Spring Boot wiring, security, module seams, and AI port are in place. The inventory
 > module persists its core entities and direct relationships, exposes authenticated CRUD APIs, and
-> answers impact graph queries (component/vendor → impacted services + owners, including transitive
-> component dependents); the ingestion framework (scheduled polling, dedup, raw-event store) runs four
+> answers "Used by" (a package in any version, or a vendor → the services using it, directly or through
+> which component, in each service's own dependency graph); the ingestion framework (scheduled polling, dedup, raw-event store) runs four
 > connectors — the **NVD CVE feed** (CPE, CVSS and affected versions → advisories), **OSV**
 > (ecosystem-native advisories keyed by purl; off by default), **vendor status
 > pages** (Statuspage/RSS → vendor incidents), and **security news** (RSS/Atom → articles with the CVE
@@ -19,7 +19,9 @@ See the root [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`BUILD_PLAN.md`](../..
 > evidence chains. **Impact scoring is built:** every impacted service is scored
 > `severity x exposure x criticality`, banded into a tier and rolled up per owner and per service,
 > with every weight in the model configurable and every score's contributing factors surfaced.
-> Action workflows remain planned.
+> **Three responses are built**, each drafted by one person and approved by another: safe-upgrade draft
+> pull requests, risk tickets filed in the organization's Jira, and DORA regulator memos. Persisted
+> findings and the audit trail remain planned.
 
 ## Modules (a modular monolith, split by seams later)
 
@@ -30,16 +32,16 @@ and the modules are cycle-free.
 
 | Package | Responsibility |
 |---|---|
-| `platform`   | Cross-cutting foundation: the `ApiError` contract, security/OpenAPI config, tenancy (`CurrentOrg`), ping |
+| `platform`   | Cross-cutting foundation: the `ApiError` contract, security/OpenAPI config, tenancy (`CurrentOrg`), sealing stored credentials (`crypto.SecretBox`), ping |
 | `ingestion`  | The pipeline framework (scheduled poll → dedup → raw-event store → drain); source connectors under `ingestion.connectors` (NVD, OSV, vendor status, security news) |
 | `advisories` | Normalised advisories (NVD/OSV) + read API |
 | `incidents`  | Normalised vendor incidents (status pages) + read API |
 | `news`       | Security-news articles with extracted CVE references + read API |
 | `signals`    | The unified read-only `change_signals` view over advisories, incidents, and news |
-| `inventory`  | Services and their repository links, components, vendors, SBOM dependencies, ownership — the map |
+| `inventory`  | Services and their repository links, components, vendors, SBOM dependencies, ownership — the map. Each service has its own dependency graph (`DependencyGraph`, V29): the one walk behind matching, the upgrade recommendations and "Used by" |
 | `matching`   | Advisory package + version range → components → impacted services/owners + evidence chains |
 | `scoring`    | Deterministic impact score per service and owner, with a "why" breakdown |
-| `actions`    | Draft-PR port + provider registry, the disabled-by-default GitHub App adapter, and safe-upgrade proposals a person approves (E8 story 4) |
+| `actions`    | Approved responses: the draft-PR port + GitHub App adapter and safe-upgrade proposals (`pr`, `upgrade`, E8 story 4), the issue-tracker port + Jira adapter and risk tickets (`tracker`, `ticket`, story 5), and DORA regulator memos (`memo`, story 6) |
 | `ai`         | **Port** to the Python ai-service: `AiAssessor` / `AiDrafter` + DTOs + `HttpAiClient` |
 
 ## Service repositories and draft PR providers (E8 Story 2)
@@ -112,62 +114,132 @@ of the organization's services — or one service — highest impact first, foun
 the advisory store which advisories name any of those packages, and applies matching's own identity and
 version rules, so a dependency is listed exactly when that advisory's impact page would list the service.
 Each item carries the fixed version (`UpgradeTargets`, clearing every advisory with a fix), the impact
-score (`ImpactScorer`: severity x exposure x criticality), the manifest, any proposal already drafted, and
-a readiness: `READY`, `NO_REPOSITORY` (link it), `TRANSITIVE` (another package pulls it in — upgrade that
-one or pin this), `UNSUPPORTED` (an ecosystem Aegis does not edit) or `NO_FIX`, with the reason, plus
-`canDraft` for the caller. Recomputed per request, in a fixed number of batched lookups however many
-services there are: `VulnerableDependencies.find` loads every advisory naming the packages, and each target
-is worked out in memory from them (`UpgradeTargets.resolve(vulnerability, component, known)` — the same
-answer drafting gets, which a test pins). Nothing is drafted until a person clicks. The UI shows
-them on **Review & approve** ("Recommended upgrades", direct dependencies across the estate) and on each
+score (`ImpactScorer`: severity x exposure x criticality), every manifest declaring it (`manifestPaths`),
+the vulnerability a response would answer (`changeSignalId`), the response already drafted for it
+(`response`, through the ticket module's `ResponseDirectory`) and the pull request upgrading it
+(`proposal`), and a readiness: `READY`, `NO_REPOSITORY` (link it), `TRANSITIVE` (another package pulls it
+in — upgrade that one or pin this), `UNSUPPORTED` (an ecosystem Aegis does not edit) or `NO_FIX`, with the
+reason, plus `canDraft` for the caller. Recomputed per request, in a fixed number of batched lookups however
+many services there are: `VulnerableDependencies.find` loads every advisory naming the packages, and each
+target is worked out in memory from them (`UpgradeTargets.resolve(vulnerability, component, known)` — the
+same answer drafting gets, which a test pins). Nothing is drafted until a person clicks **Draft response**:
+on **Review & approve** ("Recommended upgrades", direct dependencies across the estate) and on each
 service's page ("Vulnerable dependencies", including transitive ones).
 
-## Safe-upgrade draft pull requests (E8 Story 4, with an early slice of E9)
+## Responses: a risk ticket and its upgrade pull request (E8 Stories 4–5, with an early slice of E9)
 
-For a vulnerability that reaches a service through a component it uses **directly**, Aegis drafts the
-fix as a pull request a person approves. Nothing reaches a repository without that approval, the PR is
-always a **draft** on an `aegis/` branch, and Aegis never merges.
+A **response** answers one vulnerability (or vendor outage) in one service: its **risk ticket** — the record
+of the risk, filed in the organization's Jira — and, for a vulnerability, the **one upgrade pull request**
+that fixes it, drafted and approved together. Nothing leaves Aegis without an approval; the PR is always a
+**draft** on an `aegis/` branch, and Aegis never merges.
 
 | Method | Path | Who | What |
 |---|---|---|---|
-| POST | `/api/actions/upgrade-proposals` | an analyst, or the service's assigned owners | Draft: `{changeSignalId, serviceId, componentId, manifestPath?}` → 201 `PROPOSED` |
-| GET | `/api/actions/upgrade-proposals?serviceId=&changeSignalId=&status=A,B` | any domain role | Newest first |
-| GET | `/api/actions/upgrade-proposals/{id}` | any domain role | Includes the exact PR title and body |
-| POST | `/api/actions/upgrade-proposals/{id}/approve` | an analyst, or the service's assigned owners — **never the drafter** | Opens the draft PR → `OPENED` (or `FAILED`, with the reason) |
-| POST | `/api/actions/upgrade-proposals/{id}/dismiss` | an analyst, or the service's assigned owners (the drafter included) | `{reason}` → `DISMISSED` |
+| POST | `/api/actions/risk-tickets` | an analyst, or the service's assigned owners | Draft a response: `{changeSignalId, serviceId}` → 201, the ticket `PROPOSED` with its `pullRequests` |
+| GET | `/api/actions/risk-tickets?serviceId=&changeSignalId=&status=A,B&pending=` | any domain role | Newest first; `pending=true` keeps those that still need a person (the ticket or its PR awaits a decision, or failed) |
+| GET | `/api/actions/risk-tickets/{id}` | any domain role | With its pull requests and `serviceNow`: the ticket as ServiceNow incident fields |
+| POST | `/api/actions/risk-tickets/{id}/approve` | an analyst, or the service's assigned owners — **never the drafter of a response with a PR** | Files the ticket in Jira → `FILED`, then opens the PR under the ticket's key → `OPENED` (or `FAILED`, with the reason, on the part that failed) |
+| POST | `/api/actions/risk-tickets/{id}/dismiss` | an analyst, or the service's assigned owners (the drafter included) | `{reason}` → the ticket and its PR `DISMISSED` |
+| POST | `/api/actions/risk-tickets/{id}/pull-requests` | an analyst, or the service's assigned owners | Draft the PR of a response that has none (left out, or its repository linked afterwards) |
+| POST | `/api/actions/risk-tickets/{id}/pull-requests/{proposalId}/approve` | an analyst, or the service's assigned owners — **never the PR's drafter** | Open a filed response's PR on its own: drafted afterwards, or failed |
+| POST | `/api/actions/upgrade-proposals/{id}/dismiss` | an analyst, or the service's assigned owners (the drafter included) | Leave the PR out of its response: `{reason}` → `DISMISSED` |
+| GET | `/api/actions/upgrade-proposals?serviceId=&changeSignalId=&status=A,B&standalone=` | any domain role | Newest first; `standalone=true`: only those drafted on their own before responses |
+| GET | `/api/actions/upgrade-proposals/{id}` | any domain role | The exact PR title and body, and every edit |
+| POST | `/api/actions/upgrade-proposals/{id}/approve` | an analyst, or the service's assigned owners — never the drafter | Only a PR drafted on its own before responses (409 for a response's) |
 
-- **One duty per role, and a second person approves** (ADR §6e). An analyst drafts and decides for any
-  service, a service owner for the services they own. A compliance admin reads all of it — the queue,
-  each proposal with who drafted and who decided, the history — to audit the decisions, and makes none
-  of them. Whoever drafted a proposal never approves it, retrying a failed opening included (403); they
-  may still dismiss it, which opens nothing and leaves the upgrade recommended. The recommendations'
+- **Four eyes where a repository changes** (ADR §6e, RTS 2024/1774 Art. 17(1)(b)). Approving a response
+  with a pull request is never its drafter's, retries included (403). A response without one only records
+  a risk (Art. 10(2)(h)), so its drafter may file it — and leaving a PR out (dismissing it) turns a
+  response into one. A compliance admin reads all of it — the queues, each response with who drafted and
+  who decided, the history — to audit the decisions, and makes none of them. The recommendations'
   `canDraft` follows the same rule.
-
+- **One pull request per vulnerability per repository** (`UpgradeProposalService.plan`): every direct
+  dependency the vulnerability matches for the service, in **every manifest** the SBOM import found it
+  declared in (V26: `business_service_components.manifest_paths`; the ecosystem's manifest at the root when
+  none was recorded). A dependency another current PR already upgrades is left to it; what can't be
+  automated — transitive, an unsupported ecosystem, no fix, no linked repository — is recorded on the ticket
+  as `Not automated: …` evidence instead. Edits are JSON on the proposal (V27); several in one file are
+  applied in turn.
 - **The safe version is deterministic** (`matching.UpgradeTargets`): starting from the installed version,
   move to the fixed version of whichever affected range still contains it, across **every** advisory
   Aegis holds for the package, not only the one being remediated (Log4Shell's own fix, 2.15.0, was still
-  vulnerable). A remediated range with no published fix, or a version that cannot be compared, is a
-  refusal; another advisory without a fix is reported in the PR body rather than blocking.
-- **The edit is deterministic and minimal**: Maven `pom.xml` (the dependency's `<version>` or the
-  property it reads), npm `package.json` (keeping `^`/`~`/`>=`; the PR asks the reviewer to refresh the
-  lockfile) and PyPI `requirements.txt` (`==` pins). A transitive dependency, a parent-managed version or
-  an unfamiliar spec is refused with the reason, never approximated.
+  vulnerable). A remediated range with no published fix, or a version that cannot be compared, is not
+  automated; another advisory without a fix is reported in the PR body rather than blocking.
+- **The edits are deterministic and minimal**: Maven `pom.xml` (the dependency's `<version>` or the
+  property it reads), npm `package.json` (keeping `^`/`~`/`>=`) and PyPI `requirements.txt` (`==` pins). A
+  parent-managed version or an unfamiliar spec is refused with the reason, never approximated. Aegis runs no
+  package manager, so an npm PR leaves the lockfile beside each `package.json` to the reviewer: it opens with
+  **Finish it before merging**, and its first checklist item names every folder whose lockfile to refresh and
+  commit to the branch. Until that is done the lockfile still pins the old version — `npm ci` refuses the
+  mismatch, and the next SBOM import still finds the vulnerable version.
+- **The ticket is filed first, then the PR opens under its key** (`SEC-12: Upgrade axios to 1.8.2 in 2
+  manifests (CVE-…)`, and in the body), so the tracker links them — with the GitHub for Jira app, the issue
+  shows its PR, and a Jira Automation rule can close the issue when the PR merges ([JIRA.md](JIRA.md)); Aegis
+  never edits an issue. The Jira description lists what the PR will change. If the PR then fails to open,
+  the ticket stays filed and the PR is retried on its own.
 - **The repository is the service's own link**, never a caller's input; approval refuses if the link
-  changed after drafting. At approval the manifest is read again, the edit re-applied, and the write
+  changed after drafting. At approval each manifest is read again, the edits re-applied, and each write
   pinned to the revision just read, so a manifest edited in between is refused rather than overwritten.
-- **The PR body** states the facts (versions, advisories checked, score, match confidence, evidence) and
-  a reviewer checklist. The ai-service's rationale, when available, is quoted and labelled unverified; an
-  AI outage never blocks a fix. Feed- and model-written text is made inert (no @-mentions,
-  cross-references, remote images or HTML).
-- **Decisions are safe under concurrency**: approval claims the proposal first (optimistic lock), so two
-  people approving at once get one PR and a conflict. A failure is recorded on the proposal, which can be
-  approved again or dismissed. One live proposal per service, change and component.
-- Org-scoped (`upgrade_proposals`, V18, with the RLS backstop); a proposal goes with its service. Every
-  response carries the service's current `serviceName` alongside the stored proposal.
-- **In the UI**: the change-impact page (`/advisories/{id}`) offers **Draft upgrade PR** on a direct
-  evidence chain (or links the proposal already drafted); `/responses/upgrades/{id}` shows the exact PR
-  and takes the decision; `/responses/review` lists what still needs a person (`PROPOSED`, `FAILED`,
-  `OPENING`) and `/responses/history` what was decided (`OPENED`, `DISMISSED`).
+- **The PR body** states the facts (every edit, advisories checked, score, match confidence, evidence) and a
+  reviewer checklist. The ai-service's rationale, when available, is quoted and labelled unverified; an AI
+  outage never blocks a fix. Feed- and model-written text is made inert (no @-mentions, cross-references,
+  remote images or HTML).
+- **The ticket: Aegis's facts, the AI's words.** The title, priority and due date (from the impact tier:
+  CRITICAL → Highest, due in 7 days; HIGH → High, 30; MEDIUM → Medium, 90; LOW → Low, 180; NEGLIGIBLE →
+  Lowest, no due date), labels and evidence are deterministic. The summary, risk, impact and recommended
+  actions are the ai-service's draft (`risk_ticket`), cited, or a plain fallback from the change's own
+  description when the AI is unavailable — which never blocks a response. The Jira description is Atlassian
+  Document Format built from text nodes only, so nothing a feed or the model wrote is read as markup.
+- **Decisions are safe under concurrency**: each part is claimed first (optimistic lock) — `FILING`, then
+  `OPENING` — so two people approving at once get one issue, one PR and a conflict; a claim interrupted for
+  ten minutes can be retried, and a failure is recorded on the part that failed. One current response per
+  service and change (V23, and `FAILED` counts), one current PR per response (V27).
+- **Jira is connected per organization** (`jira_connections`, V24): its organization admin grants Aegis one
+  Jira site through Atlassian's consent screen under Organization → Integrations, then chooses the project
+  and issue type. Tokens are sealed with `AEGIS_SECRETS_KEY`, bound to the organization. Setup, the exact
+  scopes and the Jira permissions: [JIRA.md](JIRA.md). `/api/integrations/jira`: `GET` (any domain role or
+  the organization admin), `POST /authorizations`, `POST /connections`, `GET /options`, `PUT /settings`,
+  `DELETE /connection` (the organization admin).
+- **ServiceNow** has no connection: each ticket's `serviceNow` fields (`short_description`, `description`,
+  `impact`, `urgency`, `cmdb_ci`, `due_date`) are for pasting, or for POSTing to `/api/now/table/incident`.
+- Org-scoped (`risk_tickets` V23, `upgrade_proposals` V18/V27, with the RLS backstop); a response goes with
+  its service. A proposal drafted on its own before responses keeps no ticket and is decided on its own.
+- **In the UI**: **Draft response** on each row of the recommended upgrades and a service's vulnerable
+  dependencies, and on each service of the change-impact page; `/responses/tickets/{id}` is the response —
+  the decision, its pull request (edits, **Leave out**, **Try again**, **Draft upgrade pull request**) and
+  the ticket exactly as it will be filed; `/responses/upgrades/{id}` shows a PR's full text. The review queue
+  lists responses that still need a person and the history those decided.
+
+## Regulator memos (E8 Story 6)
+
+A regulator memo is a DORA (Regulation (EU) 2022/2554) notification about one change, drafted only when the
+change **materially** affects a service. A vendor outage is drafted as the initial notification of a major
+ICT-related incident (Article 19(1)); a vulnerability as a voluntary notification of a significant cyber
+threat (Article 19(2)). Approving makes it final. **Aegis never sends it**: a person completes it and
+submits it through the competent authority's own channel.
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| POST | `/api/actions/regulator-memos` | an analyst | Draft: `{changeSignalId}` → 201 `PROPOSED`; 409 when no service is materially affected |
+| GET | `/api/actions/regulator-memos?changeSignalId=&status=A,B` | any domain role | Newest first |
+| GET | `/api/actions/regulator-memos/{id}` | any domain role | Includes `body`, the whole memo in Markdown |
+| POST | `/api/actions/regulator-memos/{id}/approve` | an analyst — **never the drafter** | → `APPROVED` (final, ready to download) |
+| POST | `/api/actions/regulator-memos/{id}/dismiss` | an analyst (the drafter included) | `{reason}` → `DISMISSED` |
+
+- **Templated** (`classpath:memo/dora-major-incident.md`, `dora-cyber-threat.md`), rendered in one pass so
+  nothing a feed or the model wrote is read as a placeholder. Aegis fills in what it knows: a reference,
+  when the organization became aware (an outage's start, or the vulnerability's publication), the initial
+  notification's deadline (24 hours after detection), the affected services with their scores, the third
+  party, the affected components and the evidence. The AI drafts the description, impact, measures and
+  next steps (`memo`), or a plain fallback when it is unavailable. What Aegis can't know — the entity's
+  name and LEI, the classification, clients, duration, member states, data losses — stays
+  "[To be confirmed]" for a person; the model is told never to classify an incident as major itself.
+- **Only analysts draft and decide** (`MemoRoles`): a memo covers every service a change affects, so it
+  isn't one owner's to send. Compliance admins audit memos and service owners read them. One live memo
+  per change. Org-scoped (`regulator_memos`, V25, with the RLS backstop).
+- **In the UI**: the change-impact page shows a **Regulator notification (DORA)** panel when a service is
+  materially affected; `/responses/memos/{id}` shows the timeline, the services and the whole memo, takes
+  the decision, and downloads the final memo as Markdown.
 
 ## The AI boundary
 
@@ -213,6 +285,23 @@ domain. See `ARCHITECTURE.md` for the topology.
 | `AEGIS_INGESTION_NEWS_ENABLED` | `false` | Poll security news feeds (Docker Compose sets `true`) |
 | `AEGIS_NEWS_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → news-item drain |
 | `AEGIS_INGESTION_HEALTH_STALE_AFTER` | `PT45M` | How long since a feed's last success before `aegis_ingestion_health` reports unhealthy |
+| `AEGIS_INGESTION_OSV_ENABLED` | `false` | Sync OSV's per-ecosystem exports ([OSV connector](#osv-connector-ecosystem-advisories)) |
+| `AEGIS_OSV_ECOSYSTEMS` | `npm,PyPI,crates.io,RubyGems,Go,Maven` | Exact OSV bucket names to sync, comma-separated |
+| `AEGIS_OSV_INCLUDE_MALICIOUS` | `false` | Also import OSV's malicious-package reports (`MAL-*`) |
+| `AEGIS_OSV_POLL_INTERVAL` / `AEGIS_OSV_INITIAL_DELAY` | `P1D` / `PT30S` | How often the bulk sync runs, and how long after startup it first does |
+| `AEGIS_OSV_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → advisory drain for OSV |
+| `AEGIS_OSV_BASE_URL` | OSV's export bucket | Override the export host (a mirror, tests) |
+| `AEGIS_SCHEDULING_POOL_SIZE` | `6` | Scheduler threads, so OSV's long sync never starves the other feeds' drains |
+| `AEGIS_SBOM_GENERATION_ENABLED` | `true` | Import SBOMs from a service's linked repository (git + syft in the image) |
+| `AEGIS_SBOM_ALLOWED_HOSTS` | `github.com,gitlab.com,bitbucket.org` | Hosts a repository may be linked on and cloned from — the SSRF boundary |
+| `AEGIS_SBOM_CLONE_TIMEOUT` / `AEGIS_SBOM_SCAN_TIMEOUT` | `PT90S` / `PT180S` | Limit on getting the files (the partial clone, its sparse checkout and the checkout together) and on syft's scan |
+| `AEGIS_SBOM_MAX_REPO_BYTES` / `AEGIS_SBOM_MAX_SBOM_BYTES` | 512 MiB / 64 MiB | Reject a checkout, or the SBOM syft writes, larger than this |
+| `AEGIS_SBOM_GIT_PATH` / `AEGIS_SBOM_SYFT_PATH` | `git` / `syft` | The binaries SBOM generation runs |
+| `AEGIS_GITHUB_*` | App disabled | The GitHub App (upgrade pull requests, private clones, Connect GitHub) — see [GITHUB_APP.md](GITHUB_APP.md) |
+| `AEGIS_SCORING_*` | the calibrated model | Every scoring weight, the materiality threshold and the roll-up bounds — see [Configurable weights](#configurable-weights) |
+| `TRACING_SAMPLE_RATE` | `1.0` | Share of requests traced to Zipkin |
+| `AEGIS_JIRA_ENABLED` | `false` | File approved risk tickets in each organization's connected Jira; the other Jira variables are in [JIRA.md](JIRA.md) |
+| `AEGIS_SECRETS_KEY` | *(empty)* | Base64 of 32 random bytes (`openssl rand -base64 32`) that seals stored integration credentials; required with Jira |
 
 The vendor and news feed lists are YAML (`aegis.ingestion.vendor-status.vendors`,
 `aegis.ingestion.news.feeds`), not env vars — each entry needs several fields.
@@ -265,29 +354,40 @@ assignment. Someone who no longer owns any service stops being an owner, so the 
 `GET /api/inventory/owners` is exactly the people currently accountable for something.
 
 Deleting an inventory entity cascades only its relationship rows; the related services, components,
-and vendors remain intact. The component dependency API stores direct edges only; transitive
-reachability is resolved at query time by the impact endpoints below.
+and vendors remain intact.
 
-### Impact graph queries
+**Each service has its own dependency graph (V29).** A library version's dependencies are resolved per
+lockfile — two services on axios 1.18.0 can pin different follow-redirects — so the dependency edges an SBOM
+declares are its service's (`business_service_component_dependencies`). The component dependency API
+(`POST`/`DELETE /api/inventory/components/{componentId}/dependencies/{dependencyId}`) adds edges by hand,
+which hold in every service; `GET …/dependencies` lists both kinds. A service's graph is the components it
+links, its own edges and the hand-added ones, never another service's; `inventory.DependencyGraph` is the one
+walk over it, behind matching, the upgrade recommendations and "Used by". Transitive reachability is resolved
+at query time.
 
-- `GET /api/inventory/components/{componentId}/impact` — every business service that uses the
-  component, directly or transitively (i.e. the service uses some other component that depends on
-  it, at any depth), each with its owners. Each entry reports `direct` (true only when the service
-  uses the queried component itself) and `viaComponent` (the component the service actually
-  depends on directly).
-- `GET /api/inventory/vendors/{vendorId}/impact` — every business service that uses the vendor
-  directly, with its owners. Vendors have no dependency graph of their own, so this is a direct
-  join, not a traversal.
+### Used by
 
-Both require the same read role as the rest of the inventory API (`SERVICE_OWNER`, `ANALYST`,
-`COMPLIANCE_ADMIN`) and 404 when the component/vendor does not exist.
+- `GET /api/inventory/components/used-by?ecosystem=npm&name=axios` — every business service using the
+  package, **in any version** the inventory holds, one row per service and version: `direct` when the
+  service links that version itself, else `through` — the components from the one the service links down
+  to the one depending on this version, the shortest way in that service's own graph — with owners. Sorted
+  by service, then version (1.5.0 before 1.18.0). A package nothing uses, or the inventory doesn't hold,
+  has no uses (not a 404); a blank ecosystem or name is a 400.
+- `GET /api/inventory/vendors/{vendorId}/used-by` — every business service using the vendor, with its
+  owners. Vendors are linked directly, so this is a join, not a walk; 404 when the vendor doesn't exist.
+
+Both need the inventory's read role (`SERVICE_OWNER`, `ANALYST`, `COMPLIANCE_ADMIN`). In the UI, each row of
+the Components and Vendors pages opens its **Used by**.
 
 ### SBOM import (CycloneDX)
 
 **From the linked repository** — what the UI does. `POST /api/inventory/services/{serviceId}/sbom/from-repository`
 (`ANALYST`, `COMPLIANCE_ADMIN`, or the service's assigned owner; 409 until a repository is linked)
-shallow-clones the service's own linked repository at its branch, runs syft over it, and imports the
-result. The body is optional, `{"token": "…", "username": "…"}`. Access, first that applies: a pasted
+clones the service's own linked repository at its branch, runs syft over it, and imports the
+result. The clone fetches only what syft can read: a shallow partial clone brings the file tree without
+contents, then a sparse checkout fetches every file except images, video, audio, fonts and documents, in one
+batch — an application's assets are most of its weight (one repository was 21 MB of images around 660 KB of
+manifests, and a full clone outran the 90-second clone timeout on a slow link). The body is optional, `{"token": "…", "username": "…"}`. Access, first that applies: a pasted
 read-only **token** (used for this clone only, never stored; the username defaults to the host's
 convention — GitHub ignores it, GitLab `oauth2`, Bitbucket `x-token-auth` for access tokens and
 `x-bitbucket-api-token-auth` for `ATATT…` API tokens); a **host integration** — the GitHub App mints a
@@ -302,11 +402,21 @@ git gives up on a transfer slower than 1 KB/s for 30 seconds rather than waiting
 they declare below them — taken literally, every library would look transitive and nothing could ever be
 upgraded, and two repositories' private `client@0.0.0` would share coordinates. A repository import
 (`inventory.sbom.RepositoryLayout`) removes those project packages, makes what they declare the service's
-direct dependencies, and records on each link the manifest that declares it (`business_service_components.
-manifest_path`, **V20**: `client/package.json`, `backend/aegis-core/pom.xml`; the `package.json` beside a
-pnpm/yarn lockfile). An upgrade pull request edits that manifest by default. A re-import unlinks project
-packages an earlier import linked, and a version syft could not resolve (`UNKNOWN`, a parent-managed Maven
-version) is skipped rather than imported.
+direct dependencies, and records on each link every manifest that declares it (`business_service_components.
+manifest_paths`, **V26**, replacing V20's single path: `client/package.json`, `backend/aegis-core/pom.xml`; the
+`package.json` beside a pnpm/yarn lockfile). The same version declared in two projects is one component that syft
+reports with a location for each, so its link lists both, and a response's upgrade pull request edits every
+one of them. Services imported before V26 keep the one manifest V20 recorded; re-import them. A version syft could
+not resolve (`UNKNOWN`, a parent-managed Maven version) is skipped rather than imported.
+
+**A re-import follows the repository (V28).** An import from the repository reads everything it declares, so it
+unlinks the direct dependencies an earlier import from it linked that it no longer declares — an upgraded
+library's old version, which otherwise stayed linked beside the new one and was reported as vulnerable for good —
+and any project packages an earlier import linked (`serviceComponentsUnlinked` in the response). A component
+linked by hand or by an uploaded SBOM stays linked (`business_service_components.from_repository`, set on every
+link an import from the repository makes or finds; backfilled for links with a recorded manifest), and
+components stay in the inventory. The repository's word is its lockfile: syft reads the versions a lockfile
+pins, so an upgrade counts once the lockfile is refreshed, not when `package.json` alone changes.
 
 Every import is recorded on the service (**V19**): `sbomImportedAt` and `sbomImportSource` — `UPLOAD`,
 `PUBLIC`, `INTEGRATION` or `TOKEN`, never the credential — in every service response, and cleared when the
@@ -323,19 +433,21 @@ SBOM (`application/json` or `application/vnd.cyclonedx+json`). Either way, the S
   is the purl type and the name follows advisory-feed spelling (`group:artifact` for Maven,
   `@scope/name` for npm); components without a purl use the `generic` ecosystem. Components with no
   version are skipped; nested components are included.
-- `dependencies` become component dependency edges. The service is linked only to its top-level
-  components (the SBOM root's direct dependencies, plus any component nothing else depends on), so
+- `dependencies` become the service's own dependency edges (V29, above). The service is linked only to its
+  top-level components (the SBOM root's direct dependencies, plus any component nothing else depends on), so
   deeper libraries are reported as transitive impact.
-- The import is additive, idempotent, and atomic — a malformed purl, oversized field, or more than
+- An upload only adds; an import from the repository also unlinks what the repository no longer declares
+  (above) and removes the dependency edges it no longer declares — a transitive version the lockfile moved
+  away from (`dependenciesRemoved`). Either way the import is idempotent and atomic — a malformed purl, oversized field, or more than
   5,000 components rejects the whole document with a 400. The response counts what changed.
 
 ### Demo estate
 
 A fictional estate — five services, their vendors, and four CycloneDX SBOMs (Maven, npm,
 PyPI) — lives in `src/main/resources/demo/`. Set `AEGIS_DEMO_SEED_ENABLED=true` (Docker Compose does)
-to load it at startup through the SBOM import; seeding is idempotent. Try the impact of
-`org.apache.logging.log4j:log4j-core 2.14.1`: Order Service uses it directly, Payments API reaches it
-through three hops. The seed assigns **no owners** — an owner is a verified organization member, and
+to load it at startup through the SBOM import; seeding is idempotent. Open **Used by** on
+`org.apache.logging.log4j:log4j-core 2.14.1` under Components: Order Service uses it directly, Payments API
+reaches it through three hops. The seed assigns **no owners** — an owner is a verified organization member, and
 the seed runs with no user to verify one against. To demo ownership, invite members with the Service
 Owner role and assign them from each service's page.
 
@@ -406,6 +518,25 @@ normalises each into an **advisory**: the primary CVSS metric plus the affected
 Turn the feed off on its own with `AEGIS_INGESTION_NVD_ENABLED=false` — the rest of the scheduler
 keeps running. It is **off by default** so the test suite and a plain local run never reach out to
 nvd.nist.gov.
+
+### OSV connector (ecosystem advisories)
+
+[OSV](https://osv.dev) aggregates the ecosystem databases — GHSA, PyPA, RustSec, RubySec, Go — into one
+schema, so one connector brings advisories that NVD's CPEs miss (an npm package is often advised only in
+GHSA). Each advisory's affected products are **purl** coordinates (ecosystem + package, V11), and its
+`canonical_id` is the CVE it aliases when it has one, so NVD's and OSV's records of one CVE are a single
+change signal (ADR §6a).
+
+- **Bulk sync, self-scheduled.** OSV publishes a per-ecosystem export (hundreds of MB), not a windowed feed,
+  so the connector runs on its own schedule (`AEGIS_OSV_POLL_INTERVAL`, daily) instead of the 15-minute poll
+  loop, and streams each record straight into the raw-event store (constant memory). The raw-event id is
+  `{osvId}@{sha256 prefix of the record}`, so a revised record re-normalises and an unchanged one
+  de-duplicates.
+- **Off by default** like every feed: `AEGIS_INGESTION_OSV_ENABLED=true`, and `AEGIS_OSV_ECOSYSTEMS` with
+  OSV's exact bucket names. Malicious-package reports (`MAL-*`, most of npm's records) are skipped unless
+  `AEGIS_OSV_INCLUDE_MALICIOUS=true`: they are malware reports, not vulnerabilities.
+- The scheduler pool (`AEGIS_SCHEDULING_POOL_SIZE`) is widened so a long sync runs beside the other feeds'
+  drains rather than starving them.
 
 ### Advisories API
 
@@ -573,10 +704,12 @@ or `COMPLIANCE_ADMIN`, like the inventory and feed APIs.
   inclusive/exclusive SemVer bounds. Exact package matches are preferred; a shortened CPE product
   alias is accepted only when its vendor also appears in the package namespace. Unparseable range
   versions fail closed rather than creating a false positive.
-- The reverse dependency graph is traversed breadth-first from each affected component. The response
-  groups results by service and gives each reason the shortest component path from the vulnerable
-  component to the component that service uses directly, followed by that service's owners. Cycles
-  terminate and do not duplicate a service.
+- The reverse dependency graph is traversed breadth-first from each affected component — **each service's
+  own graph** (`inventory.DependencyGraph`, V29): the edges its SBOMs declared plus those added by hand, never
+  another service's resolution of the same library. The response groups results by service and gives each
+  reason the shortest path in that service's graph from the vulnerable component to a component the service
+  uses directly (one reason per such component), followed by that service's owners. Cycles terminate and do
+  not duplicate a service.
 - Vendor outages match the normalized incident vendor name/key to registered vendors, then traverse
   direct vendor → service → owner relationships.
 - Every result includes a deterministic `explanation` plus structured `affectedProduct`,

@@ -165,7 +165,7 @@ class SbomRepositoryImportIntegrationTest extends AbstractInventoryIntegrationTe
 
         Map<String, String> direct = store.findServiceComponentLinksForServices(List.of(service.getId())).stream()
                 .collect(Collectors.toMap(link -> inventory.getSoftwareComponent(link.componentId()).getName(),
-                        link -> String.valueOf(link.manifestPath())));
+                        link -> String.join(",", link.manifestPaths())));
         assertThat(direct).containsOnly(
                 Map.entry(name + "-http", "web/package.json"),
                 Map.entry("com.acme:" + name + "-core", "svc/pom.xml"));
@@ -173,6 +173,55 @@ class SbomRepositoryImportIntegrationTest extends AbstractInventoryIntegrationTe
         assertThat(inventory.listSoftwareComponents(new InventoryFilters.ComponentFilter(name, null, null, null, null),
                 Pageable.unpaged()).getContent()).extracting(SoftwareComponent::getName)
                 .contains(name + "-util").doesNotContain("com.acme:" + name + "-managed", "com.acme:" + name + "-svc");
+    }
+
+    @Test
+    void theSameVersionDeclaredInTwoManifestsIsLinkedWithBoth() throws Exception {
+        String name = "twolocks-" + UUID.randomUUID();
+        BusinessService service = linked("https://github.com/acme/" + name, null);
+
+        mvc.perform(post(IMPORT, service.getId()).with(role("ANALYST"))).andExpect(status().isOk());
+
+        assertThat(store.findServiceComponentLinksForServices(List.of(service.getId()))).singleElement()
+                .satisfies(link -> {
+                    assertThat(inventory.getSoftwareComponent(link.componentId()).getName()).isEqualTo(name + "-http");
+                    assertThat(link.manifestPaths()).containsExactly("client/package.json", "server/package.json");
+                });
+    }
+
+    @Test
+    void aReimportUnlinksWhatTheRepositoryNoLongerDeclaresAndKeepsWhatPeopleLinked() throws Exception {
+        String name = "upgraded-" + UUID.randomUUID();
+        BusinessService service = linked("https://github.com/acme/" + name, null);
+        git.willScan(name, FakeGitAndSyft.npmProjects(name, Map.of("client", "1.5.0", "server", "1.5.1")));
+        mvc.perform(post(IMPORT, service.getId()).with(role("ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.serviceComponentsLinked").value(2))
+                .andExpect(jsonPath("$.serviceComponentsUnlinked").value(0));
+        // Linked by hand, and by an uploaded SBOM, which only adds: neither is the repository's to unlink.
+        SoftwareComponent byHand = inventory.createSoftwareComponent("npm", name + "-vendored", "1.0.0");
+        inventory.addServiceComponent(service.getId(), byHand.getId());
+        String upload = "{\"bomFormat\":\"CycloneDX\",\"specVersion\":\"1.5\",\"components\":[{\"type\":\"library\","
+                + "\"name\":\"" + name + "-ci\",\"version\":\"1.0.0\",\"purl\":\"pkg:npm/" + name + "-ci@1.0.0\"}]}";
+        mvc.perform(post("/api/inventory/services/{id}/sbom", service.getId()).with(role("ANALYST"))
+                        .contentType(MediaType.APPLICATION_JSON).content(upload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.serviceComponentsUnlinked").value(0));
+        assertThat(linksOf(service)).hasSize(4);
+
+        // The upgrade merged and both lockfiles were refreshed, so they pin the fixed version.
+        git.willScan(name, FakeGitAndSyft.npmProjects(name, Map.of("client", "1.18.0", "server", "1.18.0")));
+        mvc.perform(post(IMPORT, service.getId()).with(role("ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.serviceComponentsLinked").value(1))
+                .andExpect(jsonPath("$.serviceComponentsUnlinked").value(2));
+
+        assertThat(linksOf(service)).containsOnly(
+                Map.entry(name + "-http@1.18.0", "client/package.json,server/package.json"),
+                Map.entry(name + "-vendored@1.0.0", ""),
+                Map.entry(name + "-ci@1.0.0", ""));
+        // The old versions stay in the inventory; they are just no longer this service's.
+        assertThat(store.findSoftwareComponentByCoordinates("npm", name + "-http", "1.5.0")).isPresent();
     }
 
     @Test
@@ -206,6 +255,15 @@ class SbomRepositoryImportIntegrationTest extends AbstractInventoryIntegrationTe
     private BusinessService linked(String url, String branch) {
         BusinessService service = inventory.createBusinessService("Imported " + UUID.randomUUID(), BusinessCriticality.HIGH);
         return inventory.linkServiceRepository(service.getId(), github(url), branch);
+    }
+
+    /** The service's direct dependencies, {@code name@version} → the manifests declaring it. */
+    private Map<String, String> linksOf(BusinessService service) {
+        return store.findServiceComponentLinksForServices(List.of(service.getId())).stream()
+                .collect(Collectors.toMap(link -> {
+                    SoftwareComponent component = inventory.getSoftwareComponent(link.componentId());
+                    return component.getName() + "@" + component.getVersion();
+                }, link -> String.join(",", link.manifestPaths())));
     }
 
     private static RepositoryUrl github(String url) {
