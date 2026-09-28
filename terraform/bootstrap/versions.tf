@@ -1,6 +1,14 @@
 terraform {
   required_version = ">= 1.16.4"
 
-  # Pinned providers go here (required_providers), e.g. hashicorp/aws. `terraform init` then writes
-  # .terraform.lock.hcl next to this file; commit it.
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+    tfe = {
+      source  = "hashicorp/tfe"
+      version = "~> 0.60"
+    }
+  }
 }
