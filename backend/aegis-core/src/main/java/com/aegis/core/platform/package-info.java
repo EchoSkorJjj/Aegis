@@ -9,6 +9,8 @@
  *       the OpenAPI wiring.</li>
  *   <li>{@link com.aegis.core.platform.tenant} — {@code CurrentOrg}, the active-organization (tenant)
  *       resolved from the JWT {@code org} claim that every org-scoped read/write goes through.</li>
+ *   <li>{@link com.aegis.core.platform.scheduling} — {@code SchedulerLease}, which lets one instance at a
+ *       time run the scheduled jobs (V30).</li>
  *   <li>{@link com.aegis.core.platform.web} — service-level endpoints with no domain of their own
  *       (health/ping).</li>
  * </ul>

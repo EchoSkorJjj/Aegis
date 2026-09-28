@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 import com.aegis.core.ingestion.RawEventDrainer;
 import com.aegis.core.ingestion.UnparseableEventException;
 import com.aegis.core.news.NewsProperties.Feed;
+import com.aegis.core.platform.scheduling.SchedulerLease;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -32,25 +33,30 @@ class NewsNormalizer {
     private final NewsItemReader reader;
     private final Map<String, Feed> feedsByKey;
     private final int batchSize;
+    private final SchedulerLease lease;
 
     NewsNormalizer(
             RawEventDrainer drainer,
             NewsItemStore items,
             NewsItemReader reader,
-            NewsProperties properties) {
+            NewsProperties properties,
+            SchedulerLease lease) {
         this.drainer = drainer;
         this.items = items;
         this.reader = reader;
         this.batchSize = properties.normalizeBatchSize();
         this.feedsByKey = properties.feeds().stream()
                 .collect(Collectors.toMap(Feed::key, Function.identity(), (first, second) -> first));
+        this.lease = lease;
     }
 
     @Scheduled(
             fixedDelayString = "${aegis.ingestion.news.normalize-interval:PT1M}",
             initialDelayString = "${aegis.ingestion.news.normalize-interval:PT1M}")
     void normalizePending() {
-        drain();
+        if (lease.held()) {
+            drain();
+        }
     }
 
     /**

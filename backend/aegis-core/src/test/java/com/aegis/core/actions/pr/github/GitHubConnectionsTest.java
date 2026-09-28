@@ -64,7 +64,7 @@ class GitHubConnectionsTest {
         server.start();
         String origin = "http://127.0.0.1:" + server.getAddress().getPort();
         var properties = new GitHubProperties(true, URI.create(origin + "/api/v3"), URI.create(origin), CLIENT_ID,
-                CLIENT_SECRET, null, URI.create("http://localhost:3000/admin/integrations/github/callback"),
+                CLIENT_SECRET, null, null, URI.create("http://localhost:3000/admin/integrations/github/callback"),
                 Set.of("github.com"));
         var mapper = JsonMapper.builder().build();
         var api = new GitHubApi(properties.apiBaseUrl(), mapper, ObservationRegistry.NOOP);

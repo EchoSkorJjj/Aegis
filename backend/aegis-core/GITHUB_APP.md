@@ -31,7 +31,8 @@ All keys are under `aegis.actions.github` in `application.yml`.
 | `web-base-url` | `AEGIS_GITHUB_WEB_URL` | `https://github.com` (the sign-in when connecting) |
 | `client-id` | `AEGIS_GITHUB_APP_CLIENT_ID` | Required when enabled |
 | `client-secret` | `AEGIS_GITHUB_APP_CLIENT_SECRET` | Required when enabled; only for connecting |
-| `private-key-path` | `AEGIS_GITHUB_APP_PRIVATE_KEY_PATH` | Required when enabled; external PKCS#8 PEM |
+| `private-key` | `AEGIS_GITHUB_APP_PRIVATE_KEY` | The PKCS#8 PEM itself, as a secret manager hands it to a container; wins over `private-key-path` |
+| `private-key-path` | `AEGIS_GITHUB_APP_PRIVATE_KEY_PATH` | A file holding the PKCS#8 PEM; one of the two is required when enabled |
 | `callback-url` | `AEGIS_GITHUB_CALLBACK_URL` | `http://localhost:3000/admin/integrations/github/callback` |
 | `hosts` | `AEGIS_GITHUB_HOSTS` | `github.com` |
 
@@ -120,7 +121,9 @@ and approval/audit enforcement before exposing any execution route or job. No bi
 included in this spike.
 
 Keep private keys outside the repository tree, build context and image, with access restricted to the
-service account. The loader expects PKCS#8; convert GitHub's downloaded PKCS#1 key once, outside the
+service account. A secret manager passes the key to a container as an environment variable
+(`AEGIS_GITHUB_APP_PRIVATE_KEY`, e.g. an ECS task's `secrets` from an SSM SecureString); line breaks written
+as `\n` are accepted. The loader expects PKCS#8; convert GitHub's downloaded PKCS#1 key once, outside the
 checkout:
 
 ```sh
@@ -176,9 +179,10 @@ GitHub**. Until they do, every GitHub operation in that organization is refused 
   so export `AEGIS_GITHUB_ENABLED=true`, `AEGIS_GITHUB_APP_CLIENT_ID`, `AEGIS_GITHUB_APP_CLIENT_SECRET` and
   `AEGIS_GITHUB_APP_PRIVATE_KEY_PATH` (absolute path to the PKCS#8 file) in the shell or run configuration.
 - **docker compose**: put `AEGIS_GITHUB_ENABLED=true`, `AEGIS_GITHUB_APP_CLIENT_ID=…` and
-  `AEGIS_GITHUB_APP_CLIENT_SECRET=…` in the repo-root `.env`, and mount the key at the path compose
-  already points the container to, in a `docker-compose.override.yml` next to `docker-compose.yml`.
-  Both files are git-ignored, and compose merges the override automatically:
+  `AEGIS_GITHUB_APP_CLIENT_SECRET=…` in the repo-root `.env`. Then either put the key itself there too
+  (`AEGIS_GITHUB_APP_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----"`), or mount it at
+  the path compose already points the container to, in a `docker-compose.override.yml` next to
+  `docker-compose.yml`. Both files are git-ignored, and compose merges the override automatically:
 
   ```yaml
   services:

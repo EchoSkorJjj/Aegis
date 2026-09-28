@@ -61,6 +61,9 @@ aegis:
       client-id: ${AEGIS_GITHUB_APP_CLIENT_ID:}
       # Only for the admin's GitHub sign-in when connecting; never logged.
       client-secret: ${AEGIS_GITHUB_APP_CLIENT_SECRET:}
+      # The App's key, unencrypted PKCS#8 PEM: either the PEM text itself (how a secret manager hands it to a
+      # container) or a file holding it. The text wins when both are set. Never logged.
+      private-key: ${AEGIS_GITHUB_APP_PRIVATE_KEY:}
       private-key-path: ${AEGIS_GITHUB_APP_PRIVATE_KEY_PATH:}
       # Must equal the App's registered callback URL: the frontend page GitHub sends the admin back to.
       callback-url: ${AEGIS_GITHUB_CALLBACK_URL:http://localhost:3000/admin/integrations/github/callback}
@@ -162,6 +165,13 @@ aegis:
       max-signals: ${AEGIS_SCORING_ROLLUP_MAX_SIGNALS:200}
       # How far back a roll-up reaches when the caller gives no `from`.
       default-window: ${AEGIS_SCORING_ROLLUP_WINDOW:P30D}
+  # The scheduled jobs below (feed polls, normalisers, the OSV sync) run on one instance at a time: the one
+  # holding a lease in the database (SchedulerLease, V30), so a rolling deploy's overlap or a second instance
+  # never runs a job twice. The holder renews it every lease-renewal; if it dies, another takes over once
+  # lease-duration passes. A stopping instance gives it up at once.
+  scheduling:
+    lease-duration: ${AEGIS_SCHEDULER_LEASE_DURATION:PT2M}
+    lease-renewal: ${AEGIS_SCHEDULER_LEASE_RENEWAL:PT30S}
   # Ingestion framework (E5). Connectors register as IngestionSource beans and the scheduler
   # discovers them. Disable with enabled=false; poll-interval is an ISO-8601 duration.
   ingestion:

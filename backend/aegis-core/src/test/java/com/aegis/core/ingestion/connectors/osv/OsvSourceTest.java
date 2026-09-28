@@ -4,6 +4,7 @@ import java.util.List;
 
 import com.aegis.core.ingestion.RawEvent;
 import com.aegis.core.ingestion.RawEventStore;
+import com.aegis.core.platform.scheduling.SchedulerLease;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -11,6 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -21,6 +23,20 @@ import static org.mockito.Mockito.when;
  * is keyed on the payload so a revision re-normalises while an unchanged record de-duplicates on re-download.
  */
 class OsvSourceTest {
+
+    private final SchedulerLease lease = mock(SchedulerLease.class);
+
+    @Test
+    void anInstanceWithoutTheLeaseDoesNotSync() {
+        RawEventStore store = mock(RawEventStore.class);
+        OsvClient client = (ecosystem, maxRecords, maxRecordBytes, consumer) ->
+                consumer.accept("GHSA-aaa", "{\"id\":\"GHSA-aaa\"}");
+        when(lease.held()).thenReturn(false);
+
+        new OsvSource(client, store, properties("npm"), lease).scheduledSync();
+
+        verify(store, never()).saveIfNew(any(), any());
+    }
 
     private static OsvProperties properties(String... ecosystems) {
         return new OsvProperties(true, null, List.of(ecosystems), null, null, 0, 0, 0, false, false);
@@ -39,7 +55,7 @@ class OsvSourceTest {
             consumer.accept("GHSA-bbb", "{\"id\":\"GHSA-bbb\"}");
         };
 
-        int stored = new OsvSource(client, store, properties("npm")).sync();
+        int stored = new OsvSource(client, store, properties("npm"), lease).sync();
 
         // Records go straight to the store as they stream; the count reflects only the new (not duplicate) ones.
         assertThat(stored).isEqualTo(1); // first saveIfNew -> true (new), second -> false (duplicate)
@@ -65,7 +81,7 @@ class OsvSourceTest {
             consumer.accept("GHSA-aaa", "{\"modified\":\"2099-02-02\"}");
         };
 
-        new OsvSource(client, store, properties("npm")).sync();
+        new OsvSource(client, store, properties("npm"), lease).sync();
 
         ArgumentCaptor<RawEvent> captor = ArgumentCaptor.forClass(RawEvent.class);
         verify(store, times(3)).saveIfNew(eq(OsvSource.SOURCE_ID), captor.capture());
@@ -85,7 +101,7 @@ class OsvSourceTest {
             consumer.accept("CVE-2025-1", "{\"id\":\"CVE-2025-1\"}");  // real advisory
         };
 
-        int stored = new OsvSource(client, store, properties("npm")).sync();
+        int stored = new OsvSource(client, store, properties("npm"), lease).sync();
 
         // Only the two real advisories are stored; the MAL-* report never reaches the store.
         assertThat(stored).isEqualTo(2);
@@ -102,7 +118,7 @@ class OsvSourceTest {
         OsvClient client = (ecosystem, maxRecords, maxRecordBytes, consumer) ->
                 consumer.accept("MAL-2025-1", "{\"id\":\"MAL-2025-1\"}");
 
-        int stored = new OsvSource(client, store, propertiesWithMalicious("npm")).sync();
+        int stored = new OsvSource(client, store, propertiesWithMalicious("npm"), lease).sync();
 
         assertThat(stored).isEqualTo(1); // opted in — the malicious-package report is stored
         verify(store, times(1)).saveIfNew(eq(OsvSource.SOURCE_ID), any());
@@ -115,7 +131,7 @@ class OsvSourceTest {
         OsvClient client = (ecosystem, maxRecords, maxRecordBytes, consumer) ->
                 consumer.accept("REC-" + ecosystem, "{\"ecosystem\":\"" + ecosystem + "\"}");
 
-        new OsvSource(client, store, properties("npm", "PyPI", "crates.io")).sync();
+        new OsvSource(client, store, properties("npm", "PyPI", "crates.io"), lease).sync();
 
         ArgumentCaptor<RawEvent> captor = ArgumentCaptor.forClass(RawEvent.class);
         verify(store, times(3)).saveIfNew(eq(OsvSource.SOURCE_ID), captor.capture());

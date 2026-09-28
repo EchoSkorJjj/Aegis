@@ -106,9 +106,48 @@ class GitHubAppConfigTest {
     }
 
     @Test
-    void enabledRequiresKeyPath() {
+    void enabledRequiresAKey() {
         enabled().run(context -> assertThat(context).hasFailed().getFailure()
-                .hasRootCauseMessage("GitHub App private-key-path is required when enabled"));
+                .hasRootCauseMessage("GitHub App private-key or private-key-path is required when enabled"));
+    }
+
+    @Test
+    void enabledAcceptsTheKeyTextItself() throws Exception {
+        String pem = Files.readString(GitHubAppPrProviderTest.writeKey(temporary, GitHubAppPrProviderTest.generateKey()));
+        enabled().withPropertyValues("aegis.actions.github.private-key=" + pem).run(context ->
+                assertThat(context).hasNotFailed().hasSingleBean(PrProvider.class));
+    }
+
+    @Test
+    void theKeyTextMayCarryItsLineBreaksEscaped() throws Exception {
+        String pem = Files.readString(GitHubAppPrProviderTest.writeKey(temporary, GitHubAppPrProviderTest.generateKey()));
+        String oneLine = pem.strip().replace("\n", "\\n");
+        enabled().withPropertyValues("aegis.actions.github.private-key=" + oneLine).run(context ->
+                assertThat(context).hasNotFailed().hasSingleBean(PrProvider.class));
+    }
+
+    @Test
+    void theKeyTextWinsOverThePath() throws Exception {
+        String pem = Files.readString(GitHubAppPrProviderTest.writeKey(temporary, GitHubAppPrProviderTest.generateKey()));
+        enabled().withPropertyValues("aegis.actions.github.private-key=" + pem,
+                "aegis.actions.github.private-key-path=" + temporary.resolve("does-not-exist.pem")).run(context ->
+                assertThat(context).hasNotFailed().hasSingleBean(PrProvider.class));
+    }
+
+    @Test
+    void theKeyIsNeverPrinted() throws Exception {
+        String pem = Files.readString(GitHubAppPrProviderTest.writeKey(temporary, GitHubAppPrProviderTest.generateKey()));
+        String body = pem.lines().filter(line -> !line.startsWith("-----")).findFirst().orElseThrow();
+        enabled().withPropertyValues("aegis.actions.github.private-key=" + pem).run(context ->
+                assertThat(context.getBean(GitHubProperties.class).toString()).doesNotContain(body));
+    }
+
+    @Test
+    void invalidKeyTextFailsSafelyAtStartup() {
+        enabled().withPropertyValues(
+                "aegis.actions.github.private-key=-----BEGIN RSA PRIVATE KEY-----\nsecret\n-----END RSA PRIVATE KEY-----")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasRootCauseMessage("GitHub App key must be a readable, unencrypted PKCS#8 RSA PEM (at least 2048 bits)"));
     }
 
     @Test

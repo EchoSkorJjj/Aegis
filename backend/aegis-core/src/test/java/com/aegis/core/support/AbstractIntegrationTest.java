@@ -1,11 +1,14 @@
 package com.aegis.core.support;
 
+import javax.sql.DataSource;
+
 import com.aegis.core.inventory.sbom.SbomTestConfig;
 import com.aegis.core.matching.MatchingService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -22,12 +25,20 @@ import static org.springframework.security.test.web.servlet.setup.SecurityMockMv
  * filter chain are all genuinely exercised. Requires a running Docker daemon.
  *
  * <p>Plain {@code postgres:16} — the core has no pgvector dependency (RAG lives in the ai-service).
+ *
+ * <p>The application connects as a plain role ({@code testcontainers/app-role.sql}), as it does when deployed:
+ * the container's own user is a superuser, and a superuser skips every row-level security policy, so the org
+ * isolation of V9 onwards would go untested. A test that checks the schema itself, past those policies, uses
+ * {@link #superuserDataSource()}.
  */
 @SpringBootTest
 @Import({IdentityTestConfig.class, ActionsTestConfig.class, SbomTestConfig.class})
 public abstract class AbstractIntegrationTest {
 
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16");
+    private static final String APP_ROLE = "aegis";
+
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16")
+            .withInitScript("testcontainers/app-role.sql");
 
     static {
         POSTGRES.start();
@@ -36,8 +47,16 @@ public abstract class AbstractIntegrationTest {
     @DynamicPropertySource
     static void datasourceProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        registry.add("spring.datasource.username", POSTGRES::getUsername);
-        registry.add("spring.datasource.password", POSTGRES::getPassword);
+        registry.add("spring.datasource.username", () -> APP_ROLE);
+        registry.add("spring.datasource.password", () -> APP_ROLE);
+    }
+
+    /**
+     * The database as its superuser sees it: past every row-level security policy. Only for a test about the
+     * schema itself — a constraint, a migration's backfill — never for what the application may see.
+     */
+    protected static DataSource superuserDataSource() {
+        return new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
     }
 
     @Autowired

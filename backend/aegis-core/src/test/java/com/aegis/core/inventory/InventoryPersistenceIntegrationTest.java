@@ -46,8 +46,8 @@ class InventoryPersistenceIntegrationTest extends AbstractInventoryIntegrationTe
     @Autowired
     private TestOwners owners;
 
-    @Autowired
-    private JdbcTemplate jdbc;
+    /** Past row-level security: checks the schema itself — its constraints, what a row holds — not what a caller sees. */
+    private final JdbcTemplate jdbc = new JdbcTemplate(superuserDataSource());
 
     @Autowired
     private EntityManager entityManager;

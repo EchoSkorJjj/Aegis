@@ -12,7 +12,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 /**
  * The GitHub App. The client ID and private key authenticate Aegis as the App; the client secret is only for
  * an organization admin's sign-in when they connect an installation ({@link GitHubConnections}), whose
- * GitHub redirect comes back to {@code callbackUrl} — the App's registered callback URL.
+ * GitHub redirect comes back to {@code callbackUrl} — the App's registered callback URL. The key is given
+ * either as its PEM text ({@code privateKey}, e.g. injected from a secret manager) or as a file
+ * ({@code privateKeyPath}); the text wins when both are set.
  */
 @ConfigurationProperties("aegis.actions.github")
 record GitHubProperties(
@@ -21,6 +23,7 @@ record GitHubProperties(
         @DefaultValue("https://github.com") URI webBaseUrl,
         String clientId,
         String clientSecret,
+        String privateKey,
         Path privateKeyPath,
         @DefaultValue("http://localhost:3000/admin/integrations/github/callback") URI callbackUrl,
         @DefaultValue("github.com") Set<String> hosts) {
@@ -52,7 +55,7 @@ record GitHubProperties(
         }
     }
 
-    /** Never prints the client secret, whoever logs this. */
+    /** Never prints the client secret or the key, whoever logs this. */
     @Override
     public String toString() {
         return "GitHubProperties[enabled=" + enabled + ", apiBaseUrl=" + apiBaseUrl + ", webBaseUrl=" + webBaseUrl

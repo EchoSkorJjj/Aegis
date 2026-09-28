@@ -35,14 +35,20 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * JPA adapter for the inventory domain, org-scoped (ADR §6). Every method resolves the caller's active
  * org via {@link #scope()} — which also binds it on the DB session for the RLS backstop — then reads
  * only that org's rows and stamps that org onto every write. The application layer (service,
  * controller, port) is unaware of tenancy; isolation lives here and in the DB.
+ *
+ * <p>Every method runs in a transaction — the caller's, or its own when the caller has none — because the
+ * binding lasts only as long as the transaction: bound in one and queried in the next, the query would run
+ * with no org and row-level security would hide every row.
  */
 @Repository
+@Transactional
 public class JpaInventoryStore implements InventoryStore {
 
     @PersistenceContext
@@ -85,8 +91,8 @@ public class JpaInventoryStore implements InventoryStore {
     /**
      * The caller's active org (403 if none), also bound as the transaction-local {@code
      * aegis.current_org} GUC so Postgres RLS enforces isolation as a backstop when the app connects as
-     * a non-superuser. Always runs inside the calling service's transaction, so the GUC lands on that
-     * transaction's connection.
+     * a non-superuser. Runs inside the method's transaction, so the GUC lands on the connection the
+     * method's queries use.
      */
     private UUID scope() {
         UUID org = currentOrg.require();
