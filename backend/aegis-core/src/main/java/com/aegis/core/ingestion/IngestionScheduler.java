@@ -2,6 +2,7 @@ package com.aegis.core.ingestion;
 
 import java.util.List;
 
+import com.aegis.core.platform.scheduling.SchedulerLease;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -15,7 +16,8 @@ import org.springframework.stereotype.Component;
  *
  * <p>Disable entirely with {@code aegis.ingestion.enabled=false}; tune cadence with
  * {@code aegis.ingestion.poll-interval} (ISO-8601 duration, default {@code PT15M}). The first poll is
- * deferred by one interval so startup (and tests) are unaffected.
+ * deferred by one interval so startup (and tests) are unaffected. Only the instance holding the
+ * {@link SchedulerLease} polls.
  */
 @Component
 @ConditionalOnProperty(name = "aegis.ingestion.enabled", havingValue = "true", matchIfMissing = true)
@@ -27,20 +29,24 @@ class IngestionScheduler {
     private final RawEventStore store;
     private final IngestionRetry retry;
     private final IngestionFeedMetrics metrics;
+    private final SchedulerLease lease;
 
-    IngestionScheduler(
-            List<IngestionSource> sources, RawEventStore store, IngestionRetry retry, IngestionFeedMetrics metrics) {
+    IngestionScheduler(List<IngestionSource> sources, RawEventStore store, IngestionRetry retry,
+            IngestionFeedMetrics metrics, SchedulerLease lease) {
         this.sources = sources;
         this.store = store;
         this.retry = retry;
         this.metrics = metrics;
+        this.lease = lease;
     }
 
     @Scheduled(
             fixedDelayString = "${aegis.ingestion.poll-interval:PT15M}",
             initialDelayString = "${aegis.ingestion.poll-interval:PT15M}")
     void pollAll() {
-        runOnce();
+        if (lease.held()) {
+            runOnce();
+        }
     }
 
     /**

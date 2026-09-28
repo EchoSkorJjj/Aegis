@@ -23,7 +23,12 @@ final class GitHubAppJwt {
     private final Clock clock;
 
     GitHubAppJwt(Path path, String clientId, Clock clock) {
-        this.key = readKey(path);
+        this(null, path, clientId, clock);
+    }
+
+    /** The key's PEM text wins over its file when both are given; a deployment usually sets one. */
+    GitHubAppJwt(String pem, Path path, String clientId, Clock clock) {
+        this.key = readKey(pem, path);
         this.clientId = clientId;
         this.clock = clock;
     }
@@ -41,12 +46,14 @@ final class GitHubAppJwt {
         }
     }
 
-    private static RSAPrivateKey readKey(Path path) {
-        if (path == null) {
-            throw new IllegalStateException("GitHub App private-key-path is required when enabled");
+    private static RSAPrivateKey readKey(String text, Path path) {
+        boolean inline = text != null && !text.isBlank();
+        if (!inline && path == null) {
+            throw new IllegalStateException("GitHub App private-key or private-key-path is required when enabled");
         }
         try {
-            String pem = Files.readString(path).trim();
+            // An environment variable may carry the PEM's line breaks as literal "\n" (a .env file, say).
+            String pem = (inline ? text.replace("\\n", "\n") : Files.readString(path)).trim();
             String begin = "-----BEGIN PRIVATE KEY-----";
             String end = "-----END PRIVATE KEY-----";
             if (!pem.startsWith(begin) || !pem.endsWith(end)) {

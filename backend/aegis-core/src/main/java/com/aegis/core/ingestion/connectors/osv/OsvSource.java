@@ -6,6 +6,7 @@ import java.security.NoSuchAlgorithmException;
 
 import com.aegis.core.ingestion.RawEvent;
 import com.aegis.core.ingestion.RawEventStore;
+import com.aegis.core.platform.scheduling.SchedulerLease;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -41,22 +42,28 @@ class OsvSource {
     private final OsvClient client;
     private final RawEventStore store;
     private final OsvProperties properties;
+    private final SchedulerLease lease;
 
-    OsvSource(OsvClient client, RawEventStore store, OsvProperties properties) {
+    OsvSource(OsvClient client, RawEventStore store, OsvProperties properties, SchedulerLease lease) {
         this.client = client;
         this.store = store;
         this.properties = properties;
+        this.lease = lease;
     }
 
     /**
      * Downloads each configured ecosystem's snapshot on the OSV cadence (daily by default), after a
      * short initial delay so startup is unaffected. A failure is logged and isolated — the next run
-     * retries, and unchanged records de-duplicate, so nothing is lost.
+     * retries, and unchanged records de-duplicate, so nothing is lost. Only the instance holding the
+     * {@link SchedulerLease} syncs.
      */
     @Scheduled(
             fixedDelayString = "${aegis.ingestion.osv.poll-interval:P1D}",
             initialDelayString = "${aegis.ingestion.osv.initial-delay:PT30S}")
     void scheduledSync() {
+        if (!lease.held()) {
+            return;
+        }
         try {
             sync();
         } catch (Exception ex) {

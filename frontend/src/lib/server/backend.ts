@@ -36,16 +36,39 @@ interface BackendRequest extends RequestInit {
 }
 
 /**
- * Propagates the caller's IP to the backend so its audit log and rate limiter see the real
- * client, not this BFF. Forwards the inbound X-Forwarded-For chain (set by the load balancer /
- * ingress in front of Next) or X-Real-IP; trust it only as far as that proxy is trusted to set
- * it. In local dev with no proxy there is neither, and the backend simply sees the BFF.
+ * How many proxies in front of this server append to X-Forwarded-For: `TRUSTED_PROXY_HOPS`, default 1
+ * (an AWS load balancer; CloudFront in front of it makes 2). With no proxy at all (local dev), 1 still
+ * works: Next.js fills the header in with the caller's address when a request arrives without one.
+ */
+function trustedProxyHops(): number {
+  const hops = Number.parseInt(process.env.TRUSTED_PROXY_HOPS ?? "", 10);
+  return Number.isInteger(hops) && hops >= 1 ? hops : 1;
+}
+
+/**
+ * The caller's address as the outermost trusted proxy recorded it. Each proxy appends the address a
+ * request came from, so only the last `hops` entries of X-Forwarded-For were written by proxies;
+ * anything before them came from the client, who can write whatever it likes there.
+ */
+function clientAddress(forwardedFor: string | null, hops: number): string | undefined {
+  const chain = (forwardedFor ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return chain[Math.max(chain.length - hops, 0)];
+}
+
+/**
+ * Propagates the caller's address to the backend so identity-service's rate limiter and audit log see
+ * the real client, not this BFF: one address, the one the proxies recorded, never the part of the
+ * chain the client wrote (it could dodge the per-IP limit on /auth by claiming a new address every
+ * time). The gateway passes it on only from the BFF's network (see its ForwardedForFilter).
  */
 async function forwardedFor(): Promise<Record<string, string>> {
   try {
     const inbound = await nextHeaders();
-    const value = inbound.get("x-forwarded-for") ?? inbound.get("x-real-ip");
-    return value ? { "X-Forwarded-For": value } : {};
+    const address = clientAddress(inbound.get("x-forwarded-for"), trustedProxyHops());
+    return address ? { "X-Forwarded-For": address } : {};
   } catch {
     // headers() is only available within a request scope; ignore otherwise.
     return {};

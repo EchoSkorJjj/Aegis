@@ -8,7 +8,6 @@ import javax.sql.DataSource;
 import com.aegis.core.support.AbstractIntegrationTest;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -18,10 +17,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * edges, then migrated to V29. Every edge goes to each service that reached it — so no service's graph changes until
  * its next import — marked as the repository's for a service imported from its repository; an edge no service
  * reaches stays organization-wide.
+ *
+ * <p>As the superuser: V29 ran on databases whose migrations run as one (docker compose's), past row-level security.
+ * A role that row-level security applies to would see none of these rows, so its V29 would move no edges.
  */
 class ServiceDependenciesMigrationTest extends AbstractIntegrationTest {
 
-    @Autowired private DataSource dataSource;
+    private final DataSource dataSource = superuserDataSource();
 
     @Test
     void existingEdgesGoToEveryServiceThatReachesThemAndNoServicesGraphChanges() {

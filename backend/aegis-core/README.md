@@ -258,6 +258,16 @@ domain. See `ARCHITECTURE.md` for the topology.
 - **Port** `8082` (`SERVER_PORT`).
 - **Database** — shares one PostgreSQL instance with identity-service; owns the **`core`** schema.
   Plain relational store (no pgvector — RAG belongs to the ai-service). Flyway manages the schema.
+  Org-scoped tables have row-level security, forced on their owner too: a role that isn't a superuser sees
+  only the rows of the organization its transaction bound (`aegis.current_org`, bound by the stores; V9, read
+  through `current_org()` since V31), and none when none is bound. Docker Compose connects as a superuser,
+  which skips it; Amazon RDS has no superuser, so there it always applies, and the test suite connects as a
+  plain role to match. A migration that backfills org-scoped rows must bind each organization itself, or it
+  touches nothing where row-level security applies.
+- **Scheduled jobs** — the feed polls, the normalisers and the OSV sync run on one instance at a time, the
+  one holding the scheduler lease (`platform.scheduling.SchedulerLease`, V30). So rolling deploys and several
+  instances are safe: the others stand by, and take over within a renewal when the holder stops, or once its
+  lease expires if it dies.
 - **Auth** — OAuth2 resource server; validates identity-service's RS256 JWTs via its JWKS
   (`IDENTITY_JWKS_URI`), maps the `roles` claim, and authorizes per route.
 - **Observability** — `/actuator/health|info|prometheus`, traces to Zipkin (propagated to the
@@ -296,12 +306,13 @@ domain. See `ARCHITECTURE.md` for the topology.
 | `AEGIS_OSV_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → advisory drain for OSV |
 | `AEGIS_OSV_BASE_URL` | OSV's export bucket | Override the export host (a mirror, tests) |
 | `AEGIS_SCHEDULING_POOL_SIZE` | `6` | Scheduler threads, so OSV's long sync never starves the other feeds' drains |
+| `AEGIS_SCHEDULER_LEASE_DURATION` / `AEGIS_SCHEDULER_LEASE_RENEWAL` | `PT2M` / `PT30S` | How long the instance running the scheduled jobs holds the lease, and how often it renews it (V30) |
 | `AEGIS_SBOM_GENERATION_ENABLED` | `true` | Import SBOMs from a service's linked repository (git + syft in the image) |
 | `AEGIS_SBOM_ALLOWED_HOSTS` | `github.com,gitlab.com,bitbucket.org` | Hosts a repository may be linked on and cloned from — the SSRF boundary |
 | `AEGIS_SBOM_CLONE_TIMEOUT` / `AEGIS_SBOM_SCAN_TIMEOUT` | `PT90S` / `PT180S` | Limit on getting the files (the partial clone, its sparse checkout and the checkout together) and on syft's scan |
 | `AEGIS_SBOM_MAX_REPO_BYTES` / `AEGIS_SBOM_MAX_SBOM_BYTES` | 512 MiB / 64 MiB | Reject a checkout, or the SBOM syft writes, larger than this |
 | `AEGIS_SBOM_GIT_PATH` / `AEGIS_SBOM_SYFT_PATH` | `git` / `syft` | The binaries SBOM generation runs |
-| `AEGIS_GITHUB_*` | App disabled | The GitHub App (upgrade pull requests, private clones, Connect GitHub) — see [GITHUB_APP.md](GITHUB_APP.md) |
+| `AEGIS_GITHUB_*` | App disabled | The GitHub App (upgrade pull requests, private clones, Connect GitHub) — see [GITHUB_APP.md](GITHUB_APP.md). Its key is `AEGIS_GITHUB_APP_PRIVATE_KEY` (the PEM itself, as a secret manager hands it over) or `AEGIS_GITHUB_APP_PRIVATE_KEY_PATH` (a file) |
 | `AEGIS_SCORING_*` | the calibrated model | Every scoring weight, the materiality threshold and the roll-up bounds — see [Configurable weights](#configurable-weights) |
 | `TRACING_SAMPLE_RATE` | `1.0` | Share of requests traced to Zipkin |
 | `AEGIS_JIRA_ENABLED` | `false` | File approved risk tickets in each organization's connected Jira; the other Jira variables are in [JIRA.md](JIRA.md) |
@@ -321,6 +332,11 @@ mvn spring-boot:run     # run locally (needs Postgres on :5432 and identity-serv
 
 In Docker Compose it builds and starts alongside identity-service and the ai-service. API docs at
 `http://localhost:8082/swagger-ui.html`.
+
+The integration tests connect to their Testcontainers PostgreSQL as a plain role (`aegis`, created by
+`src/test/resources/testcontainers/app-role.sql`), not the container's superuser, so row-level security applies
+to them as it does on RDS. A test about the schema itself, past those policies — a constraint, a migration's
+backfill — uses `AbstractIntegrationTest.superuserDataSource()`.
 
 ## Inventory API
 
@@ -475,6 +491,8 @@ status, and security news follow the same seam.
   the events replay. An event the handler cannot parse is still marked processed, so one bad payload
   never becomes a poison pill.
 - Disable the scheduler with `AEGIS_INGESTION_ENABLED=false`.
+- **One instance at a time** — every scheduled job first asks the `SchedulerLease` (V30), so with several
+  aegis-core instances only the lease holder polls and drains.
 - **Resilience is tested against mocked feeds, not live external calls** (CS203-47): every connector
   test spins up a real local HTTP server (`com.sun.net.httpserver.HttpServer`) or hand-built fixture,
   never nvd.nist.gov or a real status page. Covered: a feed returning an error status or being

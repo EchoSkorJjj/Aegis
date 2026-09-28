@@ -11,6 +11,7 @@ import com.aegis.core.ingestion.RawEventDrainer;
 import com.aegis.core.ingestion.UnparseableEventException;
 import com.aegis.core.ingestion.connectors.vendorstatus.VendorStatusProperties.Format;
 import com.aegis.core.ingestion.connectors.vendorstatus.VendorStatusProperties.Vendor;
+import com.aegis.core.platform.scheduling.SchedulerLease;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -37,13 +38,15 @@ class VendorStatusNormalizer {
     private final RssFeedReader rssReader;
     private final Map<String, Vendor> vendorsByKey;
     private final int batchSize;
+    private final SchedulerLease lease;
 
     VendorStatusNormalizer(
             RawEventDrainer drainer,
             VendorIncidentStore incidents,
             StatuspageFeedReader statuspageReader,
             RssFeedReader rssReader,
-            VendorStatusProperties properties) {
+            VendorStatusProperties properties,
+            SchedulerLease lease) {
         this.drainer = drainer;
         this.incidents = incidents;
         this.statuspageReader = statuspageReader;
@@ -51,13 +54,16 @@ class VendorStatusNormalizer {
         this.batchSize = properties.normalizeBatchSize();
         this.vendorsByKey = properties.vendors().stream()
                 .collect(Collectors.toMap(Vendor::key, Function.identity(), (first, second) -> first));
+        this.lease = lease;
     }
 
     @Scheduled(
             fixedDelayString = "${aegis.ingestion.vendor-status.normalize-interval:PT1M}",
             initialDelayString = "${aegis.ingestion.vendor-status.normalize-interval:PT1M}")
     void normalizePending() {
-        drain();
+        if (lease.held()) {
+            drain();
+        }
     }
 
     /**
