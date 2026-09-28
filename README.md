@@ -89,6 +89,17 @@ Other common knobs: `IDENTITY_BOOTSTRAP_ADMIN_EMAIL` / `…_PASSWORD` (seed an a
 `AUTH_COOKIE_SECURE` (set `true` behind HTTPS), and the token-TTL, lockout, and rate-limit settings —
 all in `application.yml`. Ready-made ops metrics and PromQL are in [`ops/README.md`](ops/README.md).
 
+For a deployment, three more:
+
+- `IDENTITY_JWT_PRIVATE_KEY`: the PKCS#8 PEM that signs access tokens. Without it a key is generated at startup,
+  so tokens don't survive a restart and two instances reject each other's.
+- `TRUSTED_PROXY_HOPS` on the frontend: how many proxies in front of it append to `X-Forwarded-For` (1 for a
+  load balancer).
+- `GATEWAY_TRUSTED_PROXIES` on the gateway: a regex for the frontend's addresses.
+
+The last two decide which address the `/auth` rate limit sees. The AWS settings still to be built are listed in
+[`todo/aws-deployment.md`](todo/aws-deployment.md).
+
 ## Testing
 
 ```bash
