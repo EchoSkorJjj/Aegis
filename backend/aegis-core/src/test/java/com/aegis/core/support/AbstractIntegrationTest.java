@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -33,6 +34,17 @@ import static org.springframework.security.test.web.servlet.setup.SecurityMockMv
  */
 @SpringBootTest
 @Import({IdentityTestConfig.class, ActionsTestConfig.class, SbomTestConfig.class})
+// What reaches outside (GitHub, Jira, the feeds) and the demo seed stay off, whatever the shell running the tests
+// exported: application.yml reads AEGIS_GITHUB_ENABLED and the like from the environment, and these outrank it. A
+// test that needs one on sets it in its own @TestPropertySource, which outranks these.
+@TestPropertySource(properties = {
+        "aegis.actions.github.enabled=false",
+        "aegis.actions.jira.enabled=false",
+        "aegis.ingestion.nvd.enabled=false",
+        "aegis.ingestion.osv.enabled=false",
+        "aegis.ingestion.vendor-status.enabled=false",
+        "aegis.ingestion.news.enabled=false",
+        "aegis.demo.seed-enabled=false"})
 public abstract class AbstractIntegrationTest {
 
     private static final String APP_ROLE = "aegis";
