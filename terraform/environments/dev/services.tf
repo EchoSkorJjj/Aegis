@@ -24,7 +24,7 @@ module "service" {
   security_group_ids = [module.security_groups.service_security_group_ids[each.key]]
   capacity_provider  = var.capacity == "spot" ? "FARGATE_SPOT" : "FARGATE"
   desired_count      = var.desired_count
-  health_check_path  = each.value.health_check_path
+  load_balanced      = each.key == "frontend"
   target_group_arn   = each.key == "frontend" ? module.alb.target_group_arn : null
   log_retention_days = var.log_retention_days
 }

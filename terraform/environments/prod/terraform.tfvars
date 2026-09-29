@@ -12,7 +12,7 @@ desired_count = 0
 image_tag     = "initial" # the tag CI pushed
 
 deletion_protection  = true
-registration_enabled = false
+registration_enabled = true
 
 # github_app_enabled   = true
 # github_app_client_id = "<the App's client ID>"
@@ -20,6 +20,6 @@ registration_enabled = false
 # jira_client_id       = "<the Atlassian app's client ID>"
 # nvd_api_key_enabled  = true
 # llm_provider         = "groq"
-# bootstrap_admin_email = "<the first platform admin>"
+# bootstrap_admin_email = "<a platform admin, optional>"
 # privacy_operator     = "<who runs this deployment>"
 # privacy_contact      = "<email or https link>"

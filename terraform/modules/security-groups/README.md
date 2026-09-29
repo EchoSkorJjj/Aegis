@@ -37,3 +37,6 @@ Every service may go out anywhere (the NAT instance takes it from there); the AL
 `aws_vpc_security_group_ingress_rule` / `aws_vpc_security_group_egress_rule` with `referenced_security_group_id`,
 not inline `ingress` blocks. Only the gateway and aegis-core may reach identity-service: it trusts the first
 `X-Forwarded-For` hop.
+
+The environment's one-time database setup task runs in aegis-core's group, the one group besides identity-service's
+that reaches the database.

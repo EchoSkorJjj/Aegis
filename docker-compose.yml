@@ -94,7 +94,7 @@ services:
       # to 50. Demo cadence: first poll ~1 min after startup over a one-day window, rather than the
       # 15-minute/two-day production defaults, so `docker compose up` shows advisories quickly.
       AEGIS_INGESTION_NVD_ENABLED: "true"
-      AEGIS_NVD_API_KEY: ${NVD_API_KEY:-}
+      AEGIS_NVD_API_KEY: ${AEGIS_NVD_API_KEY:-}
       AEGIS_INGESTION_POLL_INTERVAL: PT1M
       AEGIS_NVD_INITIAL_WINDOW: P1D
       AEGIS_INGESTION_OSV_ENABLED: "true"

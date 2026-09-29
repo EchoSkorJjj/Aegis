@@ -14,8 +14,23 @@ output "database_endpoint" {
 }
 
 output "database_master_secret_arn" {
-  description = "The Secrets Manager secret holding the master password, for the one-time role setup."
+  description = "The Secrets Manager secret holding the master username and password (RDS rotates it)."
   value       = module.rds.master_user_secret_arn
+}
+
+output "database_setup_command" {
+  description = "Runs the one-time database setup (database-setup.tf); again to reset the services' database passwords."
+  value = join(" ", [
+    "aws ecs run-task --region ${var.aws_region} --cluster ${module.ecs_cluster.cluster_name}",
+    "--launch-type FARGATE --task-definition ${aws_ecs_task_definition.database_setup.family}",
+    "--network-configuration 'awsvpcConfiguration={subnets=[${join(",", module.network.private_subnet_ids)}],securityGroups=[${module.security_groups.service_security_group_ids["aegis-core"]}],assignPublicIp=DISABLED}'",
+    "--query 'tasks[0].taskArn' --output text",
+  ])
+}
+
+output "database_setup_log_group" {
+  description = "Where the database setup task logs: aws logs tail <this> --follow."
+  value       = aws_cloudwatch_log_group.database_setup.name
 }
 
 output "ecs_cluster_name" {

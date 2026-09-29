@@ -98,13 +98,13 @@ variable "log_retention_days" {
 }
 
 variable "registration_enabled" {
-  description = "Public sign-up. Off: invite-only."
+  description = "Public sign-up, so anyone can create an account and then an organization. false: invite-only."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "bootstrap_admin_email" {
-  description = "Seeds the first platform admin at startup, with the identity/bootstrap-admin-password parameter as password. Empty seeds nobody; clear it once that admin exists."
+  description = "Optional. Seeds a platform admin at startup (an account in no organization, which can disable, delete and promote users across all of them), with the identity/bootstrap-admin-password parameter as its password. Empty seeds nobody."
   type        = string
   default     = ""
 }

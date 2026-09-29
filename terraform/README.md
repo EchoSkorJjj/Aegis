@@ -1,8 +1,8 @@
 # Aegis infrastructure
 
 Aegis on AWS, managed with Terraform in HCP Terraform: ECS on Fargate behind one ALB, RDS PostgreSQL 16, a NAT
-instance, at **aegisops.pro**. What each resource must be set to (heap sizes, timeouts, SES, secrets, database
-roles) is listed in `todo/aws-deployment.md`.
+instance, at **aegisops.pro**. To deploy an environment the first time (secrets, images, the database roles), follow
+[`environments/README.md`](environments/README.md); `todo/aws-deployment.md` explains why each setting is what it is.
 
 ## Layout
 
@@ -20,8 +20,8 @@ terraform/
     ├── ecs-cluster/      cluster, Fargate capacity providers, service discovery, execution role
     ├── ecs-service/      one service (task definition, service, logs, task role); used five times
     ├── rds-postgres/     PostgreSQL instance, subnet and parameter groups
-    ├── ssm-secrets/      the SecureString parameters the services read
-    └── ses-domain/       SES identity, DKIM, MAIL FROM, SMTP user
+    ├── ssm-secrets/      the names and ARNs of the SecureString parameters the services read
+    └── ses-domain/       SES identity, DKIM, MAIL FROM, DMARC
 ```
 
 `bootstrap/`, `global/` and each `environments/<name>/` is a **root module**: its own state, its own HCP
@@ -54,10 +54,17 @@ name, with data sources (`data.tf`), not through global's state.
 
 ## Running
 
+Once: sign the CLI in to HCP Terraform, which stores a token for it, and in each root copy `.env.example` to
+`.env` and fill it in.
+
 ```bash
-terraform login               # once: stores your HCP Terraform token
+terraform login
+```
+
+Then, from the root you're working on:
+
+```bash
 cd terraform/environments/dev
-cp .env.example .env          # once; fill in
 source .env
 terraform init
 terraform plan
@@ -72,8 +79,9 @@ terraform plan
 
 ## Conventions
 
-- **Names** `aegis-<environment>-<component>` (e.g. `aegis-dev-core`); every resource tagged `Project`,
+- **Names** `aegis-<environment>-<component>` (e.g. `aegis-dev-gateway`); every resource tagged `Project`,
   `Environment` and `ManagedBy` through the provider's default tags.
-- **Secrets never go in a tfvars file or in state.** They are SSM parameters (`ssm-secrets`), created with
-  write-only values or filled in by hand; the services read them through their task definitions.
+- **Secrets never go in a tfvars file or in state.** They are SSM parameters a person creates
+  ([`environments/README.md`](environments/README.md)); Terraform only knows their names, and the services read
+  them through their task definitions. The RDS master password is RDS's own, in Secrets Manager.
 - **Formatting**: `terraform fmt -recursive` and `terraform validate` before every commit.

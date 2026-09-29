@@ -22,6 +22,7 @@ Used by: each environment (`environments/*/main.tf`).
 | `cluster_arn` | `string` | The cluster |
 | `cluster_name` | `string` | The cluster's name |
 | `namespace_id` | `string` | The Cloud Map namespace |
+| `namespace_name` | `string` | The namespace's DNS name |
 | `execution_role_arn` | `string` | The task execution role |
 
 ## Notes

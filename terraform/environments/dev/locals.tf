@@ -29,11 +29,11 @@ locals {
   # What each service runs with. The environment is plain configuration; secrets are in secret_candidates below.
   services = {
     frontend = {
-      cpu               = 256
-      memory            = 512
-      health_check_path = local.frontend_health_check_path
+      cpu    = 256
+      memory = 512
       environment = tomap({
         NODE_ENV           = "production"
+        HOSTNAME           = "0.0.0.0" # listen on every interface, whatever host name the task gets
         AUTH_COOKIE_SECURE = "true"
         GATEWAY_URL        = local.urls.gateway
         TRUSTED_PROXY_HOPS = "1"
@@ -45,9 +45,8 @@ locals {
     }
 
     gateway = {
-      cpu               = 512
-      memory            = 1024
-      health_check_path = "/actuator/health"
+      cpu    = 512
+      memory = 1024
       environment = tomap({
         IDENTITY_URI            = local.urls["identity-service"]
         CORE_URI                = local.urls["aegis-core"]
@@ -59,9 +58,8 @@ locals {
     }
 
     "identity-service" = {
-      cpu               = 512
-      memory            = 1024
-      health_check_path = "/actuator/health"
+      cpu    = 512
+      memory = 1024
       environment = tomap({
         DB_URL                                           = local.jdbc_url
         DB_USER                                          = "aegis_identity"
@@ -85,9 +83,8 @@ locals {
     }
 
     "aegis-core" = {
-      cpu               = 1024
-      memory            = 2048
-      health_check_path = "/actuator/health"
+      cpu    = 1024
+      memory = 2048
       environment = tomap({
         DB_URL                                = local.jdbc_url
         DB_USER                               = "aegis_core"
@@ -114,9 +111,8 @@ locals {
     }
 
     "ai-service" = {
-      cpu               = 256
-      memory            = 512
-      health_check_path = "/actuator/health"
+      cpu    = 256
+      memory = 512
       environment = tomap({
         LLM_PROVIDER = var.llm_provider
         GROQ_MODEL   = var.groq_model

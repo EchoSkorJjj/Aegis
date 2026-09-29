@@ -25,6 +25,7 @@ Used by: each environment (`environments/*/main.tf`).
 | Name | Type | Description |
 |---|---|---|
 | `alb_dns_name` | `string` | The ALB's own DNS name |
+| `url` | `string` | `https://<domain_name>` |
 | `target_group_arn` | `string` | The frontend's target group. **Declare it with `depends_on = [aws_lb_listener.https]`:** ECS refuses a target group no listener uses, and the frontend's service is created from this output |
 
 ## Notes
@@ -35,3 +36,5 @@ Used by: each environment (`environments/*/main.tf`).
 - HTTPS listener: `ssl_policy = "ELBSecurityPolicy-TLS13-1-2-2021-06"`, forwarding to the target group. HTTP
   listener: redirect to 443 with status 301.
 - `aws_route53_record` alias (A) for `domain_name` to the ALB.
+- The certificate validates only once the zone answers for the domain (global's README, step 3): until then
+  `aws_acm_certificate_validation` waits, up to 75 minutes.

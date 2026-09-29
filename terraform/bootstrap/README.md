@@ -13,11 +13,17 @@ reach AWS without stored keys, and the workspaces that use it:
 It can't use that role itself, so it runs locally with your own AWS sign-in: create the `aegis-bootstrap`
 workspace by hand in HCP Terraform with **execution mode Local** (its state is still kept there).
 
+`terraform login` stores your HCP Terraform token (the tfe provider reads it too); run it once. `aws login` turns
+your IAM user's console sign-in into short-lived CLI credentials. The first time, also copy `.env.example` to `.env`
+and fill it in.
+
 ```bash
-terraform login                       # once: HCP Terraform token (the tfe provider reads it too)
-aws login --profile aegis-runner      # your IAM user's console sign-in, as short-lived CLI credentials
+terraform login
+```
+
+```bash
+aws login --profile aegis-runner
 cd terraform/bootstrap
-cp .env.example .env                  # once; fill in
 source .env
 terraform init
 terraform apply
