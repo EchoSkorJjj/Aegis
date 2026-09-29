@@ -1,0 +1,10 @@
+# What a remote run does NOT upload. With a workspace's Terraform Working Directory set (see README.md), the CLI
+# uploads the whole of terraform/, so this file sits here, at the top of what's uploaded.
+.terraform/
+**/.terraform/
+*.tfstate
+**/*.tfstate
+.env
+**/.env
+*.local.tfvars
+**/*.local.tfvars

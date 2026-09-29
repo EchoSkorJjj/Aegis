@@ -4,6 +4,7 @@ import com.aegis.core.advisories.Advisory;
 import com.aegis.core.advisories.AdvisoryStore;
 import com.aegis.core.ingestion.RawEventDrainer;
 import com.aegis.core.ingestion.UnparseableEventException;
+import com.aegis.core.platform.scheduling.SchedulerLease;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -20,23 +21,28 @@ class NvdNormalizer {
     private final AdvisoryStore advisories;
     private final NvdAdvisoryParser parser;
     private final int batchSize;
+    private final SchedulerLease lease;
 
     NvdNormalizer(
             RawEventDrainer drainer,
             AdvisoryStore advisories,
             NvdAdvisoryParser parser,
-            NvdProperties properties) {
+            NvdProperties properties,
+            SchedulerLease lease) {
         this.drainer = drainer;
         this.advisories = advisories;
         this.parser = parser;
         this.batchSize = properties.normalizeBatchSize();
+        this.lease = lease;
     }
 
     @Scheduled(
             fixedDelayString = "${aegis.ingestion.nvd.normalize-interval:PT1M}",
             initialDelayString = "${aegis.ingestion.nvd.normalize-interval:PT1M}")
     void normalizePending() {
-        drain();
+        if (lease.held()) {
+            drain();
+        }
     }
 
     /**

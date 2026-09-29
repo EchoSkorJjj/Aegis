@@ -9,10 +9,13 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+import com.aegis.core.platform.scheduling.SchedulerLease;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class IngestionSchedulerTest {
 
@@ -20,12 +23,26 @@ class IngestionSchedulerTest {
     private final IngestionRetry retry = new IngestionRetry(new IngestionProperties(
             new IngestionProperties.Retry(2, Duration.ZERO, 2.0, Duration.ZERO), 5, null));
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    private final SchedulerLease lease = mock(SchedulerLease.class);
 
     private IngestionScheduler scheduler(IngestionSource... sources) {
         List<IngestionSource> sourceList = List.of(sources);
         IngestionFeedMetrics metrics = new IngestionFeedMetrics(
                 registry, sourceList, new IngestionProperties(null, 5, null));
-        return new IngestionScheduler(sourceList, store, retry, metrics);
+        return new IngestionScheduler(sourceList, store, retry, metrics, lease);
+    }
+
+    @Test
+    void onlyTheInstanceHoldingTheLeasePolls() {
+        IngestionScheduler scheduler = scheduler(new FakeSource("nvd", List.of(event("CVE-1"))));
+
+        when(lease.held()).thenReturn(false);
+        scheduler.pollAll();
+        assertThat(store.stored).isEmpty();
+
+        when(lease.held()).thenReturn(true);
+        scheduler.pollAll();
+        assertThat(store.stored).containsExactly("nvd|CVE-1");
     }
 
     private static RawEvent event(String externalId) {

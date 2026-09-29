@@ -16,6 +16,12 @@ spring:
 gateway:
   identity-uri: ${IDENTITY_URI:http://localhost:8081}
   core-uri: ${CORE_URI:http://localhost:8082}
+  # Callers whose X-Forwarded-For the gateway passes on (a Java regex over the caller's IP; see
+  # ForwardedForFilter). The frontend's BFF sends the browser's address there, and identity-service's /auth
+  # rate limit and audit log key on it; anyone else's claim is replaced with their own address. Only the BFF
+  # should reach the gateway (compose's network, a security group in AWS), so the default trusts private
+  # and loopback addresses. Narrow it to the frontend's subnets where they're known.
+  trusted-proxies: '${GATEWAY_TRUSTED_PROXIES:10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|127\.\d+\.\d+\.\d+|0:0:0:0:0:0:0:1}'
 
 management:
   endpoints:

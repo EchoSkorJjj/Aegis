@@ -1,0 +1,28 @@
+# Provider plugins and module downloads from `terraform init`
+.terraform/
+
+# State stays in HCP Terraform; never commit a local copy (it can hold secrets)
+*.tfstate
+*.tfstate.*
+
+# Each root module's .env (its HCP organization and workspace); .env.example is the committed template
+.env
+
+# Each root's terraform.tfvars holds only non-secret values and is committed. A personal override, or anything
+# secret, goes in a *.local.tfvars instead: ignored here, and kept out of remote runs by .terraformignore.
+*.local.tfvars
+*.local.tfvars.json
+
+# Crash logs and local overrides
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# CLI configuration, which may hold credentials
+.terraformrc
+terraform.rc
+
+# .terraform.lock.hcl stays committed: it pins the provider versions for everyone.

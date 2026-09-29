@@ -45,6 +45,16 @@ are forwarded unchanged.
 Identity-service also serves other paths (e.g. `/users/**`) that are **not** yet routed here; add
 them before pointing the BFF at the gateway.
 
+## Client addresses (X-Forwarded-For)
+
+identity-service's `/auth` rate limit and audit log key on the first `X-Forwarded-For` hop. The frontend's BFF
+sets it to the browser's address (the one address its load balancer recorded, never what the browser wrote).
+[`ForwardedForFilter`](src/main/java/com/aegis/gateway/ForwardedForFilter.java) passes that header on, with the
+caller's own address appended, only when the caller matches `gateway.trusted-proxies` (the BFF's network); from
+anyone else it sends just their own address. Spring Cloud Gateway's own X-Forwarded filter stays off: it keeps an
+entry only when the entry itself is a trusted proxy, which would drop the browser's public address. Without either,
+the gateway strips the header and every user shares one rate-limit bucket.
+
 ## Environment variables
 
 | Var | Default | Purpose |
@@ -53,6 +63,7 @@ them before pointing the BFF at the gateway.
 | `IDENTITY_URI` | `http://localhost:8081` | Downstream identity-service base URI |
 | `CORE_URI` | `http://localhost:8082` | Downstream aegis-core base URI |
 | `IDENTITY_JWKS_URI` | `http://localhost:8081/oauth2/jwks` | Keys to validate access tokens |
+| `GATEWAY_TRUSTED_PROXIES` | private and loopback addresses | Java regex over the caller's IP: whose `X-Forwarded-For` is passed on (the BFF's subnets) |
 | `ZIPKIN_ENDPOINT` | `http://localhost:9411/api/v2/spans` | Trace collector |
 
 ## Build & run

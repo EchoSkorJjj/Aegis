@@ -120,8 +120,14 @@ src/test/java/…      AbstractIntegrationTest + integration tests across the ab
 
 - Passwords hashed with bcrypt (`DelegatingPasswordEncoder`).
 - Refresh tokens are opaque, stored **hashed** (SHA-256), and **rotated** (single-use) on exchange.
-- The RSA signing key is **generated at startup** (ephemeral). For production, load a stable key
-  from a secret manager / keystore so tokens survive restarts and can be rotated deliberately.
+- The RSA signing key comes from `IDENTITY_JWT_PRIVATE_KEY` (`identity.jwt.private-key`): an unencrypted
+  PKCS#8 PEM of at least 2048 bits, e.g. `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048`, handed
+  over by a secret manager. Then tokens survive restarts, and every instance signs with the same key and key id
+  (the key's RFC 7638 thumbprint), so rolling deploys and several instances work. Unset, a key is **generated at
+  startup** — fine for one local instance (the service warns); rotating means setting a new key and redeploying.
+- The `/auth` rate limit and the audit log read the client's address from the first `X-Forwarded-For` hop, which
+  the frontend's BFF and the gateway set (see the gateway's README). Only the gateway and aegis-core should be
+  able to reach this service: a caller reaching it directly could claim any address.
 - **Account lockout:** repeated failed logins lock the account (HTTP 423) for a cooldown.
 - **Email verification & password reset** use single-use, hashed, time-limited tokens. The default
   `EmailSender` **logs** the token (dev only); supply an SMTP-backed `EmailSender` bean for production.

@@ -30,7 +30,8 @@ class GitHubAppConfig {
 
     @Bean
     GitHubAppJwt githubAppJwt(GitHubProperties properties) {
-        return new GitHubAppJwt(properties.privateKeyPath(), properties.clientId(), Clock.systemUTC());
+        return new GitHubAppJwt(properties.privateKey(), properties.privateKeyPath(), properties.clientId(),
+                Clock.systemUTC());
     }
 
     @Bean

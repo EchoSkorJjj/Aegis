@@ -28,8 +28,8 @@ class GitHubConnectionStoreIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private CurrentOrg currentOrg;
 
-    @Autowired
-    private JdbcTemplate jdbc;
+    /** Past row-level security: counts the rows themselves, whichever organization they belong to. */
+    private final JdbcTemplate jdbc = new JdbcTemplate(superuserDataSource());
 
     private final UUID orgA = UUID.randomUUID();
     private final UUID orgB = UUID.randomUUID();
