@@ -97,7 +97,9 @@ For a deployment, three more:
   load balancer).
 - `GATEWAY_TRUSTED_PROXIES` on the gateway: a regex for the frontend's addresses.
 
-The last two decide which address the `/auth` rate limit sees. The AWS settings still to be built are listed in
+The last two decide which address the `/auth` rate limit sees. The AWS deployment sets all three: it's Terraform in
+[`terraform/`](terraform/README.md), with the first deploy's steps in
+[`terraform/environments/README.md`](terraform/environments/README.md) and the reasons behind each setting in
 [`todo/aws-deployment.md`](todo/aws-deployment.md).
 
 ## Testing

@@ -9,7 +9,7 @@ capacity    = "spot"
 
 # 0 until the secrets are filled in and the database roles exist; then 1. Back to 0 between demos.
 desired_count = 0
-image_tag     = "initial" # the tag CI pushed
+image_tag     = "4d90666748f6" # the tag CI pushed
 
 deletion_protection  = false
 registration_enabled = true

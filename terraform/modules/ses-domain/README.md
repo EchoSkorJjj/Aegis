@@ -28,5 +28,6 @@ Used by: global (`global/main.tf`).
   10) and an SPF TXT record (`v=spf1 include:amazonses.com ~all`) on the MAIL FROM domain.
 - DMARC: a TXT record `_dmarc.<domain>` = `v=DMARC1; p=none;`.
 - By hand, outside Terraform: request production access (SES starts in the sandbox), and create the SMTP login in
-  the SES console (SMTP settings → Create SMTP credentials), then put it in each environment's
+  the SES console (SMTP settings → IAM SMTP credentials → Create IAM credentials; not Mail Manager SMTP, which
+  creates a paid ingress endpoint on another host), then put it in each environment's
   `identity/smtp-username` and `identity/smtp-password` parameters.

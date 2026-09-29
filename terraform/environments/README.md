@@ -84,8 +84,11 @@ rm -r "$KEYDIR"
 ```
 
 **The SES SMTP login.** In the SES console, switched to **Asia Pacific (Singapore)** (an SMTP password only works in
-the region it was made in): **SMTP settings → Create SMTP credentials → Create user**. It shows the user name and
-password once; download the `.csv`. One login can serve both environments. Then:
+the region it was made in): **SMTP settings → IAM SMTP credentials → Create IAM credentials → Create user**. It shows
+the user name (it starts with `AKIA`) and the password once; download the `.csv`. One login can serve both
+environments. Not **Mail Manager SMTP → Create SMTP credentials** on the same page: that creates a Mail Manager
+ingress endpoint (a user name starting `inp-`), which identity-service can't send through, at $50 a month each after
+the first. Then:
 
 ```bash
 P=/aegis/dev
