@@ -90,8 +90,8 @@ services:
       # Dev only: seed the demo estate (services, owners, vendors, SBOM components) on startup.
       AEGIS_DEMO_SEED_ENABLED: "true"
       # Ingest real CVEs from the NVD API 2.0. No API key is needed (NVD allows 5 requests per
-      # rolling 30s unauthenticated); set NVD_API_KEY in .env — which is git-ignored — to raise that
-      # to 50. Demo cadence: first poll ~1 min after startup over a one-day window, rather than the
+      # rolling 30s unauthenticated); set AEGIS_NVD_API_KEY in .env — which is git-ignored — to raise
+      # that to 50. Demo cadence: first poll ~1 min after startup over a one-day window, rather than the
       # 15-minute/two-day production defaults, so `docker compose up` shows advisories quickly.
       AEGIS_INGESTION_NVD_ENABLED: "true"
       AEGIS_NVD_API_KEY: ${AEGIS_NVD_API_KEY:-}

@@ -1,123 +1,184 @@
 # Aegis
 
-Aegis is an **identity and access platform**: secure authentication with pluggable multi-factor auth,
-role-based authorization, self-service accounts, and an append-only audit trail — served through an
-API gateway and a Next.js frontend. It is the foundation the wider Aegis platform builds on.
+Aegis is a **supply-chain and operational-resilience platform** for organizations that run many services. It maps
+each service's dependencies, watches vulnerability advisories, vendor outages and security news, works out which
+services each change reaches and how much it matters, and drafts the response (a safe-upgrade pull request, a risk
+ticket, a regulator notification) for a person to approve. Nothing reaches your code, your tracker or a regulator
+without that approval.
+
+## How it works
+
+1. **Map the estate.** Register services with their owners, business criticality and internet exposure. Link a
+   service's repository and Aegis generates its SBOM, which becomes that service's dependency graph.
+2. **Watch for change.** Scheduled connectors pull advisories from NVD and OSV, vendor status pages and security
+   news, and keep one record per CVE.
+3. **Match.** Each change is checked against every service's dependency graph, direct and transitive, with
+   ecosystem-aware version comparison and the evidence for each match.
+4. **Score.** Impact per service and per owner: severity × exposure × business criticality, tiered from critical to
+   low, with every factor shown.
+5. **Draft.** For a vulnerability, a risk ticket plus a pull request that moves each affected dependency to the
+   lowest version clearing every advisory. When a service is materially affected, a DORA notification memo. The
+   AI writes only the narrative, citing its sources.
+6. **Decide.** A person approves or dismisses, with a reason. Whoever drafted a pull request can't approve it.
+7. **Act.** Approval files the ticket in Jira, then opens the pull request as a draft on GitHub. A memo is only made
+   final, for a person to submit; Aegis never sends it.
+
+Matching and scoring are deterministic code, and every decision is a person's. The model only drafts; it never
+decides or acts.
+
+## What's built
+
+| Area | State |
+|---|---|
+| Accounts and organizations | Open sign-up or invite-only; email verification and password reset; a second factor at sign-in by email code, authenticator app (TOTP) or passkey (WebAuthn); sign-in rate limits and lockout; organizations with members and roles; an append-only log of sign-in and admin events |
+| Estate | Services, components, vendors and owners; SBOMs generated from a linked repository or uploaded as CycloneDX; each service's own dependency graph; **Used by** for any package or vendor |
+| Change feeds | NVD; OSV for npm, PyPI, Maven, Go, crates.io and RubyGems; vendor status pages; security news |
+| Matching and scoring | Recomputed on every request; impact per service and per owner, with the factor holding each score down |
+| Responses | **Recommended upgrades** (every vulnerable dependency, highest impact first); risk tickets filed in Jira; draft upgrade pull requests on GitHub for Maven `pom.xml`, npm `package.json` and PyPI `requirements.txt`; DORA regulator memos; four-eyes approval |
+| AI | Drafting through Groq, or an offline stub by default, with citations the server resolves and rate and token budgets |
+| Not yet | Stored findings with a status, and the triage and owner views built on them; an audit trail of decisions with evidence export; notifications and routing to owners; reachability in the score (the assessment endpoint exists, but nothing calls it yet) |
 
 ## Architecture
 
-The browser talks only to the Next.js **frontend** (a BFF that keeps tokens in httpOnly cookies). The
-BFF calls the **gateway**, which authenticates every request at the edge and routes it to the
-**identity-service**:
+![Aegis's services: the browser talks only to the frontend, which calls the gateway; the gateway routes to identity-service and aegis-core, which calls ai-service and both Java services use PostgreSQL](assets/diagrams/system-architecture.png)
 
-```
-Browser → Frontend + BFF (Next.js) → Gateway (Spring Cloud Gateway) → identity-service (Spring Boot) → PostgreSQL
-```
+| Service | Stack | Port | What it does |
+|---|---|---|---|
+| [frontend](frontend/README.md) | Next.js 16, Base UI | 3000 | The UI, and a backend-for-frontend: tokens live in httpOnly cookies, and the browser never calls the API itself |
+| [gateway](backend/gateway/README.md) | Spring Cloud Gateway | 8080 | The single entry point: validates every JWT, routes `/auth`, `/users` and `/orgs` to identity-service and `/api` to aegis-core |
+| [identity-service](backend/identity-service/README.md) | Java 21, Spring Boot 4 | 8081 | Accounts, MFA, organizations and roles; signs RS256 JWTs (JWKS at `/oauth2/jwks`); the audit log |
+| [aegis-core](backend/aegis-core/README.md) | Java 21, Spring Boot 4 | 8082 | The domain: estate, SBOM import, feeds, matching, scoring, responses, and the GitHub and Jira connections |
+| [ai-service](backend/ai-service/README.md) | Python 3.12, FastAPI | 8083 | Drafting behind a strict schema; reachable only from aegis-core, with a service token |
 
-- **identity-service** (Java / Spring Boot) — authentication, users, roles, MFA, and the audit trail;
-  issues RS256 JWTs with a published JWKS endpoint.
-- **gateway** (Spring Cloud Gateway) — the single entry point; validates JWTs and enforces
-  route-level rules, leaving owner-scoped checks to the service.
-- **frontend** (Next.js) — marketing page, the full auth flow, account settings, and an admin console.
+One PostgreSQL 16 database holds a schema per service (`public` for identity-service, `core` for aegis-core), each
+migrated by Flyway.
 
-PostgreSQL (Flyway-migrated), Mailhog (dev SMTP), and Prometheus + Zipkin (metrics + tracing) complete
-the stack; all are wired into Docker Compose.
+**Security model.**
+- The gateway authenticates every request; identity-service and aegis-core validate the token again and authorize
+  it. ai-service accepts only aegis-core's service token.
+- Each organization is a tenant. Every estate and response row carries its organization, enforced by the code and
+  by PostgreSQL row-level security.
+- No one grades their own homework:
+  - Analysts and compliance admins register services, grade them and assign their owners.
+  - Owners maintain only their own services.
+  - Whoever drafts a pull request never approves it.
+  - Compliance admins audit responses, read-only.
+- An organization's admin connects its GitHub installations and Jira site, after a sign-in proves they control them.
+  Jira tokens are sealed with AES-GCM.
+- Feed and model text is untrusted. It's made inert in pull request bodies and Jira descriptions.
 
-## Features
+## Run it locally
 
-**Authentication**
-- Email + password with **pluggable MFA**, each factor toggled by a single env var:
-  - **Email OTP** — 6-digit emailed code; the zero-enrollment baseline.
-  - **TOTP** (RFC 6238) — authenticator apps, secrets encrypted at rest, single-use recovery codes.
-  - **WebAuthn / passkeys** — device biometrics or a security key (FIDO2).
-
-  When more than one factor is enabled, the user chooses a method at login.
-- RS256 JWTs + JWKS (`/oauth2/jwks`); rotating, hashed refresh tokens with per-session and global logout.
-- Per-account login lockout and per-IP rate limiting on `/auth/*`.
-
-**Authorization & accounts**
-- Platform roles `USER` / `PLATFORM_ADMIN` / `ORG_ADMIN` and Aegis domain roles `SERVICE_OWNER` /
-  `ANALYST` / `COMPLIANCE_ADMIN`, persisted and issued by identity-service and mapped to Spring
-  `ROLE_*` authorities. `PLATFORM_ADMIN` is the org-less platform operator; `ORG_ADMIN` administers a
-  single organization. Platform roles are not aliases for domain roles.
-- The opt-in bootstrap account starts with `USER` + `PLATFORM_ADMIN`; an administrator assigns domain
-  roles through the user-management API before those users access domain APIs.
-- Public sign-up toggle (flip to invite-only), admin invite flow, email verification, password reset,
-  and self-service change-password — one backend flag drives both the API and the UI.
-
-**Audit trail**
-- Append-only log of auth and admin events (who / what / when / client IP / outcome), immutable at the
-  database (a trigger rejects updates and deletes), with an admin-only read API.
-
-**Platform**
-- PostgreSQL + Flyway migrations; OpenAPI / Swagger UI; Prometheus metrics and Zipkin tracing;
-  Testcontainers and Playwright test suites.
-
-## Quick start
+With Docker running:
 
 ```bash
 docker compose up --build
 ```
 
-| Service | URL | Notes |
+| Service | Address | Notes |
 |---|---|---|
-| Frontend | http://localhost:3000 | Next.js app — start here |
-| Gateway | http://localhost:8080 | API entry point (JWT auth + routing) |
-| identity-service | http://localhost:8081 | API + `/swagger-ui.html` |
-| PostgreSQL | localhost:5432 | `identity` / `identity` |
-| Mailhog | http://localhost:8025 | dev inbox (SMTP on 1025) |
-| Prometheus / Zipkin | http://localhost:9090 · http://localhost:9411 | metrics / traces |
+| Frontend | http://localhost:3000 | Start here |
+| Gateway | http://localhost:8080 | The API's entry point |
+| identity-service | http://localhost:8081 | API docs at `/swagger-ui.html` |
+| aegis-core | http://localhost:8082 | API docs at `/swagger-ui.html` |
+| PostgreSQL | localhost:5432 | User and password `identity` |
+| Mailhog | http://localhost:8025 | Catches every email, whatever the address |
+| Prometheus, Zipkin | http://localhost:9090, http://localhost:9411 | Metrics and traces |
 
-Sign up at http://localhost:3000, then open the **Mailhog inbox** (http://localhost:8025) for the
-verification link and the login code. Compose seeds a dev admin — **`admin@example.com` /
-`admin-dev-password`** — and enables TOTP so you can try authenticator enrollment in Account settings.
+ai-service has no address on your machine: only aegis-core can reach it.
+
+**First sign-in.**
+1. Sign up at http://localhost:3000. The verification link and each sign-in code arrive in Mailhog.
+2. Create an organization. You're its admin: you manage its members and integrations.
+3. The estate pages need a domain role, which an organization's admin can't give themselves. Invite a second
+   address under **Admin → Users**, set its password from the invitation in Mailhog, and give it **Analyst** (or
+   **Service owner**).
+4. Sign in as that member, add a service under **Inventory → Services** and link its repository.
+
+Compose also seeds a platform admin, `admin@example.com` / `admin-dev-password`. It belongs to no organization and
+manages accounts across all of them.
+
+**Optional integrations.** Copy [`.env.example`](.env.example) to `.env` (git-ignored) and fill in what you want:
+
+| To | Set |
+|---|---|
+| Draft with a real model | `LLM_PROVIDER=groq` and `GROQ_API_KEY` |
+| Raise NVD's rate limit from 5 to 50 requests per 30 seconds | `AEGIS_NVD_API_KEY` |
+| Open upgrade pull requests and clone private repositories | `AEGIS_GITHUB_ENABLED=true`, the GitHub App's client ID and secret, and its key: see [GITHUB_APP.md](backend/aegis-core/GITHUB_APP.md) |
+| File risk tickets in Jira | `AEGIS_JIRA_ENABLED=true`, the Atlassian app's client ID and secret, and `AEGIS_SECRETS_KEY`: see [JIRA.md](backend/aegis-core/JIRA.md) |
 
 ## Configuration
 
-Everything is environment-overridable; the full set of defaults lives in
-[`application.yml`](backend/identity-service/src/main/resources/application.yml). Each optional
-capability is a single flag, read by the backend and mirrored in the UI via `GET /auth/config`:
+Every setting is an environment variable with its default in the service's `application.yml`. The ones you're most
+likely to change:
 
-| Flag | Default | Effect when off |
-|---|---|---|
-| `REGISTRATION_ENABLED` | `true` | Invite-only: `POST /auth/register` → 403 and the UI hides sign-up |
-| `MFA_EMAIL_OTP_ENABLED` | `true` | Email OTP not offered at login |
-| `MFA_TOTP_ENABLED` | `false` | TOTP enrollment hidden / not offered |
-| `MFA_WEBAUTHN_ENABLED` | `false` | Passkeys not offered |
+| Variable | Service | Default | What it does |
+|---|---|---|---|
+| `REGISTRATION_ENABLED` | identity-service | `true` | Public sign-up. `false` makes it invite-only, and the UI hides sign-up |
+| `ORG_SIGNUP_ENABLED` | identity-service | `true` | Whether a signed-in user may create an organization |
+| `MFA_EMAIL_OTP_ENABLED`, `MFA_TOTP_ENABLED`, `MFA_WEBAUTHN_ENABLED` | identity-service | `true`, `false`, `false` | Which second factors are offered (compose turns all three on) |
+| `IDENTITY_JWT_PRIVATE_KEY` | identity-service | generated at startup | The PKCS#8 PEM that signs tokens. Without it, sessions end at every restart and two instances reject each other's tokens |
+| `AEGIS_INGESTION_NVD_ENABLED`, `…_OSV_…`, `…_VENDOR_STATUS_…`, `…_NEWS_…` | aegis-core | `false` | Which feeds are pulled (compose turns all four on) |
+| `AEGIS_DEMO_SEED_ENABLED` | aegis-core | `false` | Seeds a sample estate into the fixed organization the tests use, not into one you create |
+| `LLM_PROVIDER` | ai-service | `stub` | `stub` or `groq` |
+| `TRUSTED_PROXY_HOPS`, `GATEWAY_TRUSTED_PROXIES` | frontend, gateway | 1, any private address | Which `X-Forwarded-For` address the sign-in rate limit trusts: the proxies in front of the frontend, and the addresses the gateway accepts the header from |
 
-Other common knobs: `IDENTITY_BOOTSTRAP_ADMIN_EMAIL` / `…_PASSWORD` (seed an admin),
-`AUTH_COOKIE_SECURE` (set `true` behind HTTPS), and the token-TTL, lockout, and rate-limit settings —
-all in `application.yml`. Ready-made ops metrics and PromQL are in [`ops/README.md`](ops/README.md).
+Scoring weights and tiers: [SCORING-CALIBRATION.md](backend/aegis-core/SCORING-CALIBRATION.md). Metrics and ready-made
+PromQL: [ops/README.md](ops/README.md).
 
-For a deployment, three more:
+## Deploy to AWS
 
-- `IDENTITY_JWT_PRIVATE_KEY`: the PKCS#8 PEM that signs access tokens. Without it a key is generated at startup,
-  so tokens don't survive a restart and two instances reject each other's.
-- `TRUSTED_PROXY_HOPS` on the frontend: how many proxies in front of it append to `X-Forwarded-For` (1 for a
-  load balancer).
-- `GATEWAY_TRUSTED_PROXIES` on the gateway: a regex for the frontend's addresses.
+Aegis runs on AWS in Singapore (`ap-southeast-1`) at **aegisops.pro**, built by the Terraform in
+[`terraform/`](terraform/README.md) through HCP Terraform. Dev serves https://dev.aegisops.pro while it's running,
+and is stopped between demos. Prod is written but not applied yet.
 
-The last two decide which address the `/auth` rate limit sees. The AWS deployment sets all three: it's Terraform in
-[`terraform/`](terraform/README.md), with the first deploy's steps in
-[`terraform/environments/README.md`](terraform/environments/README.md) and the reasons behind each setting in
-[`todo/aws-deployment.md`](todo/aws-deployment.md).
+![Aegis on AWS: users reach an Application Load Balancer in public subnets, which forwards to five Fargate services in private subnets; RDS PostgreSQL sits in isolated subnets, and outbound traffic leaves through a NAT instance](assets/diagrams/aws-architecture.png)
+
+- **Only the load balancer is public**, and it forwards to the frontend alone. Each service is its own Fargate task
+  with its own security group, so it accepts only the callers drawn above; the database accepts only
+  identity-service and aegis-core.
+- **Services find each other by name** through Cloud Map, e.g. `gateway.dev.aegis.internal:8080`.
+- **Outbound traffic** (the feeds, GitHub, Jira, Groq, SES) leaves through one small NAT instance instead of a NAT
+  Gateway. Image layers come from S3 through a gateway endpoint.
+- **No secret is in Terraform's state.** The services' secrets are SSM parameters a person creates. The database's
+  master password is RDS's own, kept in Secrets Manager. Everything is encrypted with AWS-managed keys.
+- **Dev runs on Fargate Spot, prod on regular Fargate.** Setting `desired_count = 0` stops the services between
+  demos.
+- **Images are built for `linux/amd64` and pushed to ECR by hand** for now. A push role for GitHub Actions is ready
+  for when a workflow does it.
+
+Where to go next:
+- [terraform/README.md](terraform/README.md): the layout and how to run it.
+- [terraform/environments/README.md](terraform/environments/README.md): a first deploy, step by step.
+- [todo/aws-deployment.md](todo/aws-deployment.md): why each setting is what it is.
 
 ## Testing
 
-```bash
-# Backend — integration tests against a real Postgres (Docker required)
-cd backend/identity-service && mvn verify
+| Service | Command | Needs |
+|---|---|---|
+| identity-service | `./mvnw verify` | Docker (Testcontainers) |
+| aegis-core | `./mvnw verify` | Docker. `./mvnw -Dtest=PackageStructureArchTest test` checks the module boundaries without it |
+| gateway | `mvn verify` | Docker |
+| ai-service | `pip install -e '.[dev]'`, then `pytest` | Nothing else |
+| frontend | `pnpm exec tsc --noEmit`, `pnpm lint`, `pnpm build` | Nothing else |
+| frontend end to end | `pnpm exec playwright install chromium`, then `pnpm test:e2e` | The stack running (`docker compose up`) |
 
-# Frontend — Playwright end-to-end (real Chromium)
-cd frontend && pnpm exec playwright install chromium && pnpm test:e2e
+Run each from the service's folder. Every service has its own workflow in [`.github/workflows`](.github/workflows),
+run on the pushes and pull requests that touch it: `identity-service-ci`, `gateway-ci`, `aegis-core-ci`,
+`ai-service-ci` (ruff and pytest) and `frontend-e2e` (Playwright).
+
+## Repository layout
+
 ```
-
-Both suites run in CI on every push/PR (`backend-ci`, `frontend-e2e`). The E2E workflow boots
-identity-service and the gateway against Postgres + Mailhog, then drives the full sign-up / sign-in
-flow through the gateway.
-
-## Roadmap
-
-The wider **Aegis** platform — supply-chain resilience services that build on this identity
-foundation — is in progress. Near-term hardening for the platform itself: SSO / OIDC federation (via
-the existing delegated-auth seam) and externalized secrets (Vault / KMS).
+backend/
+  identity-service/   accounts, MFA, organizations, roles, audit log
+  gateway/            the entry point: JWT validation and routing
+  aegis-core/         the domain: estate, feeds, matching, scoring, responses
+  ai-service/         drafting, in Python
+frontend/             Next.js UI and backend-for-frontend
+terraform/            AWS: bootstrap, global, environments/dev and prod, modules
+ops/                  Prometheus configuration and PromQL
+assets/diagrams/      the README's diagrams: SVG sources and their PNGs
+todo/                 deployment notes
+docker-compose.yml    the whole stack, locally
+```
