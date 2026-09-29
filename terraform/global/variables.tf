@@ -43,7 +43,7 @@ variable "monthly_budget_usd" {
 }
 
 variable "budget_alert_emails" {
-  description = "Who gets the budget alerts. Empty: the budget exists, but alerts nobody."
+  description = "Who gets the budget alerts."
   type        = list(string)
   default     = []
 }
