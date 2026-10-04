@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Aegis on AWS. The source of aws-architecture.png: edit this file, then render it again (see README.md here).
+  Icons come from Iconify's open-source sets (logos: AWS architecture icons; lucide: glyphs). Amazon ECR and
+  AWS Cloud Map have no icon there, so they're drawn as AWS-style category tiles.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1600" height="1180"
+     viewBox="0 0 1600 1180" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#232F3E"/>
+    </marker>
+    <marker id="arrow-grey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7D8998"/>
+    </marker>
+    <style>
+      .title { font-size: 26px; font-weight: 700; fill: #232F3E; }
+      .subtitle { font-size: 14px; fill: #545B64; }
+      .group { font-size: 14px; font-weight: 600; fill: #232F3E; }
+      .name { font-size: 14px; font-weight: 600; fill: #232F3E; text-anchor: middle; }
+      .detail { font-size: 12px; fill: #545B64; text-anchor: middle; }
+      .card-name { font-size: 14px; font-weight: 600; fill: #232F3E; }
+      .card-detail { font-size: 12px; fill: #545B64; }
+      .list-name { font-size: 14px; font-weight: 600; fill: #232F3E; }
+      .list-detail { font-size: 12px; fill: #545B64; }
+      .edge { stroke: #232F3E; stroke-width: 1.6; fill: none; }
+      .edge-dashed { stroke: #7D8998; stroke-width: 1.4; fill: none; stroke-dasharray: 6 4; }
+      .edge-label { font-size: 12px; fill: #232F3E; }
+      .edge-label-bg { fill: #FFFFFF; }
+      .note { font-size: 12px; fill: #545B64; font-style: italic; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1180" fill="#FFFFFF"/>
+
+  <!-- Title -->
+  <text x="40" y="58" class="title">Aegis on AWS</text>
+  <text x="40" y="84" class="subtitle">dev at dev.aegisops.pro, prod at aegisops.pro · one VPC per environment</text>
+
+  <!-- Outside AWS, left: HCP Terraform, the registrar, users -->
+  <image href="https://api.iconify.design/logos/terraform-icon.svg" x="93" y="108" width="44" height="44"/>
+  <text x="115" y="170" class="name">HCP Terraform</text>
+  <text x="115" y="186" class="detail">plans and applies</text>
+
+  <image href="https://api.iconify.design/lucide/globe.svg?color=%23545B64" x="93" y="226" width="44" height="44"/>
+  <text x="115" y="288" class="name">GoDaddy</text>
+  <text x="115" y="304" class="detail">registrar</text>
+
+  <image href="https://api.iconify.design/lucide/users.svg?color=%23232F3E" x="93" y="418" width="44" height="44"/>
+  <text x="115" y="480" class="name">Users</text>
+  <text x="115" y="496" class="detail">in a browser</text>
+
+  <!-- Outside AWS, top right: what the services reach through the NAT instance -->
+  <rect x="860" y="20" width="720" height="112" rx="8" fill="#FAFAFA" stroke="#AAB7B8" stroke-dasharray="4 3"/>
+  <text x="878" y="42" class="group">Internet</text>
+  <image href="https://api.iconify.design/lucide/shield-alert.svg?color=%23D13212" x="941" y="50" width="34" height="34"/>
+  <text x="958" y="102" class="name">NVD, OSV</text>
+  <text x="958" y="118" class="detail">advisories</text>
+  <image href="https://api.iconify.design/lucide/rss.svg?color=%23ED7100" x="1073" y="50" width="34" height="34"/>
+  <text x="1090" y="102" class="name">Status pages, news</text>
+  <text x="1090" y="118" class="detail">outages, threat news</text>
+  <image href="https://api.iconify.design/logos/github-icon.svg" x="1213" y="50" width="34" height="34"/>
+  <text x="1230" y="102" class="name">GitHub</text>
+  <text x="1230" y="118" class="detail">clones, draft PRs</text>
+  <image href="https://api.iconify.design/logos/jira.svg" x="1343" y="50" width="34" height="34"/>
+  <text x="1360" y="102" class="name">Jira</text>
+  <text x="1360" y="118" class="detail">risk tickets</text>
+  <image href="https://api.iconify.design/thesvg-color/groq.svg" x="1473" y="50" width="34" height="34"/>
+  <text x="1490" y="102" class="name">Groq</text>
+  <text x="1490" y="118" class="detail">drafting model</text>
+
+  <!-- AWS Cloud -->
+  <rect x="230" y="150" width="1350" height="1010" fill="none" stroke="#232F3E" stroke-width="1.5"/>
+  <image href="https://api.iconify.design/logos/aws.svg" x="244" y="160" width="36" height="22"/>
+  <text x="290" y="177" class="group">AWS Cloud</text>
+
+  <!-- Region -->
+  <rect x="255" y="195" width="1300" height="945" fill="none" stroke="#00A4A6" stroke-width="1.5" stroke-dasharray="7 4"/>
+  <image href="https://api.iconify.design/lucide/flag.svg?color=%2300A4A6" x="268" y="203" width="18" height="18"/>
+  <text x="292" y="217" class="group">Asia Pacific (Singapore), ap-southeast-1</text>
+
+  <!-- Regional edge of the stack: DNS, certificate, the role HCP Terraform assumes -->
+  <image href="https://api.iconify.design/logos/aws-route53.svg" x="318" y="232" width="44" height="44"/>
+  <text x="340" y="294" class="name">Route 53</text>
+  <text x="340" y="310" class="detail">aegisops.pro, alias to the ALB</text>
+  <image href="https://api.iconify.design/logos/aws-certificate-manager.svg" x="458" y="232" width="44" height="44"/>
+  <text x="480" y="294" class="name">ACM</text>
+  <text x="480" y="310" class="detail">TLS certificate</text>
+  <image href="https://api.iconify.design/logos/aws-iam.svg" x="598" y="232" width="44" height="44"/>
+  <text x="620" y="294" class="name">IAM</text>
+  <text x="620" y="310" class="detail">OIDC role, no stored keys</text>
+
+  <!-- VPC -->
+  <rect x="280" y="345" width="880" height="775" fill="none" stroke="#8C4FFF" stroke-width="1.5"/>
+  <image href="https://api.iconify.design/logos/aws-vpc.svg" x="292" y="353" width="22" height="22"/>
+  <text x="322" y="369" class="group">VPC, across two availability zones</text>
+
+  <!-- Public subnets -->
+  <rect x="305" y="390" width="830" height="150" fill="#F2F6E8" stroke="#7AA116" stroke-width="1.2"/>
+  <image href="https://api.iconify.design/lucide/lock-open.svg?color=%237AA116" x="315" y="397" width="16" height="16"/>
+  <text x="337" y="410" class="group" fill="#3B4F12">Public subnets</text>
+  <image href="https://api.iconify.design/logos/aws-elb.svg" x="373" y="418" width="44" height="44"/>
+  <text x="395" y="482" class="name">Application Load Balancer</text>
+  <text x="395" y="498" class="detail">HTTPS; HTTP redirects to it</text>
+  <image href="https://api.iconify.design/logos/aws-ec2.svg" x="1018" y="418" width="44" height="44"/>
+  <text x="1040" y="482" class="name">NAT instance</text>
+  <text x="1040" y="498" class="detail">EC2 t4g.nano</text>
+
+  <!-- Private subnets: the five services -->
+  <rect x="305" y="570" width="830" height="330" fill="#E6F6F7" stroke="#00A4A6" stroke-width="1.2"/>
+  <image href="https://api.iconify.design/lucide/lock.svg?color=%23007E80" x="412" y="577" width="16" height="16"/>
+  <text x="434" y="590" class="group" fill="#00585A">Private subnets: ECS on Fargate, one task per service</text>
+
+  <g>
+    <rect x="320" y="615" width="150" height="76" rx="8" fill="#FFFFFF" stroke="#ED7100" stroke-width="1.2"/>
+    <image href="https://api.iconify.design/logos/aws-fargate.svg" x="330" y="637" width="30" height="30"/>
+    <text x="368" y="648" class="card-name">frontend</text>
+    <text x="368" y="666" class="card-detail">Next.js, BFF</text>
+
+    <rect x="520" y="615" width="150" height="76" rx="8" fill="#FFFFFF" stroke="#ED7100" stroke-width="1.2"/>
+    <image href="https://api.iconify.design/logos/aws-fargate.svg" x="530" y="637" width="30" height="30"/>
+    <text x="568" y="648" class="card-name">gateway</text>
+    <text x="568" y="666" class="card-detail">checks every JWT</text>
+
+    <rect x="760" y="615" width="150" height="76" rx="8" fill="#FFFFFF" stroke="#ED7100" stroke-width="1.2"/>
+    <image href="https://api.iconify.design/logos/aws-fargate.svg" x="770" y="637" width="30" height="30"/>
+    <text x="808" y="648" class="card-name">aegis-core</text>
+    <text x="808" y="666" class="card-detail">the domain</text>
+
+    <rect x="965" y="615" width="150" height="76" rx="8" fill="#FFFFFF" stroke="#ED7100" stroke-width="1.2"/>
+    <image href="https://api.iconify.design/logos/aws-fargate.svg" x="975" y="637" width="30" height="30"/>
+    <text x="1013" y="648" class="card-name">ai-service</text>
+    <text x="1013" y="666" class="card-detail">drafting</text>
+
+    <rect x="520" y="790" width="164" height="76" rx="8" fill="#FFFFFF" stroke="#ED7100" stroke-width="1.2"/>
+    <image href="https://api.iconify.design/logos/aws-fargate.svg" x="530" y="812" width="30" height="30"/>
+    <text x="568" y="823" class="card-name">identity-service</text>
+    <text x="568" y="841" class="card-detail">accounts, MFA</text>
+  </g>
+
+  <image href="https://api.iconify.design/logos/aws-s3.svg" x="1018" y="790" width="44" height="44"/>
+  <text x="1040" y="852" class="name">S3 gateway endpoint</text>
+  <text x="1040" y="868" class="detail">image layers skip the NAT</text>
+  <text x="320" y="872" class="note">Fargate Spot in dev, regular in prod;</text>
+  <text x="320" y="888" class="note">desired_count 0 stops the services</text>
+
+  <!-- Isolated subnets: the database -->
+  <rect x="305" y="930" width="830" height="170" fill="#F2F3F3" stroke="#7D8998" stroke-width="1.2"/>
+  <image href="https://api.iconify.design/lucide/lock.svg?color=%23545B64" x="315" y="937" width="16" height="16"/>
+  <text x="337" y="950" class="group" fill="#3F4750">Isolated subnets: no route out</text>
+  <image href="https://api.iconify.design/logos/aws-rds.svg" x="693" y="980" width="44" height="44"/>
+  <text x="715" y="1042" class="name">RDS PostgreSQL 16</text>
+  <text x="715" y="1058" class="detail">db.t4g.micro; schemas public and core</text>
+
+  <!-- Regional services the tasks use -->
+  <rect x="1190" y="345" width="340" height="775" rx="6" fill="#FAFAFA" stroke="#AAB7B8" stroke-dasharray="4 3"/>
+  <text x="1208" y="369" class="group">Used by every task</text>
+
+  <rect x="1212" y="392" width="44" height="44" rx="6" fill="#ED7100"/>
+  <image href="https://api.iconify.design/lucide/container.svg?color=white" x="1220" y="400" width="28" height="28"/>
+  <text x="1272" y="410" class="list-name">Amazon ECR</text>
+  <text x="1272" y="428" class="list-detail">one image repository per service</text>
+
+  <image href="https://api.iconify.design/logos/aws-systems-manager.svg" x="1212" y="512" width="44" height="44"/>
+  <text x="1272" y="530" class="list-name">SSM Parameter Store</text>
+  <text x="1272" y="548" class="list-detail">the services' secrets, created by hand</text>
+
+  <image href="https://api.iconify.design/logos/aws-secrets-manager.svg" x="1212" y="632" width="44" height="44"/>
+  <text x="1272" y="650" class="list-name">Secrets Manager</text>
+  <text x="1272" y="668" class="list-detail">the database's master password</text>
+
+  <image href="https://api.iconify.design/logos/aws-cloudwatch.svg" x="1212" y="752" width="44" height="44"/>
+  <text x="1272" y="770" class="list-name">CloudWatch Logs</text>
+  <text x="1272" y="788" class="list-detail">one log group per service</text>
+
+  <rect x="1212" y="872" width="44" height="44" rx="6" fill="#8C4FFF"/>
+  <image href="https://api.iconify.design/lucide/map-pin.svg?color=white" x="1220" y="880" width="28" height="28"/>
+  <text x="1272" y="890" class="list-name">Cloud Map</text>
+  <text x="1272" y="908" class="list-detail">gateway.dev.aegis.internal and so on</text>
+
+  <image href="https://api.iconify.design/logos/aws-ses.svg" x="1212" y="992" width="44" height="44"/>
+  <text x="1272" y="1010" class="list-name">Amazon SES</text>
+  <text x="1272" y="1028" class="list-detail">verification and sign-in emails</text>
+
+  <!-- Edges: requests (solid), DNS and control (dashed) -->
+  <path d="M142 440 L 366 440" class="edge" marker-end="url(#arrow)"/>
+  <rect x="164" y="424" width="44" height="16" class="edge-label-bg"/>
+  <text x="168" y="436" class="edge-label">HTTPS</text>
+
+  <path d="M142 248 L 311 252" class="edge-dashed" marker-end="url(#arrow-grey)"/>
+  <rect x="146" y="231" width="80" height="15" class="edge-label-bg"/>
+  <text x="148" y="243" class="edge-label">name servers</text>
+
+  <path d="M142 128 C 330 140, 520 170, 606 226" class="edge-dashed" marker-end="url(#arrow-grey)"/>
+  <rect x="352" y="128" width="112" height="15" class="edge-label-bg"/>
+  <text x="354" y="140" class="edge-label">assumes the role</text>
+
+
+  <path d="M395 504 L 395 609" class="edge" marker-end="url(#arrow)"/>
+  <path d="M470 653 L 514 653" class="edge" marker-end="url(#arrow)"/>
+  <path d="M670 653 L 754 653" class="edge" marker-end="url(#arrow)"/>
+  <rect x="696" y="630" width="30" height="15" class="edge-label-bg"/>
+  <text x="700" y="642" class="edge-label">/api</text>
+  <path d="M595 691 L 595 784" class="edge" marker-end="url(#arrow)"/>
+  <rect x="602" y="730" width="126" height="15" class="edge-label-bg"/>
+  <text x="604" y="742" class="edge-label">/auth, /users, /orgs</text>
+  <path d="M800 691 L 690 800" class="edge" marker-end="url(#arrow)"/>
+  <path d="M910 653 L 959 653" class="edge" marker-end="url(#arrow)"/>
+  <path d="M595 866 C 600 930, 650 990, 687 1000" class="edge" marker-end="url(#arrow)"/>
+  <path d="M850 691 C 850 850, 790 980, 743 1000" class="edge" marker-end="url(#arrow)"/>
+
+  <path d="M1040 570 L 1040 510" class="edge" marker-end="url(#arrow)"/>
+  <text x="1032" y="560" class="edge-label" text-anchor="end">outbound, every task</text>
+  <path d="M1040 414 L 1040 138" class="edge" marker-end="url(#arrow)"/>
+
+  <path d="M1135 735 L 1184 735" class="edge-dashed" marker-end="url(#arrow-grey)"/>
+</svg>
