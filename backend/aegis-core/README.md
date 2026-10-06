@@ -41,8 +41,32 @@ and the modules are cycle-free.
 | `inventory`  | Services and their repository links, components, vendors, SBOM dependencies, ownership — the map. Each service has its own dependency graph (`DependencyGraph`, V29): the one walk behind matching, the upgrade recommendations and "Used by" |
 | `matching`   | Advisory package + version range → components → impacted services/owners + evidence chains |
 | `scoring`    | Deterministic impact score per service and owner, with a "why" breakdown |
+| `findings`   | Live material changes ranked by score, filtered by service/owner, with server-side pagination; reuses matching and scoring |
 | `actions`    | Approved responses: the draft-PR port + GitHub App adapter and safe-upgrade proposals (`pr`, `upgrade`, E8 story 4), the issue-tracker port + Jira adapter and risk tickets (`tracker`, `ticket`, story 5), and DORA regulator memos (`memo`, story 6) |
 | `ai`         | **Port** to the Python ai-service: `AiAssessor` / `AiDrafter` + DTOs + `HttpAiClient` |
+
+## Material findings and item detail (E9 Stories 1–2)
+
+`GET /api/findings?serviceId={id}&ownerId={id}&mine=true&page=0&size=20` returns `items`
+(a Spring page), service/owner filter options from the active org, and `ownedServiceCount`.
+All filters are optional. Owner IDs are inventory owner rows; `mine` is derived from the authenticated
+JWT subject and verified assignments. Service and owner constraints apply to the same service.
+
+One item represents one change with its material affected services, ranked by the highest of those
+services' scores within the selected scope. Equal scores sort by change ID. Filtering, materiality and
+ranking happen before pagination. Vulnerability candidates come from `VulnerableDependencies`, including
+transitive dependencies and old CVEs; vendor outages use the existing scoring/matching path. There is
+no date cutoff. Security news has no identity to correlate and cannot produce a scored finding yet.
+The queue is recomputed on each request, including page/filter changes; candidate vulnerabilities are
+found in batches, then each candidate change is scored through `ScoringService`.
+
+The frontend's `/findings` and `/findings/mine` are triage views. `/findings/{changeSignalId}` reuses
+the change-impact view, with the original change summary/source, all impacted services and owners,
+score factors and match evidence, plus each service's existing drafted response and upgrade edits.
+Drafting and decisions reuse the response API and its RBAC/four-eyes rules. `/responses/review` now
+contains drafted decisions only; vulnerable dependency recommendations remain on each service's page.
+Findings remain live projections: persisted snapshots, lifecycle state, routing and notifications
+are separate stories. No database migration is needed.
 
 ## Service repositories and draft PR providers (E8 Story 2)
 

@@ -34,9 +34,10 @@ decides or acts.
 | Estate | Services, components, vendors and owners; SBOMs generated from a linked repository or uploaded as CycloneDX; each service's own dependency graph; **Used by** for any package or vendor |
 | Change feeds | NVD; OSV for npm, PyPI, Maven, Go, crates.io and RubyGems; vendor status pages; security news |
 | Matching and scoring | Recomputed on every request; impact per service and per owner, with the factor holding each score down |
-| Responses | **Recommended upgrades** (every vulnerable dependency, highest impact first); risk tickets filed in Jira; draft upgrade pull requests on GitHub for Maven `pom.xml`, npm `package.json` and PyPI `requirements.txt`; DORA regulator memos; four-eyes approval |
+| Findings | Material vulnerabilities and vendor outages ranked by impact; service/owner filters and pagination; an assigned owner's view; detail with affected services/owners, score factors, evidence and drafted responses |
+| Responses | Drafted responses awaiting decisions; risk tickets filed in Jira; draft upgrade pull requests on GitHub for Maven `pom.xml`, npm `package.json` and PyPI `requirements.txt`; DORA regulator memos; four-eyes approval. Vulnerable dependencies and recommended upgrades remain on each service's page |
 | AI | Drafting through Groq, or an offline stub by default, with citations the server resolves and rate and token budgets |
-| Not yet | Stored findings with a status, and the triage and owner views built on them; an audit trail of decisions with evidence export; notifications and routing to owners; reachability in the score (the assessment endpoint exists, but nothing calls it yet) |
+| Not yet | Stored finding snapshots and lifecycle status (triage currently reads live scores); an audit trail of decisions with evidence export; notifications and routing to owners; reachability in the score (the assessment endpoint exists, but nothing calls it yet) |
 
 ## Architecture
 

@@ -14,37 +14,45 @@ import type { RiskTicket } from "@/lib/types";
 
 /**
  * The responses drafted for one change and not dismissed, keyed by service — so the impact page links to a
- * response instead of offering to draft it again. Null while loading.
+ * response instead of offering to draft it again. Fetches every page; failures remain visible rather
+ * than being treated as an empty list. The impact view remounts this hook on a workspace change.
  */
-export function useResponses(changeSignalId: string, enabled: boolean): Map<string, RiskTicket> | null {
+export function useResponses(changeSignalId: string, enabled: boolean) {
   const [responses, setResponses] = useState<Map<string, RiskTicket> | null>(null);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setResponses(null);
-    ticketApi
-      .list({ changeSignalId, status: ["PROPOSED", "FILING", "FILED", "FAILED"], size: 100 })
-      .then((page) => {
-        if (cancelled) return;
-        // Newest first, so the first response for a service is the one to show.
-        const byService = new Map<string, RiskTicket>();
+    setError(false);
+    async function load() {
+      // Newest first, so the first response for a service is the one to show.
+      const byService = new Map<string, RiskTicket>();
+      let pageIndex = 0;
+      while (!cancelled) {
+        const page = await ticketApi.list({
+          changeSignalId, status: ["PROPOSED", "FILING", "FILED", "FAILED"], size: 100, page: pageIndex,
+        });
         for (const response of page.content) {
           if (!byService.has(response.serviceId)) byService.set(response.serviceId, response);
         }
-        setResponses(byService);
-      })
+        pageIndex++;
+        if (pageIndex >= page.totalPages) break;
+      }
+      if (!cancelled) setResponses(byService);
+    }
+    load()
       .catch(() => {
-        // Offer drafting anyway; the backend refuses a duplicate with a link to the current response.
-        if (!cancelled) setResponses(new Map());
+        if (!cancelled) setError(true);
       });
     return () => {
       cancelled = true;
     };
   }, [changeSignalId, enabled]);
 
-  return responses;
+  return { responses, error };
 }
 
 /**
