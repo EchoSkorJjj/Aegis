@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 
 import com.aegis.core.matching.MatchingDtos.ChangeRef;
 import com.aegis.core.matching.MatchingDtos.EvidenceChain;
+import com.aegis.core.platform.common.SensitiveText;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.signals.ChangeSignal;
 
@@ -36,12 +37,12 @@ public final class DraftEvidence {
         lines.add("Source: " + change.sourceId() + " / " + change.externalId() + ".");
         lines.add("Source URL: " + (blank(url) ? "not published" : url.strip()));
         lines.add("Source time: " + (occurredAt == null ? "not published" : occurredAt.toString()));
-        String excerpt = blank(summary) ? "not published" : summary.strip();
+        String excerpt = blank(summary) ? "not published" : SensitiveText.redact(summary.strip());
         if (excerpt.length() > MAX_EXCERPT) {
             excerpt = excerpt.substring(0, MAX_EXCERPT) + "… [excerpt truncated]";
         }
         lines.add("Source excerpt: " + excerpt);
-        return List.copyOf(lines);
+        return SensitiveText.redact(lines);
     }
 
     /** Matching paths, affected service and owners, and every factor needed to reproduce its score. */
@@ -57,8 +58,8 @@ public final class DraftEvidence {
                 .strip());
         lines.add("Affected service: " + scored.service().name() + " (" + scored.service().id() + "), "
                 + scored.service().criticality() + " criticality, " + scored.service().exposure() + ".");
-        lines.add("Service owners: " + (scored.owners().isEmpty() ? "none assigned" : scored.owners().stream()
-                .map(owner -> owner.name() + " (" + owner.userId() + ")").collect(Collectors.joining(", "))) + ".");
+        lines.add("Service owners: " + (scored.owners().isEmpty() ? "none assigned"
+                : scored.owners().size() + " assigned (personal details omitted)") + ".");
         lines.add("Match confidence: " + scored.confidence() + ".");
         var breakdown = scored.breakdown();
         if (breakdown != null) {
@@ -75,7 +76,7 @@ public final class DraftEvidence {
                     + (factor.limiting() ? "; limiting factor" : "")
                     + (factor.setting() == null ? "" : "; setting " + factor.setting()) + "."));
         }
-        return List.copyOf(lines);
+        return SensitiveText.redact(lines);
     }
 
     /** A quoted source passage must remain text when the memo is downloaded as Markdown. */
@@ -88,7 +89,7 @@ public final class DraftEvidence {
         if (text == null) {
             return "";
         }
-        return text.replace("\r", "").replace("<", "&lt;").replace("@", "@\u200b")
+        return SensitiveText.redact(text).replace("\r", "").replace("<", "&lt;").replace("@", "@\u200b")
                 .replaceAll("#(\\d)", "#\u200b$1").replace("![", "!\u200b[");
     }
 

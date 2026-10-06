@@ -7,6 +7,7 @@ import java.util.UUID;
 
 import com.aegis.core.actions.tracker.IssueTracker.FiledIssue;
 import com.aegis.core.actions.tracker.IssueTracker.Priority;
+import com.aegis.core.platform.common.SensitiveText;
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 import com.aegis.core.signals.ChangeSignal.SignalType;
 
@@ -49,10 +50,17 @@ public record RiskTicket(
         long version) {
 
     public RiskTicket {
-        labels = List.copyOf(labels);
-        actions = List.copyOf(actions);
-        evidence = List.copyOf(evidence);
-        citations = List.copyOf(citations);
+        changeTitle = SensitiveText.redact(changeTitle);
+        title = SensitiveText.redact(title);
+        labels = List.copyOf(SensitiveText.redact(labels));
+        summary = SensitiveText.redact(summary);
+        risk = SensitiveText.redact(risk);
+        impact = SensitiveText.redact(impact);
+        actions = List.copyOf(SensitiveText.redact(actions));
+        evidence = List.copyOf(SensitiveText.redact(evidence));
+        citations = List.copyOf(SensitiveText.redact(citations));
+        dismissReason = SensitiveText.redact(dismissReason);
+        failureMessage = SensitiveText.redact(failureMessage);
     }
 
     /** Approved by {@code approver}; the issue is about to be filed. */

@@ -9,6 +9,8 @@ from html import escape
 from importlib.resources import files
 from typing import Literal
 
+from ai_service.capabilities._guardrails import redact
+
 PASSAGE_CHARS = 1000
 
 
@@ -26,7 +28,8 @@ def build_prompt(
     *,
     draft_type: Literal["risk_ticket", "upgrade", "memo"] | None = None,
 ) -> Prompt:
-    """Split without trimming or truncation; retain originals for server-side citation resolution."""
+    """Redact whole sources before splitting; citations resolve to the same protected passages."""
+    sources = [(prefix, redact(text)) for prefix, text in sources]
     passages = {
         f"{prefix}{index // PASSAGE_CHARS + 1}": text[index : index + PASSAGE_CHARS]
         for prefix, text in sources
@@ -44,4 +47,4 @@ def build_prompt(
     user = resources.joinpath(f"{template}.user.md").read_text(encoding="utf-8").format(
         passages=blocks, draft_type=draft_type
     )
-    return Prompt(f"{template}.v1", system, user, passages)
+    return Prompt(f"{template}.v2", system, user, passages)

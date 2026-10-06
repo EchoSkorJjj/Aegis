@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.ServiceExposure;
+import com.aegis.core.platform.common.SensitiveText;
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 import com.aegis.core.signals.ChangeSignal.SignalType;
 
@@ -42,13 +43,23 @@ public record RegulatorMemo(
         long version) {
 
     public RegulatorMemo {
+        changeTitle = SensitiveText.redact(changeTitle);
         services = List.copyOf(services);
-        citations = List.copyOf(citations);
+        summary = SensitiveText.redact(summary);
+        impact = SensitiveText.redact(impact);
+        measures = SensitiveText.redact(measures);
+        nextSteps = SensitiveText.redact(nextSteps);
+        citations = List.copyOf(SensitiveText.redact(citations));
+        body = SensitiveText.redact(body);
+        dismissReason = SensitiveText.redact(dismissReason);
     }
 
     /** A service the change affects, as Aegis scored it when the memo was drafted. */
     public record AffectedService(UUID serviceId, String name, BusinessCriticality criticality,
                                   ServiceExposure exposure, double score, ImpactTier tier, boolean material) {
+        public AffectedService {
+            name = SensitiveText.redact(name);
+        }
     }
 
     RegulatorMemo approved(UUID by, Instant at) {

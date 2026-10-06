@@ -87,6 +87,39 @@ class HttpAiClientTest {
     }
 
     @Test
+    void draftRequestsAndAllReturnedNarrativeFieldsAreRedactedAtThePort() {
+        String sensitive = "alice@example.test password=opaque-credential";
+        body = JSON.writeValueAsString(Map.of("draft_type", "risk_ticket", "content", sensitive,
+                "ticket", Map.of("summary", sensitive, "risk", sensitive, "impact", sensitive,
+                        "actions", List.of(sensitive)), "citations", List.of(sensitive)));
+
+        AiDtos.Draft draft = client.draft(new AiDtos.DraftRequest("proposal-1", "risk_ticket", sensitive));
+
+        assertThat(seenBody.get()).contains("[REDACTED]").doesNotContain("alice@example.test", "opaque-credential");
+        assertThat(draft.content()).isEqualTo("[REDACTED] [REDACTED]");
+        assertThat(draft.ticket().summary()).isEqualTo(draft.content());
+        assertThat(draft.ticket().risk()).isEqualTo(draft.content());
+        assertThat(draft.ticket().impact()).isEqualTo(draft.content());
+        assertThat(draft.ticket().actions()).containsExactly(draft.content());
+        assertThat(draft.citations()).containsExactly(draft.content());
+    }
+
+    @Test
+    void assessmentAndMemoFieldsAreProtectedEvenIfTheAiServiceReturnsSensitiveText() {
+        body = "{\"material\":true,\"rationale\":\"alice@example.test\",\"suggested_severity\":\"HIGH\","
+                + "\"citations\":[\"password=opaque-credential\"]}";
+        AiDtos.Assessment result = client.assess(new AiDtos.AssessmentRequest("f-1", "password=opaque-credential",
+                "alice@example.test"));
+        assertThat(seenBody.get()).doesNotContain("alice@example.test", "opaque-credential");
+        assertThat(result.rationale()).isEqualTo("[REDACTED]");
+        assertThat(result.citations()).containsExactly("[REDACTED]");
+        var memo = new AiDtos.MemoSections("alice@example.test", "phone: 555-123-4567",
+                "password=opaque-credential", "full_name: Alice Smith");
+        assertThat(List.of(memo.summary(), memo.impact(), memo.measures(), memo.nextSteps()))
+                .containsOnly("[REDACTED]");
+    }
+
+    @Test
     void anErrorStatusBecomesASafeUpstreamFailure() {
         status = 503;
         body = "{\"message\":\"LLM daily token budget exhausted\"}";

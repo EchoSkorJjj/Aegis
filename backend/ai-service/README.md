@@ -34,8 +34,8 @@ adapter using the existing `httpx` dependency; no Groq SDK or optional package e
 The `anthropic` provider remains explicitly unimplemented, including when the reserved `llm` extra
 is installed. Unknown providers or Groq without a key fail at startup.
 
-Prompts are package resources, loaded with `importlib.resources` and identified as `assess.v1` and
-`draft.v1`. Untrusted advisory and service text is placed in numbered, escaped data blocks. Embedded
+Prompts are package resources, loaded with `importlib.resources` and identified as `assess.v2`,
+`draft.v2`, `draft_risk_ticket.v2` and `draft_memo.v2`. Untrusted advisory and service text is placed in numbered, escaped data blocks. Embedded
 delimiters cannot close those blocks. Prompts instruct the model to treat their content as data,
 and never to perform matching, final scoring, decisions, or execution.
 
@@ -43,7 +43,7 @@ The model returns an internal Pydantic schema with citation IDs. A schema transf
 object closed (`additionalProperties: false`) and every property required for strict structured
 output. Responses are validated locally too: malformed JSON, forbidden fields, invalid severity,
 unknown citation IDs, and material assessments without citations are rejected. Citations are
-resolved from the exact input snippets sent to the model, each at most 1,000 characters; the model
+resolved from the redacted input snippets sent to the model, each at most 1,000 characters; the model
 does not supply citation text. The public contract continues to return those snippets as strings.
 
 There is one retry for invalid model output and at most two status retries for 429/5xx responses.
@@ -52,6 +52,7 @@ attempts, validation retries, and retry waits. Other 4xx responses and timeouts 
 Errors use the existing `{timestamp, status, error, message, path}` shape:
 
 - **400:** invalid request or oversized input; text is never silently truncated.
+- **400:** recognisable source control instructions; no provider call and no source text in the error.
 - **502:** invalid provider output after the validation retry.
 - **503:** exhausted local limits/budget, timeout, or provider unavailability.
 
@@ -59,6 +60,33 @@ Logs contain operational metadata, including prompt version, rather than prompts
 text, or raw provider error bodies. Metrics record requests by provider/model/capability/outcome,
 token usage by direction, latency, and prompt versions. The Compose Prometheus container is on a
 different network and does not scrape ai-service; the metrics endpoint can be inspected locally.
+
+### Guardrails (E8 story 8)
+
+`capabilities/_guardrails.py` screens advisory and service context for recognisable instruction
+attacks, including role/control delimiters, requests to ignore prior rules, reveal secrets/prompts,
+or bypass approval. Screening normalises Unicode compatibility characters and invisible format
+controls and runs before passage splitting. Rejection is a generic 400; aegis-core falls back to
+its deterministic draft without filing, opening or sending anything.
+
+Whole sources are redacted before prompt splitting. Recognisable private keys, credential-bearing
+URLs, Bearer/Basic credentials, common API/cloud/VCS tokens, JWTs, labelled passwords/tokens,
+emails, SSNs, international phone numbers and labelled personal names/addresses/identity/contact
+fields become `[REDACTED]`. Generated narratives are redacted and revalidated against their schema
+bounds. Server-resolved citations use the same protected passages, so they cannot reintroduce raw
+matches. No original-to-redacted mapping or text is logged. The policy is mirrored in aegis-core's
+`platform.common.SensitiveText`, protecting its deterministic evidence, fallback and export paths too.
+
+Prompts forbid reconstructing redacted values or following encoded/embedded instructions. The
+provider is given no tools; tool/function responses, unknown execution fields and selected claims
+that Aegis has already filed, opened, merged or sent a response are invalid output. The existing
+single validation retry never echoes that output into its next prompt. Human decisions and all
+execution remain exclusively in aegis-core's existing workflow.
+
+Pattern matching cannot detect every secret, unlabelled name/address, encoding or semantic attack.
+Escaping and system instructions do not guarantee model obedience. No-tools execution, closed
+schemas, server-resolved citations, deterministic business facts and human approval remain
+independent safeguards. These guards protect the AI/draft boundaries, not raw ingestion storage.
 
 ## Configuration and cost controls
 

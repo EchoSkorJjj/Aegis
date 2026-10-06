@@ -84,6 +84,18 @@ class MemoTemplateTest {
     }
 
     @Test
+    void sourceAndNarrativeTextIsRedactedAndCannotEmbedActiveMarkup() {
+        String sensitive = "alice@example.test password=opaque-credential";
+        String hostile = "<img src='https://evil.example/x'> ![x](https://evil.example/x) @ops";
+        String memo = MemoTemplate.render(MemoKind.CYBER_THREAT,
+                new Facts("AEGIS-0", sensitive, null, null, SERVICES, List.of(sensitive), List.of(sensitive),
+                        List.of(sensitive)), new Sections(hostile + " " + sensitive, sensitive, sensitive, sensitive),
+                List.of(sensitive));
+        assertThat(memo).contains("[REDACTED]", "&lt;img", "!\u200b[x]", "@\u200bops")
+                .doesNotContain("alice@example.test", "opaque-credential", "<img", "![x]", "@ops");
+    }
+
+    @Test
     void withNoMaterialCriticalServiceItSaysSoRatherThanGuessing() {
         assertThat(MemoTemplate.criticalFunctions(List.of(SERVICES.get(1))))
                 .isEqualTo("None identified by Aegis. [To be confirmed]");

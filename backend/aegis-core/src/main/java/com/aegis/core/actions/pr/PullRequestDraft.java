@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Objects;
 
 import com.aegis.core.platform.common.ApiExceptions;
+import com.aegis.core.platform.common.SensitiveText;
 
 /** Validated proposal, not approval evidence. Creating one never performs a remote operation. */
 public record PullRequestDraft(
@@ -12,6 +13,9 @@ public record PullRequestDraft(
         String title, String body, String commitMessage, List<FileChange> changes) {
 
     public PullRequestDraft {
+        title = SensitiveText.redact(title);
+        body = SensitiveText.redact(body);
+        commitMessage = SensitiveText.redact(commitMessage);
         if (repository == null) {
             throw new ApiExceptions.BadRequest("A repository is required");
         }

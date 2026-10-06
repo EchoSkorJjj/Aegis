@@ -91,7 +91,7 @@ final class MemoTemplate {
             if (value == null) {
                 throw new IllegalStateException("Unknown memo placeholder " + placeholder.group(1));
             }
-            placeholder.appendReplacement(memo, Matcher.quoteReplacement(value.strip()));
+            placeholder.appendReplacement(memo, Matcher.quoteReplacement(DraftEvidence.inert(value.strip())));
         }
         placeholder.appendTail(memo);
         if (!citations.isEmpty()) {

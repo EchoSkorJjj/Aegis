@@ -57,11 +57,22 @@ class DraftEvidenceTest {
 
         assertThat(evidence).contains("Direct dependency is affected.", "A second dependency path is affected.",
                 "Affected service: Payments (" + SERVICE + "), HIGH criticality, INTERNAL.",
-                "Service owners: Alice (" + USER + ").", "Match confidence: POSSIBLE.",
+                "Service owners: 1 assigned (personal details omitted).", "Match confidence: POSSIBLE.",
                 "Score calculation: severity 0.9 x exposure 0.9 x criticality 0.8 x confidence 1 x 100 = 64.8"
                         + " (rounded to one decimal).",
                 "Score factor CRITICALITY: HIGH; weight 0.8; limiting factor; setting aegis.scoring.criticality.high.");
         assertThat(evidence).anySatisfy(line -> assertThat(line).startsWith("Impact score 64.8 (MEDIUM, material)."));
+        assertThat(String.join("\n", evidence)).doesNotContain("Alice", USER.toString());
+    }
+
+    @Test
+    void sourceSecretsAreRedactedBeforeTheExcerptCanSplitThem() {
+        String secret = "ghp_" + "a".repeat(36);
+        String summary = "x".repeat(3_990) + " " + secret + " alice@example.test";
+        String evidence = String.join("\n", DraftEvidence.source(CHANGE, summary, PUBLISHED,
+                "https://user:credential@status.example/incidents/1"));
+        assertThat(evidence).contains("[REDACTED]", "[excerpt truncated]", "Source: osv / GHSA-1.")
+                .doesNotContain("ghp_", "alice@example.test", "credential");
     }
 
     @Test

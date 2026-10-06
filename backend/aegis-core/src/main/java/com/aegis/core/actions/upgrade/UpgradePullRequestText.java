@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 
 import com.aegis.core.actions.evidence.DraftEvidence;
 import com.aegis.core.actions.upgrade.UpgradeProposal.Edit;
+import com.aegis.core.platform.common.SensitiveText;
 
 /**
  * The title and Markdown body of a safe-upgrade pull request, written once when the proposal is drafted
@@ -230,6 +231,7 @@ final class UpgradePullRequestText {
 
     /** A code span: Markdown processes no mentions, references or HTML inside one. */
     static String code(String text) {
+        text = SensitiveText.redact(text);
         return "`" + (text == null ? "" : text.replace("`", "'").replaceAll("\\p{Cntrl}", " ")) + "`";
     }
 
@@ -255,11 +257,13 @@ final class UpgradePullRequestText {
     }
 
     private static String bounded(String text, int max) {
+        text = SensitiveText.redact(text);
         return text.length() <= max ? text : text.substring(0, max) + "…";
     }
 
     /** A title within GitHub's limit, on one line. */
     private static String bounded(String title) {
+        title = SensitiveText.redact(title);
         return (title.length() <= MAX_TITLE ? title : title.substring(0, MAX_TITLE - 1) + "…")
                 .replaceAll("\\p{Cntrl}", " ");
     }

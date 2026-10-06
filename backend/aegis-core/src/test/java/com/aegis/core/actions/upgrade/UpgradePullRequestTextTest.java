@@ -16,6 +16,18 @@ class UpgradePullRequestTextTest {
     private static final UUID PROPOSAL = UUID.fromString("1a2b3c4d-0000-0000-0000-000000000000");
 
     @Test
+    void secretsAreRemovedBeforeRationaleAndCitationsAreTruncatedOrEscaped() {
+        String secret = "ghp_" + "a".repeat(36);
+        String body = UpgradePullRequestText.body(facts("CONFIRMED", List.of()),
+                Rationale.drafted("x".repeat(7_990) + " " + secret,
+                        List.of("x".repeat(490) + " " + secret, "alice@example.test")));
+        assertThat(body).contains("[REDACTED]", "### Rationale drafted by AI")
+                .doesNotContain("ghp_", "alice@example.test");
+        assertThat(UpgradePullRequestText.title("alice@example.test", "1", "2", "CVE-1"))
+                .contains("[REDACTED]").doesNotContain("alice@example.test");
+    }
+
+    @Test
     void theTitleNamesTheChangeAndStaysWithinGithubsLimit() {
         assertThat(UpgradePullRequestText.title("org.apache.logging.log4j:log4j-core", "2.14.1", "2.17.1", "CVE-2021-44228"))
                 .isEqualTo("Upgrade org.apache.logging.log4j:log4j-core from 2.14.1 to 2.17.1 (CVE-2021-44228)");

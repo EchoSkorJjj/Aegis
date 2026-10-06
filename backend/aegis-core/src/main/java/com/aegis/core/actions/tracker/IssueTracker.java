@@ -4,6 +4,8 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Objects;
 
+import com.aegis.core.platform.common.SensitiveText;
+
 /**
  * Port: file an approved risk ticket in the organization's issue tracker — Jira, through the optional
  * adapter in {@code actions.tracker.jira}. With no adapter enabled there is nowhere to file, and approving
@@ -25,9 +27,10 @@ public interface IssueTracker {
 
         public IssueDraft {
             Objects.requireNonNull(title, "title");
+            title = SensitiveText.redact(title);
             description = List.copyOf(description);
             Objects.requireNonNull(priority, "priority");
-            labels = List.copyOf(labels);
+            labels = List.copyOf(SensitiveText.redact(labels));
         }
     }
 
@@ -36,7 +39,8 @@ public interface IssueTracker {
 
         public Block {
             Objects.requireNonNull(kind, "kind");
-            items = items == null ? List.of() : List.copyOf(items);
+            text = SensitiveText.redact(text);
+            items = items == null ? List.of() : List.copyOf(SensitiveText.redact(items));
         }
 
         public static Block heading(String text) {

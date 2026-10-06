@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import com.aegis.core.actions.pr.PullRequestRef;
 import com.aegis.core.matching.MatchingDtos.MatchConfidence;
+import com.aegis.core.platform.common.SensitiveText;
 
 /**
  * A reviewed plan to fix one vulnerability in one service with one pull request (E8 story 4): every edit it
@@ -45,6 +46,10 @@ public record UpgradeProposal(
 
     public UpgradeProposal {
         edits = List.copyOf(edits);
+        title = SensitiveText.redact(title);
+        body = SensitiveText.redact(body);
+        dismissReason = SensitiveText.redact(dismissReason);
+        failureMessage = SensitiveText.redact(failureMessage);
     }
 
     /** One package moved from one version to another in one manifest. */

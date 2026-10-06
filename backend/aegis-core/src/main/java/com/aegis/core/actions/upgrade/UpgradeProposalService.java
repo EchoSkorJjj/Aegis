@@ -43,6 +43,7 @@ import com.aegis.core.matching.MatchingDtos.MatchConfidence;
 import com.aegis.core.matching.UpgradeTargets;
 import com.aegis.core.matching.UpgradeTargets.UpgradeTarget;
 import com.aegis.core.platform.common.ApiExceptions;
+import com.aegis.core.platform.common.SensitiveText;
 import com.aegis.core.scoring.ScoringDtos.ChangeImpactResponse;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.scoring.ScoringService;
@@ -357,7 +358,8 @@ public class UpgradeProposalService {
             return Map.of();
         }
         Map<UUID, String> names = new HashMap<>();
-        inventoryStore.findBusinessServicesByIds(serviceIds).forEach((id, service) -> names.put(id, service.getName()));
+        inventoryStore.findBusinessServicesByIds(serviceIds)
+                .forEach((id, service) -> names.put(id, SensitiveText.redact(service.getName())));
         return names;
     }
 

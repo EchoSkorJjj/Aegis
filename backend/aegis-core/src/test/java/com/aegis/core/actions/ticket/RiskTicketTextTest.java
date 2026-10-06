@@ -41,6 +41,20 @@ class RiskTicketTextTest {
     }
 
     @Test
+    void trackerAndCopyableFieldsCannotLeakContactsOrTruncatedSecrets() {
+        String secret = "ghp_" + "a".repeat(36);
+        assertThat(RiskTicketText.cut("x".repeat(150) + " " + secret, 160)).doesNotContain("ghp_");
+        IssueDraft issue = RiskTicketText.issue(ticket(true, List.of("alice@example.test", "password=opaque-credential")),
+                "alice@example.test", null);
+        assertThat(RiskTicketText.plainText(issue.description())).contains("[REDACTED]")
+                .doesNotContain("alice@example.test", "opaque-credential");
+        assertThat(RiskTicketText.serviceNow(ticket(false, List.of()), "alice@example.test", null))
+                .containsEntry("cmdb_ci", "[REDACTED]");
+        assertThat(RiskTicketText.labels(SignalType.VULNERABILITY, "alice@example.test", ImpactTier.HIGH))
+                .doesNotContain("alice-example.test");
+    }
+
+    @Test
     void labelsAreSafeForJiraAndNameTheVulnerability() {
         assertThat(RiskTicketText.labels(SignalType.VULNERABILITY, "CVE-2021-44228", ImpactTier.HIGH))
                 .containsExactly("aegis", "vulnerability", "impact-high", "CVE-2021-44228");

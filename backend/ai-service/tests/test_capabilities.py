@@ -81,7 +81,7 @@ def test_assessment_resolves_exact_bounded_input_passages():
     assert result.suggested_severity == "HIGH"
     assert set(result.model_dump()) == {"material", "rationale", "suggested_severity", "citations"}
     call = engine.calls[0]
-    assert call["template_id"] == "assess.v1"
+    assert call["template_id"] == "assess.v2"
     assert call["capability"] == "assess"
     assert "opaque-finding-never-sent" not in call["user"] + call["system"]
 
@@ -200,7 +200,7 @@ def test_upgrade_draft_preserves_type_and_resolves_exact_context():
     assert result.content == "Draft for human review."
     assert result.citations == [context]
     assert result.ticket is None and result.memo is None
-    assert engine.calls[0]["template_id"] == "draft.v1"
+    assert engine.calls[0]["template_id"] == "draft.v2"
     assert "opaque-secret-id" not in engine.calls[0]["user"] + engine.calls[0]["system"]
 
 
@@ -209,7 +209,7 @@ def test_risk_ticket_returns_typed_sections_and_a_readable_draft():
     result = asyncio.run(
         draft(DraftRequest(finding_id="f1", draft_type="risk_ticket", context="CVE-2021-44228 evidence"), engine)
     )
-    assert engine.calls[0]["template_id"] == "draft_risk_ticket.v1"
+    assert engine.calls[0]["template_id"] == "draft_risk_ticket.v2"
     assert engine.calls[0]["output_model"] is TicketOutput
     assert result.ticket.actions == ["Upgrade log4j-core to 2.17.1.", "Confirm no other service uses 2.14.1."]
     assert result.memo is None
@@ -222,7 +222,7 @@ def test_memo_returns_typed_sections_under_the_dora_template():
     engine = RecordingEngine(memo_output())
     result = asyncio.run(draft(DraftRequest(finding_id="f1", draft_type="memo", context="outage evidence"), engine))
     call = engine.calls[0]
-    assert call["template_id"] == "draft_memo.v1"
+    assert call["template_id"] == "draft_memo.v2"
     assert call["output_model"] is MemoOutput
     assert "Digital Operational" in call["system"] and "[To be confirmed]" in call["system"]
     assert result.memo.next_steps.startswith("Confirm the duration")

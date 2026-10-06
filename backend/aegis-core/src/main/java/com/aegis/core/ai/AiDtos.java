@@ -2,6 +2,7 @@ package com.aegis.core.ai;
 
 import java.util.List;
 
+import com.aegis.core.platform.common.SensitiveText;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -20,6 +21,10 @@ public final class AiDtos {
             @JsonProperty("finding_id") String findingId,
             @JsonProperty("advisory_text") String advisoryText,
             @JsonProperty("service_context") String serviceContext) {
+        public AssessmentRequest {
+            advisoryText = SensitiveText.redact(advisoryText);
+            serviceContext = SensitiveText.redact(serviceContext);
+        }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -28,6 +33,10 @@ public final class AiDtos {
             String rationale,
             @JsonProperty("suggested_severity") String suggestedSeverity,
             List<String> citations) {
+        public Assessment {
+            rationale = SensitiveText.redact(rationale);
+            citations = SensitiveText.redact(citations);
+        }
     }
 
     /** "Draft a response" of a given type (risk_ticket | upgrade | memo). */
@@ -35,17 +44,32 @@ public final class AiDtos {
             @JsonProperty("finding_id") String findingId,
             @JsonProperty("draft_type") String draftType,
             String context) {
+        public DraftRequest {
+            context = SensitiveText.redact(context);
+        }
     }
 
     /** A risk ticket's AI-drafted narrative fields; its priority, due date and facts are aegis-core's. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record TicketSections(String summary, String risk, String impact, List<String> actions) {
+        public TicketSections {
+            summary = SensitiveText.redact(summary);
+            risk = SensitiveText.redact(risk);
+            impact = SensitiveText.redact(impact);
+            actions = SensitiveText.redact(actions);
+        }
     }
 
     /** A DORA notification memo's AI-drafted sections; the memo's template supplies every fact around them. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record MemoSections(
             String summary, String impact, String measures, @JsonProperty("next_steps") String nextSteps) {
+        public MemoSections {
+            summary = SensitiveText.redact(summary);
+            impact = SensitiveText.redact(impact);
+            measures = SensitiveText.redact(measures);
+            nextSteps = SensitiveText.redact(nextSteps);
+        }
     }
 
     /**
@@ -59,6 +83,11 @@ public final class AiDtos {
             TicketSections ticket,
             MemoSections memo,
             List<String> citations) {
+
+        public Draft {
+            content = SensitiveText.redact(content);
+            citations = SensitiveText.redact(citations);
+        }
 
         /** A draft of text only, such as an upgrade's rationale. */
         public Draft(String draftType, String content, List<String> citations) {

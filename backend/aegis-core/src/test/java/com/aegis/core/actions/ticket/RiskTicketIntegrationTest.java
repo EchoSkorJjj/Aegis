@@ -78,6 +78,32 @@ class RiskTicketIntegrationTest extends AbstractInventoryIntegrationTest {
     }
 
     @Test
+    void fallbackDraftsAndTheirStoredEvidenceRedactPersonalAndSecretData() throws Exception {
+        Fixture f = fixture();
+        Advisory old = f.advisory();
+        advisories.upsert(new Advisory(old.id(), old.sourceId(), old.externalId(), old.canonicalId(),
+                "Affected library; contact alice@example.test; password=opaque-credential", old.publishedAt(),
+                Instant.now(), old.cvss(), old.affected()));
+        Owner owner = owners.assign(f.service().getId(), "Personal Owner " + f.tag());
+        drafter.unavailable(true);
+
+        String created = mvc.perform(post(PATH).with(as("ANALYST", analyst)).contentType(MediaType.APPLICATION_JSON)
+                        .content(request(f.advisory().id(), f.service().getId())))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("PROPOSED"))
+                .andExpect(jsonPath("$.aiDrafted").value(false))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(created).contains("[REDACTED]", "1 assigned (personal details omitted)")
+                .doesNotContain("alice@example.test", "opaque-credential", owner.getName(), owner.getUserId().toString());
+        String id = JsonPath.read(created, "$.id");
+        String stored = mvc.perform(get(PATH + "/{id}", id).with(as("COMPLIANCE_ADMIN", approver)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(stored).doesNotContain("alice@example.test", "opaque-credential");
+        assertThat(drafter.requests()).filteredOn(sent -> sent.findingId().equals(id)).allSatisfy(sent ->
+                assertThat(sent.context()).doesNotContain("alice@example.test", "opaque-credential", owner.getName()));
+        assertThat(tracker.filed()).noneMatch(issue -> issue.title().contains(f.cve()));
+    }
+
+    @Test
     void aTicketIsDraftedFromTheImpactAndFiledOnlyWhenApproved() throws Exception {
         Fixture f = fixture();
 

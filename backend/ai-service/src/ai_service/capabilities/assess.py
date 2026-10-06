@@ -10,6 +10,7 @@ from ai_service.capabilities._grounding import (
     resolve_citations,
     validate_citations,
 )
+from ai_service.capabilities._guardrails import check_sources, protect_output
 from ai_service.prompts import build_prompt
 from ai_service.schemas import Assessment, AssessmentRequest
 
@@ -30,10 +31,12 @@ class AssessmentOutput(BaseModel):
 
 async def assess(request: AssessmentRequest, engine: "StructuredGenerator") -> Assessment:
     check_input_size(request, engine.settings.llm_max_input_chars)
+    check_sources(request.advisory_text, request.service_context)
     prompt = build_prompt("assess", [("A", request.advisory_text), ("S", request.service_context)])
 
     def validate(output: AssessmentOutput) -> None:
         validate_citations(output.cited_passage_ids, prompt.passages, required=output.material)
+        protect_output(output)
 
     output = await engine.generate(
         system=prompt.system,

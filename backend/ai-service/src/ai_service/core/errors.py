@@ -52,7 +52,5 @@ async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
 
 
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    message = "; ".join(
-        f"{'.'.join(str(loc) for loc in err['loc'][1:])} {err['msg']}".strip() for err in exc.errors()
-    )
-    return JSONResponse(status_code=400, content=_body(400, message or "Validation failed", request.url.path))
+    # Unknown field names and validation details can themselves contain sensitive/untrusted input.
+    return JSONResponse(status_code=400, content=_body(400, "Request validation failed", request.url.path))

@@ -13,6 +13,7 @@ import com.aegis.core.actions.tracker.IssueTracker.IssueDraft;
 import com.aegis.core.actions.tracker.IssueTracker.Priority;
 import com.aegis.core.actions.upgrade.UpgradeProposal;
 import com.aegis.core.actions.upgrade.UpgradeProposalStatus;
+import com.aegis.core.platform.common.SensitiveText;
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.signals.ChangeSignal.SignalType;
@@ -68,6 +69,7 @@ final class RiskTicketText {
 
     /** Jira labels may not contain spaces; each is folded to letters, digits, dots, dashes and underscores. */
     static List<String> labels(SignalType type, String changeTitle, ImpactTier tier) {
+        changeTitle = SensitiveText.redact(changeTitle);
         List<String> labels = new ArrayList<>(List.of("aegis",
                 type == SignalType.VENDOR_OUTAGE ? "vendor-outage" : "vulnerability",
                 "impact-" + tier.name().toLowerCase(Locale.ROOT)));
@@ -154,7 +156,7 @@ final class RiskTicketText {
         fields.put("description", plainText(issue(ticket, serviceName, pullRequest).description()));
         fields.put("impact", Integer.toString(impactUrgency[0]));
         fields.put("urgency", Integer.toString(impactUrgency[1]));
-        fields.put("cmdb_ci", serviceName == null ? "" : serviceName);
+        fields.put("cmdb_ci", serviceName == null ? "" : SensitiveText.redact(serviceName));
         if (ticket.dueDate() != null) {
             fields.put("due_date", ticket.dueDate() + " 00:00:00");
         }
@@ -174,6 +176,7 @@ final class RiskTicketText {
     }
 
     static String cut(String text, int max) {
+        text = SensitiveText.redact(text);
         return text.length() <= max ? text : text.substring(0, max - 1) + "…";
     }
 }

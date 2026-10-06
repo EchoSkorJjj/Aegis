@@ -83,6 +83,26 @@ class UpgradeProposalIntegrationTest extends AbstractInventoryIntegrationTest {
     }
 
     @Test
+    void responseAndPullRequestEvidenceIsProtectedEvenWhenAiDraftingFails() throws Exception {
+        Fixture f = fixture();
+        Advisory old = f.advisory();
+        advisories.upsert(new Advisory(old.id(), old.sourceId(), old.externalId(), old.canonicalId(),
+                "Affected library; alice@example.test; password=opaque-credential", old.publishedAt(),
+                Instant.now(), old.cvss(), old.affected()));
+        drafter.unavailable(true);
+        String created = draft(f.advisory().id(), f.service().getId(), analyst)
+                .andExpect(jsonPath("$.status").value("PROPOSED"))
+                .andExpect(jsonPath("$.pullRequests[0].status").value("PROPOSED"))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(created).contains("[REDACTED]").doesNotContain("alice@example.test", "opaque-credential");
+        assertThat(host.opened(f.repository())).isEmpty();
+        String proposalId = JsonPath.read(created, "$.pullRequests[0].id");
+        String stored = mvc.perform(get(PROPOSALS + "/{id}", proposalId).with(as("COMPLIANCE_ADMIN", approver)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(stored).contains("[REDACTED]").doesNotContain("alice@example.test", "opaque-credential");
+    }
+
+    @Test
     void theTicketAndPullRequestKeepTheirDraftEvidenceAfterTheEstateAndFeedChange() throws Exception {
         Fixture f = fixture();
         String created = draft(f.advisory().id(), f.service().getId(), analyst)

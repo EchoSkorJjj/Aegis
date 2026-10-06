@@ -68,6 +68,29 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
     }
 
     @Test
+    void aFallbackMemoRedactsSourceDataBeforePersistenceAndMarkdownDownload() throws Exception {
+        Vulnerability v = vulnerability();
+        Advisory old = v.advisory();
+        advisories.upsert(new Advisory(old.id(), old.sourceId(), old.externalId(), old.canonicalId(),
+                "Affected library; alice@example.test; password=opaque-credential", old.publishedAt(),
+                Instant.now(), old.cvss(), old.affected()));
+        drafter.unavailable(true);
+        String created = mvc.perform(post(PATH).with(as("ANALYST", analyst)).contentType(MediaType.APPLICATION_JSON)
+                        .content(request(v.advisory().id())))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("PROPOSED"))
+                .andExpect(jsonPath("$.aiDrafted").value(false))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(created).contains("[REDACTED]").doesNotContain("alice@example.test", "opaque-credential");
+        String id = JsonPath.read(created, "$.id");
+        mvc.perform(post(PATH + "/{id}/approve", id).with(as("ANALYST", secondAnalyst)))
+                .andExpect(status().isOk());
+        String approved = mvc.perform(get(PATH + "/{id}", id).with(as("ANALYST", secondAnalyst)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String download = JsonPath.read(approved, "$.body"); // the frontend downloads this stored Markdown
+        assertThat(download).contains("[REDACTED]").doesNotContain("alice@example.test", "opaque-credential");
+    }
+
+    @Test
     void theMemoKeepsItsEvidenceAndCitationsAfterTheEstateAndFeedChange() throws Exception {
         Vulnerability v = vulnerability();
         String created = mvc.perform(post(PATH).with(as("ANALYST", analyst)).contentType(MediaType.APPLICATION_JSON)

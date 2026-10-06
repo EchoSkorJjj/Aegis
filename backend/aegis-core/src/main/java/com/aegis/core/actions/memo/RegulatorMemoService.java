@@ -24,6 +24,7 @@ import com.aegis.core.matching.MatchingDtos.ChangeRef;
 import com.aegis.core.matching.MatchingDtos.ComponentRef;
 import com.aegis.core.matching.MatchingDtos.EvidenceChain;
 import com.aegis.core.platform.common.ApiExceptions;
+import com.aegis.core.platform.common.SensitiveText;
 import com.aegis.core.scoring.ScoringDtos.ChangeImpactResponse;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.scoring.ScoringDtos.SeverityInput;
@@ -259,6 +260,7 @@ public class RegulatorMemoService {
     }
 
     private static String cut(String text, int max) {
+        text = SensitiveText.redact(text);
         return text.length() <= max ? text : text.substring(0, max - 1) + "…";
     }
 }

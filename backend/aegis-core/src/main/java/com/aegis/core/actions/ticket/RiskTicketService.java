@@ -27,8 +27,8 @@ import com.aegis.core.ai.AiDtos;
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.matching.MatchingDtos.EvidenceChain;
-import com.aegis.core.matching.MatchingDtos.OwnerRef;
 import com.aegis.core.platform.common.ApiExceptions;
+import com.aegis.core.platform.common.SensitiveText;
 import com.aegis.core.scoring.ScoringDtos.ChangeImpactResponse;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.scoring.ScoringService;
@@ -129,7 +129,7 @@ public class RiskTicketService {
                 upgrades.draft(plan, ticket.id(), drafterId);
             } catch (RuntimeException failure) {
                 // The ticket stands on its own; the pull request can be drafted again from the response.
-                log.warn("response {}: the upgrade pull request was not drafted ({})", ticket.id(), failure.toString());
+                log.warn("response {}: the upgrade pull request was not drafted ({})", ticket.id(), failure.getClass().getSimpleName());
             }
         }
         return ticket;
@@ -274,7 +274,8 @@ public class RiskTicketService {
             return Map.of();
         }
         Map<UUID, String> names = new HashMap<>();
-        inventoryStore.findBusinessServicesByIds(serviceIds).forEach((id, service) -> names.put(id, service.getName()));
+        inventoryStore.findBusinessServicesByIds(serviceIds)
+                .forEach((id, service) -> names.put(id, SensitiveText.redact(service.getName())));
         return names;
     }
 
@@ -310,7 +311,7 @@ public class RiskTicketService {
                 : RiskTicketText.cut(signal.summary().strip(), MAX_CHANGE_CONTEXT);
         String when = signal == null || signal.occurredAt() == null ? "" : ", " + signal.occurredAt().toString().substring(0, 10);
         String owners = scored.owners().isEmpty() ? "none assigned"
-                : scored.owners().stream().map(OwnerRef::name).collect(Collectors.joining(", "));
+                : scored.owners().size() + " assigned (personal details omitted)";
         return """
                 %s %s%s%s: %s
                 Affected service: %s (%s criticality, %s).
