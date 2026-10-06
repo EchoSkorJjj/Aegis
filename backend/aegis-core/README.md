@@ -406,9 +406,6 @@ mvn spring-boot:run     # run locally (needs Postgres on :5432 and identity-serv
 In Docker Compose it builds and starts alongside identity-service and the ai-service. API docs at
 `http://localhost:8082/swagger-ui.html`.
 
-Spotless explicitly uses LF line endings, matching the root `.gitattributes` policy for core Java files.
-Run `spotless:apply` after changing formatting; the same check applies on Windows and Linux.
-
 The integration tests connect to their Testcontainers PostgreSQL as a plain role (`aegis`, created by
 `src/test/resources/testcontainers/app-role.sql`), not the container's superuser, so row-level security applies
 to them as it does on RDS. A test about the schema itself, past those policies — a constraint, a migration's

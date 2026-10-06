@@ -19,7 +19,7 @@ locals {
   # The ALB checks the frontend here; a redirect to the sign-in page counts as healthy.
   frontend_health_check_path = "/"
 
-  # The database the one-time role setup creates (todo/aws-deployment.md); each service connects as its own role.
+  # The database the one-time role setup creates (database-setup.tf); each service connects as its own role.
   jdbc_url = "jdbc:postgresql://${module.rds.address}:${module.rds.port}/aegis"
 
   # The gateway passes X-Forwarded-For on only from the VPC's addresses (its ForwardedForFilter), e.g. 10\.40\.\d+\.\d+.

@@ -2,14 +2,16 @@
 
 The internal Python / FastAPI service for **assessment and response drafting**. Requests carry a
 shared `X-Service-Token`, not a user JWT. Compose gives this service no host port and no gateway
-route; only `aegis-core` shares its Docker network.
+route; only `aegis-core` shares its Docker network. On AWS, its security group admits only aegis-core.
 
-**Status: Story 1 LLM integration layer implemented.** The service supports an offline stub and a
-Groq provider, versioned prompts, strict output validation, source-resolved citations, and local
-rate/token controls. The default remains `stub`, so development and tests need no API key.
-RAG, persisted findings, human approvals, and action execution are not implemented. Core's
-`HttpAiClient.assess` / `draft` are still unimplemented; the application UI does not yet invoke this
-layer as part of its pipeline. The service only returns proposed assessments and draft text.
+**Status: built, and used by aegis-core's responses.** aegis-core's `HttpAiClient` calls `/v1/draft`
+for an upgrade pull request's rationale (`upgrade`), a risk ticket's narrative (`risk_ticket`) and a
+DORA memo's sections (`memo`). `/v1/assess` is implemented and tested, but nothing calls it yet. The
+service supports an offline stub and a Groq provider, versioned prompts, strict output validation,
+source-resolved citations, and local rate/token controls. The default remains `stub`, so development
+and tests need no API key. There is no RAG yet: the service is stateless. It returns only proposed
+text: aegis-core builds each document around it, falls back to its own text when this service fails,
+and a person approves before anything is filed or opened.
 
 ## API
 
@@ -17,15 +19,19 @@ layer as part of its pipeline. The service only returns proposed assessments and
 |---|---|---|---|
 | GET | `/actuator/health` | Public | Liveness |
 | GET | `/actuator/prometheus` | Public | HTTP and LLM metrics |
+| GET | `/v1/ping` | `X-Service-Token` | Connectivity check, called by aegis-core's `/api/ai/ping` |
 | POST | `/v1/assess` | `X-Service-Token` | `{finding_id, advisory_text, service_context?}` → `{material, rationale, suggested_severity, citations}` |
-| POST | `/v1/draft` | `X-Service-Token` | `{finding_id, draft_type, context?}` → `{draft_type, content, citations}` |
+| POST | `/v1/draft` | `X-Service-Token` | `{finding_id, draft_type, context?}` → `{draft_type, content, ticket?, memo?, citations}` |
 
-`finding_id` is an opaque string. Draft types are `risk_ticket`, `upgrade`, and `memo`; other values
-return 400. Snake-case fields and response shapes continue to mirror core's `AiDtos`. FastAPI serves
-the OpenAPI specification at `/openapi.json` and Swagger UI at `/docs`.
+`finding_id` is an opaque string; aegis-core sends the id of the proposal, ticket or memo it is
+drafting. Draft types are `risk_ticket`, `upgrade`, and `memo`; other values return 400. Snake-case
+fields and response shapes continue to mirror core's `AiDtos`. FastAPI serves the OpenAPI
+specification at `/openapi.json` and Swagger UI at `/docs`.
 
-The generic draft prompt supplies the integration contract. The later type-specific response
-stories still need to implement their business workflows.
+Each draft type has its own output. An `upgrade` draft is free text (`content`). A `risk_ticket` also
+returns `ticket` (`summary`, `risk`, `impact`, `actions`), and a `memo` returns `memo` (`summary`,
+`impact`, `measures`, `next_steps`). aegis-core assembles those documents itself: every fact,
+priority and deadline around the sections is its own, and the model writes only the narrative.
 
 ## Provider, prompts, and validation
 
@@ -34,10 +40,13 @@ adapter using the existing `httpx` dependency; no Groq SDK or optional package e
 The `anthropic` provider remains explicitly unimplemented, including when the reserved `llm` extra
 is installed. Unknown providers or Groq without a key fail at startup.
 
-Prompts are package resources, loaded with `importlib.resources` and identified as `assess.v2`,
-`draft.v2`, `draft_risk_ticket.v2` and `draft_memo.v2`. Untrusted advisory and service text is placed in numbered, escaped data blocks. Embedded
-delimiters cannot close those blocks. Prompts instruct the model to treat their content as data,
-and never to perform matching, final scoring, decisions, or execution.
+Prompts are package resources, loaded with `importlib.resources` and identified as `assess.v1`,
+`draft.v1` (the upgrade rationale), `draft_risk_ticket.v1` and `draft_memo.v1`. Untrusted advisory
+and service text is placed in numbered, escaped data blocks. Embedded delimiters cannot close those
+blocks. Prompts instruct the model to treat their content as data, and never to perform matching,
+final scoring, decisions, or execution. The risk-ticket and memo prompts present aegis-core's
+computed facts as final and limit each section's length; the memo prompt also forbids classifying
+an incident as major or stating a figure the context doesn't give.
 
 The model returns an internal Pydantic schema with citation IDs. A schema transformer makes every
 object closed (`additionalProperties: false`) and every property required for strict structured
@@ -103,7 +112,7 @@ ignored `.env` files or your deployment secret store; never commit or log them.
 | `GROQ_MODEL` | `openai/gpt-oss-120b` | Model to request |
 | `GROQ_BASE_URL` | `https://api.groq.com/openai/v1` | Trusted provider base URL; another server must support the same schema/reasoning fields |
 | `LLM_TIMEOUT_SECONDS` | `20` | Overall generation deadline, maximum 20 seconds |
-| `LLM_MAX_OUTPUT_TOKENS` | `1000` | Maximum completion tokens per attempt |
+| `LLM_MAX_OUTPUT_TOKENS` | `1500` | Maximum completion tokens per attempt (room for a memo's four sections) |
 | `LLM_MAX_INPUT_CHARS` | `16000` | Maximum request input length |
 | `LLM_MAX_REQUESTS_PER_MINUTE` | `25` | Provider attempts per rolling minute |
 | `LLM_MAX_TOKENS_PER_MINUTE` | `7000` | Estimated/actual tokens per rolling minute |

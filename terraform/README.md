@@ -2,7 +2,7 @@
 
 Aegis on AWS, managed with Terraform in HCP Terraform: ECS on Fargate behind one ALB, RDS PostgreSQL 16, a NAT
 instance, at **aegisops.pro**. To deploy an environment the first time (secrets, images, the database roles), follow
-[`environments/README.md`](environments/README.md); `todo/aws-deployment.md` explains why each setting is what it is.
+[`environments/README.md`](environments/README.md).
 
 ## Layout
 

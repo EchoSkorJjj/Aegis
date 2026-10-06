@@ -95,9 +95,8 @@ Two config values control it — everything else is identical in both modes:
 
 Every setting is environment-overridable. The authoritative list with defaults lives in
 [`application.yml`](src/main/resources/application.yml), and the root
-[README](../../README.md#configuration) documents the full env-var surface — datasource, the auth
-seam, token TTLs, the MFA & registration feature flags, rate-limiting, audit, tracing and mail.
-(The two auth-seam knobs above are the ones that change how tokens are produced/validated.)
+[README](../../README.md#configuration) lists the ones you're most likely to change. (The two
+auth-seam knobs above are the ones that change how tokens are produced/validated.)
 
 ## Layout
 
@@ -146,5 +145,5 @@ genuinely exercised. They require a running Docker daemon.
 mvn verify
 ```
 
-CI runs them on every push/PR via `.github/workflows/backend-ci.yml` (JDK 21 + Docker on the
-GitHub runner), so they stay green without a local Maven install.
+CI runs them in `identity-service-ci` on every push and pull request that touches this folder (JDK 21,
+with Docker on the GitHub runner), so they stay green without a local Maven install.
