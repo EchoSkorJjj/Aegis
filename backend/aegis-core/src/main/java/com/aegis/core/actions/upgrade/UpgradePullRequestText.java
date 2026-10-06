@@ -1,5 +1,6 @@
 package com.aegis.core.actions.upgrade;
 
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -7,7 +8,9 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import com.aegis.core.actions.evidence.DraftEvidence;
 import com.aegis.core.actions.upgrade.UpgradeProposal.Edit;
+import com.aegis.core.platform.common.SensitiveText;
 
 /**
  * The title and Markdown body of a safe-upgrade pull request, written once when the proposal is drafted
@@ -23,10 +26,11 @@ import com.aegis.core.actions.upgrade.UpgradeProposal.Edit;
 final class UpgradePullRequestText {
 
     static final int MAX_TITLE = 256;
-    private static final int MAX_EXPLANATION = 2_000;
     private static final int MAX_RATIONALE = 8_000;
     private static final int MAX_CITATIONS = 5;
     private static final int MAX_CITATION = 500;
+    /** Keeps the whole body well inside the 60,000 characters a draft pull request may have. */
+    private static final int MAX_EVIDENCE = 20_000;
     private static final int MAX_LISTED = 20;
 
     private UpgradePullRequestText() {
@@ -49,11 +53,12 @@ final class UpgradePullRequestText {
             String tier,
             List<Edit> edits,
             String matchConfidence,
-            String evidence,
+            List<String> evidence,
             List<String> followUps) {
 
         Facts {
             edits = List.copyOf(edits);
+            evidence = List.copyOf(evidence);
         }
     }
 
@@ -164,8 +169,12 @@ final class UpgradePullRequestText {
             body.append("**The match is POSSIBLE, not confirmed:** check that this service really uses the ")
                     .append("affected package before merging.\n\n");
         }
-        if (facts.evidence() != null && !facts.evidence().isBlank()) {
-            body.append("**Evidence:** ").append(inline(bounded(facts.evidence(), MAX_EXPLANATION))).append("\n\n");
+        if (!facts.evidence().isEmpty()) {
+            body.append("### Evidence at drafting\n\n");
+            for (String line : evidence(facts.evidence())) {
+                body.append("- ").append(line).append('\n');
+            }
+            body.append('\n');
         }
 
         body.append("### Before merging\n\n");
@@ -207,18 +216,37 @@ final class UpgradePullRequestText {
 
     /** Text safe inside Markdown prose: nothing that notifies, cross-links, embeds or renders HTML. */
     static String inert(String text) {
-        if (text == null) {
-            return "";
-        }
-        return text.replace("\r", "")
-                .replace("<", "&lt;")
-                .replace("@", "@​")
-                .replaceAll("#(\\d)", "#​$1")
-                .replace("![", "!​[");
+        return DraftEvidence.inert(text);
     }
 
     private static String inline(String text) {
         return inert(text).replace('\n', ' ');
+    }
+
+    /**
+     * The evidence lines within {@value #MAX_EVIDENCE} characters. The dependency paths come first and the score
+     * and source last, so a service reached by many paths keeps both ends and says how many lines are left out.
+     */
+    static List<String> evidence(List<String> lines) {
+        List<String> items = lines.stream().map(UpgradePullRequestText::inline).toList();
+        if (items.stream().mapToInt(String::length).sum() <= MAX_EVIDENCE) {
+            return items;
+        }
+        int tail = items.size();
+        int used = 0;
+        while (tail > 0 && used + items.get(tail - 1).length() <= MAX_EVIDENCE / 2) {
+            used += items.get(--tail).length();
+        }
+        int head = 0;
+        while (head < tail && used + items.get(head).length() <= MAX_EVIDENCE) {
+            used += items.get(head++).length();
+        }
+        List<String> kept = new ArrayList<>(items.subList(0, head));
+        if (tail > head) {
+            kept.add("… " + (tail - head) + " more lines of evidence left out to stay within GitHub's size limit");
+        }
+        kept.addAll(items.subList(tail, items.size()));
+        return kept;
     }
 
     private static String cell(String text) {
@@ -232,6 +260,7 @@ final class UpgradePullRequestText {
 
     /** A code span: Markdown processes no mentions, references or HTML inside one. */
     static String code(String text) {
+        text = SensitiveText.redact(text);
         return "`" + (text == null ? "" : text.replace("`", "'").replaceAll("\\p{Cntrl}", " ")) + "`";
     }
 
@@ -257,11 +286,13 @@ final class UpgradePullRequestText {
     }
 
     private static String bounded(String text, int max) {
+        text = SensitiveText.redact(text);
         return text.length() <= max ? text : text.substring(0, max) + "…";
     }
 
     /** A title within GitHub's limit, on one line. */
     private static String bounded(String title) {
+        title = SensitiveText.redact(title);
         return (title.length() <= MAX_TITLE ? title : title.substring(0, MAX_TITLE - 1) + "…")
                 .replaceAll("\\p{Cntrl}", " ");
     }

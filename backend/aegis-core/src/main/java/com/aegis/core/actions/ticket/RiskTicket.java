@@ -7,6 +7,7 @@ import java.util.UUID;
 
 import com.aegis.core.actions.tracker.IssueTracker.FiledIssue;
 import com.aegis.core.actions.tracker.IssueTracker.Priority;
+import com.aegis.core.platform.common.SensitiveText;
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 import com.aegis.core.signals.ChangeSignal.SignalType;
 
@@ -64,12 +65,13 @@ public record RiskTicket(
         return transition(RiskTicketStatus.FILED, decidedBy, decidedAt, null, issue.key(), issue.url(), null);
     }
 
+    /** An upstream error can quote the request it rejected, so it is redacted as it enters the record. */
     RiskTicket failed(String reason) {
-        return transition(RiskTicketStatus.FAILED, decidedBy, decidedAt, null, null, null, reason);
+        return transition(RiskTicketStatus.FAILED, decidedBy, decidedAt, null, null, null, SensitiveText.redact(reason));
     }
 
     RiskTicket dismissed(UUID by, Instant at, String reason) {
-        return transition(RiskTicketStatus.DISMISSED, by, at, reason, null, null, failureMessage);
+        return transition(RiskTicketStatus.DISMISSED, by, at, SensitiveText.redact(reason), null, null, failureMessage);
     }
 
     private RiskTicket transition(RiskTicketStatus status, UUID decidedBy, Instant decidedAt, String dismissReason,

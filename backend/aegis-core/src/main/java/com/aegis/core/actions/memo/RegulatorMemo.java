@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.ServiceExposure;
+import com.aegis.core.platform.common.SensitiveText;
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 import com.aegis.core.signals.ChangeSignal.SignalType;
 
@@ -56,7 +57,7 @@ public record RegulatorMemo(
     }
 
     RegulatorMemo dismissed(UUID by, Instant at, String reason) {
-        return decided(RegulatorMemoStatus.DISMISSED, by, at, reason);
+        return decided(RegulatorMemoStatus.DISMISSED, by, at, SensitiveText.redact(reason));
     }
 
     private RegulatorMemo decided(RegulatorMemoStatus status, UUID by, Instant at, String reason) {

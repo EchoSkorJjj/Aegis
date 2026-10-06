@@ -28,6 +28,6 @@ def validate_citations(
 
 
 def resolve_citations(cited_ids: list[str], passages: dict[str, str]) -> list[str]:
-    # The model can select IDs only; citation text comes from the original input, unchanged.
+    # The model can select IDs only; citation text comes from the redacted grounding input.
     # Splitting at PASSAGE_CHARS bounds each citation without silently losing source characters.
     return [passages[passage_id] for passage_id in dict.fromkeys(cited_ids)]

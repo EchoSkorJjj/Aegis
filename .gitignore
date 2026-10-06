@@ -37,3 +37,6 @@ dist/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Local draft-evaluation outputs (E8 story 9); CI retains its reports as artifacts
+/backend/ai-service/evaluation-results/

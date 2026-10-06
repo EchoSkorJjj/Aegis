@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import com.aegis.core.actions.evidence.DraftEvidence;
 import com.aegis.core.actions.ticket.RiskTicketText.Sections;
 import com.aegis.core.actions.tracker.IssueTracker;
 import com.aegis.core.actions.upgrade.UpgradePlan;
@@ -26,8 +27,8 @@ import com.aegis.core.ai.AiDtos;
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.matching.MatchingDtos.EvidenceChain;
-import com.aegis.core.matching.MatchingDtos.OwnerRef;
 import com.aegis.core.platform.common.ApiExceptions;
+import com.aegis.core.platform.common.SensitiveText;
 import com.aegis.core.scoring.ScoringDtos.ChangeImpactResponse;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.scoring.ScoringService;
@@ -107,12 +108,15 @@ public class RiskTicketService {
         UpgradePlan plan = type == SignalType.VULNERABILITY ? upgrades.plan(changeSignalId, serviceId) : null;
 
         ChangeSignal signal = signals.findById(changeSignalId).orElse(null);
-        String changeTitle = impact.change().title() == null ? impact.change().externalId() : impact.change().title();
+        // Feed text: redacted as it enters the draft, like the evidence and the AI's sections.
+        String changeTitle = SensitiveText.redact(
+                impact.change().title() == null ? impact.change().externalId() : impact.change().title());
         String title = RiskTicketText.title(type, changeTitle, scored.service().name());
         List<String> evidence = new ArrayList<>(RiskTicketText.evidence(scored));
         if (plan != null) {
-            plan.notAutomated().forEach(reason -> evidence.add("Not automated: " + reason));
+            plan.notAutomated().forEach(reason -> evidence.add("Not automated: " + SensitiveText.redact(reason)));
         }
+        evidence.addAll(DraftEvidence.source(impact.change(), signal));
         UUID id = UUID.randomUUID();
         Sections sections = sections(id, type, title, changeTitle, signal, scored, evidence);
         LocalDate drafted = LocalDate.now(ZoneOffset.UTC);
@@ -127,7 +131,8 @@ public class RiskTicketService {
                 upgrades.draft(plan, ticket.id(), drafterId);
             } catch (RuntimeException failure) {
                 // The ticket stands on its own; the pull request can be drafted again from the response.
-                log.warn("response {}: the upgrade pull request was not drafted ({})", ticket.id(), failure.toString());
+                log.warn("response {}: the upgrade pull request was not drafted ({})", ticket.id(),
+                        SensitiveText.redact(failure.toString()));
             }
         }
         return ticket;
@@ -272,7 +277,8 @@ public class RiskTicketService {
             return Map.of();
         }
         Map<UUID, String> names = new HashMap<>();
-        inventoryStore.findBusinessServicesByIds(serviceIds).forEach((id, service) -> names.put(id, service.getName()));
+        inventoryStore.findBusinessServicesByIds(serviceIds)
+                .forEach((id, service) -> names.put(id, SensitiveText.redact(service.getName())));
         return names;
     }
 
@@ -308,7 +314,7 @@ public class RiskTicketService {
                 : RiskTicketText.cut(signal.summary().strip(), MAX_CHANGE_CONTEXT);
         String when = signal == null || signal.occurredAt() == null ? "" : ", " + signal.occurredAt().toString().substring(0, 10);
         String owners = scored.owners().isEmpty() ? "none assigned"
-                : scored.owners().stream().map(OwnerRef::name).collect(Collectors.joining(", "));
+                : scored.owners().size() + " assigned (personal details omitted)";
         return """
                 %s %s%s%s: %s
                 Affected service: %s (%s criticality, %s).

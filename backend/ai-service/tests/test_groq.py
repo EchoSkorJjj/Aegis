@@ -77,6 +77,26 @@ def assert_error(response, status):
     assert response.json()["path"] == "/v1/assess"
 
 
+@pytest.mark.parametrize("field", ["tool_calls", "function_call"])
+def test_provider_tool_requests_are_invalid_even_with_a_valid_text_answer(make_client, field):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={
+            "choices": [{"finish_reason": "stop", "message": {
+                "content": json.dumps(VALID_OUTPUT), field: {"name": "execute"},
+            }}], "usage": {"prompt_tokens": 12, "completion_tokens": 5},
+        })
+
+    client, _ = make_client(handler)
+    response = client.post("/v1/assess", headers=TOKEN, json=PAYLOAD)
+    assert_error(response, 502)
+    assert len(calls) == 2
+    for request in calls:
+        assert "tools" not in json.loads(request.content)
+
+
 def test_request_contract_usage_metrics_and_safe_logging(make_client, caplog):
     calls = []
 
@@ -88,7 +108,7 @@ def test_request_contract_usage_metrics_and_safe_logging(make_client, caplog):
     input_before = TOKENS.labels(*labels, "input")._value.get()
     output_before = TOKENS.labels(*labels, "output")._value.get()
     attempts_before = ATTEMPTS.labels(*labels, "assess")._value.get()
-    requests_before = REQUESTS.labels(*labels, "assess", "assess.v1", "success")._value.get()
+    requests_before = REQUESTS.labels(*labels, "assess", "assess.v2", "success")._value.get()
     client, http = make_client(handler)
     with caplog.at_level(logging.INFO):
         response = client.post("/v1/assess", headers=TOKEN, json=PAYLOAD)
@@ -114,10 +134,10 @@ def test_request_contract_usage_metrics_and_safe_logging(make_client, caplog):
     assert TOKENS.labels(*labels, "input")._value.get() - input_before == 123
     assert TOKENS.labels(*labels, "output")._value.get() - output_before == 45
     assert ATTEMPTS.labels(*labels, "assess")._value.get() - attempts_before == 1
-    assert REQUESTS.labels(*labels, "assess", "assess.v1", "success")._value.get() - (
+    assert REQUESTS.labels(*labels, "assess", "assess.v2", "success")._value.get() - (
         requests_before
     ) == 1
-    assert "template=assess.v1" in caplog.text
+    assert "template=assess.v2" in caplog.text
     assert "offline-test-credential" not in caplog.text
     assert PAYLOAD["advisory_text"] not in caplog.text
     assert VALID_OUTPUT["rationale"] not in caplog.text

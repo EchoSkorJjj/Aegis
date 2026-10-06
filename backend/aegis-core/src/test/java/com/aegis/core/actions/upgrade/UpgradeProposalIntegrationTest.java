@@ -83,6 +83,57 @@ class UpgradeProposalIntegrationTest extends AbstractInventoryIntegrationTest {
     }
 
     @Test
+    void responseAndPullRequestEvidenceIsProtectedEvenWhenAiDraftingFails() throws Exception {
+        Fixture f = fixture();
+        Owner owner = owners.assign(f.service().getId(), "Personal Owner " + f.tag());
+        Advisory old = f.advisory();
+        advisories.upsert(new Advisory(old.id(), old.sourceId(), old.externalId(), old.canonicalId(),
+                "Affected library; alice@example.test; password=opaque-credential", old.publishedAt(),
+                Instant.now(), old.cvss(), old.affected()));
+        drafter.unavailable(true);
+        String created = draft(f.advisory().id(), f.service().getId(), analyst)
+                .andExpect(jsonPath("$.status").value("PROPOSED"))
+                .andExpect(jsonPath("$.pullRequests[0].status").value("PROPOSED"))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(created).contains("[REDACTED]", "1 assigned (personal details omitted)")
+                .doesNotContain("alice@example.test", "opaque-credential", owner.getName());
+        assertThat(host.opened(f.repository())).isEmpty();
+        String proposalId = JsonPath.read(created, "$.pullRequests[0].id");
+        String ticketId = JsonPath.read(created, "$.id");
+        String stored = mvc.perform(get(PROPOSALS + "/{id}", proposalId).with(as("COMPLIANCE_ADMIN", approver)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(stored).contains("[REDACTED]").doesNotContain("alice@example.test", "opaque-credential", owner.getName());
+        assertThat(drafter.requests()).filteredOn(sent -> sent.findingId().equals(ticketId)
+                || sent.findingId().equals(proposalId)).hasSize(2).allSatisfy(sent ->
+                assertThat(sent.context()).doesNotContain("alice@example.test", "opaque-credential", owner.getName()));
+    }
+
+    @Test
+    void theTicketAndPullRequestKeepTheirDraftEvidenceAfterTheEstateAndFeedChange() throws Exception {
+        Fixture f = fixture();
+        String created = draft(f.advisory().id(), f.service().getId(), analyst)
+                .andReturn().getResponse().getContentAsString();
+        String ticketId = JsonPath.read(created, "$.id");
+        String proposalId = JsonPath.read(created, "$.pullRequests[0].id");
+        String originalBody = JsonPath.read(created, "$.pullRequests[0].body");
+        List<String> originalEvidence = JsonPath.read(created, "$.evidence");
+        String oldName = f.service().getName();
+
+        inventory.updateBusinessService(f.service().getId(), oldName + " renamed", BusinessCriticality.LOW,
+                ServiceExposure.ISOLATED);
+        Advisory old = f.advisory();
+        advisories.upsert(new Advisory(old.id(), old.sourceId(), old.externalId(), old.canonicalId(),
+                "Revised advisory text.", old.publishedAt(), Instant.now(), old.cvss(), old.affected()));
+
+        mvc.perform(get(RESPONSES + "/{id}", ticketId).with(as("COMPLIANCE_ADMIN", approver)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.evidence").value(originalEvidence));
+        mvc.perform(get(PROPOSALS + "/{id}", proposalId).with(as("COMPLIANCE_ADMIN", approver)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.body").value(originalBody));
+        assertThat(originalBody).contains(oldName, "Source excerpt: An injection flaw in upgrade-lib.")
+                .doesNotContain("Revised advisory text.");
+    }
+
+    @Test
     void approvingTheResponseFilesTheTicketThenOpensTheDraftPullRequestUnderItsKey() throws Exception {
         Fixture f = fixture();
 
@@ -104,6 +155,9 @@ class UpgradeProposalIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.pullRequests[0].body")
                         .value(containsString("| Checked against | " + f.cve() + ", " + f.laterCve() + " |")))
                 .andExpect(jsonPath("$.pullRequests[0].body").value(containsString(FakeAiDrafter.CONTENT)))
+                .andExpect(jsonPath("$.pullRequests[0].body").value(containsString("### Evidence at drafting")))
+                .andExpect(jsonPath("$.pullRequests[0].body").value(containsString("Source: ")))
+                .andExpect(jsonPath("$.pullRequests[0].body").value(containsString("Score calculation: severity ")))
                 .andReturn().getResponse().getContentAsString();
         String id = JsonPath.read(created, "$.id");
         String pullRequestId = JsonPath.read(created, "$.pullRequests[0].id");

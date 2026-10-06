@@ -79,7 +79,8 @@ class GroqLlmClient:
             choice = data["choices"][0]
             content = choice["message"].get("content")
             # Refusal/truncation still consumes usage; validate empty text in the shared layer.
-            if choice.get("finish_reason") != "stop" or not isinstance(content, str):
+            if (choice.get("finish_reason") != "stop" or not isinstance(content, str)
+                    or choice["message"].get("tool_calls") or choice["message"].get("function_call")):
                 content = ""
             return LlmResult(content, self.provider, self.model, input_tokens, output_tokens)
         except (ValueError, KeyError, TypeError, IndexError, AttributeError):

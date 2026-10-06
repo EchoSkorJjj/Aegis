@@ -50,6 +50,16 @@ are written the way the team already knows. The reactive flavour is `spring-clou
 - Spring Cloud **2025.1.2** ("Oakwood"), the release train built on Spring Framework 7 / Spring Boot 4. Bump
   `spring-cloud.version` in `pom.xml` in step with the Boot parent.
 
+## Client addresses (X-Forwarded-For)
+
+identity-service's `/auth` rate limit and audit log key on the first `X-Forwarded-For` hop. The frontend's BFF
+sets it to the browser's address (the one address its load balancer recorded, never what the browser wrote).
+[`ForwardedForFilter`](src/main/java/com/aegis/gateway/ForwardedForFilter.java) passes that header on, with the
+caller's own address appended, only when the caller matches `gateway.trusted-proxies` (the BFF's network); from
+anyone else it sends just their own address. Spring Cloud Gateway's own X-Forwarded filter stays off: it keeps an
+entry only when the entry itself is a trusted proxy, which would drop the browser's public address. Without either,
+the gateway strips the header and every user shares one rate-limit bucket.
+
 ## Environment variables
 
 | Var | Default | Purpose |

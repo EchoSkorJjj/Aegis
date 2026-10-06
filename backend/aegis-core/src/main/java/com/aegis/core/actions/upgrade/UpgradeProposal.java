@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import com.aegis.core.actions.pr.PullRequestRef;
 import com.aegis.core.matching.MatchingDtos.MatchConfidence;
+import com.aegis.core.platform.common.SensitiveText;
 
 /**
  * A reviewed plan to fix one vulnerability in one service with one pull request (E8 story 4): every edit it
@@ -62,12 +63,15 @@ public record UpgradeProposal(
                 pullRequest.url(), pullRequest.number(), null, title);
     }
 
+    /** An upstream error can quote the request it rejected, so it is redacted as it enters the record. */
     UpgradeProposal failed(String reason) {
-        return transition(UpgradeProposalStatus.FAILED, decidedBy, decidedAt, null, null, null, reason, title);
+        return transition(UpgradeProposalStatus.FAILED, decidedBy, decidedAt, null, null, null,
+                SensitiveText.redact(reason), title);
     }
 
     UpgradeProposal dismissed(UUID by, Instant at, String reason) {
-        return transition(UpgradeProposalStatus.DISMISSED, by, at, reason, null, null, failureMessage, title);
+        return transition(UpgradeProposalStatus.DISMISSED, by, at, SensitiveText.redact(reason), null, null,
+                failureMessage, title);
     }
 
     private UpgradeProposal transition(

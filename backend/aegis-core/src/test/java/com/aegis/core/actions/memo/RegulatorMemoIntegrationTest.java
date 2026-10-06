@@ -14,6 +14,7 @@ import com.aegis.core.incidents.VendorIncidentStore;
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
+import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
@@ -23,6 +24,7 @@ import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.platform.tenant.CurrentOrg;
 import com.aegis.core.support.AbstractInventoryIntegrationTest;
 import com.aegis.core.support.FakeAiDrafter;
+import com.aegis.core.support.TestOwners;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -56,6 +58,7 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
     @Autowired private VendorIncidentStore incidents;
     @Autowired private NewsItemStore newsItems;
     @Autowired private FakeAiDrafter drafter;
+    @Autowired private TestOwners owners;
     @Autowired private CurrentOrg currentOrg;
     @Autowired private RegulatorMemoService memos;
 
@@ -65,6 +68,55 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
     @AfterEach
     void aiBack() {
         drafter.unavailable(false);
+    }
+
+    @Test
+    void aFallbackMemoRedactsSourceDataBeforePersistenceAndMarkdownDownload() throws Exception {
+        Vulnerability v = vulnerability();
+        Owner owner = owners.assign(v.service().getId(), "Personal Owner " + UUID.randomUUID());
+        Advisory old = v.advisory();
+        advisories.upsert(new Advisory(old.id(), old.sourceId(), old.externalId(), old.canonicalId(),
+                "Affected library; alice@example.test; password=opaque-credential", old.publishedAt(),
+                Instant.now(), old.cvss(), old.affected()));
+        drafter.unavailable(true);
+        String created = mvc.perform(post(PATH).with(as("ANALYST", analyst)).contentType(MediaType.APPLICATION_JSON)
+                        .content(request(v.advisory().id())))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("PROPOSED"))
+                .andExpect(jsonPath("$.aiDrafted").value(false))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(created).contains("[REDACTED]", "1 assigned (personal details omitted)")
+                .doesNotContain("alice@example.test", "opaque-credential", owner.getName());
+        String id = JsonPath.read(created, "$.id");
+        mvc.perform(post(PATH + "/{id}/approve", id).with(as("ANALYST", secondAnalyst)))
+                .andExpect(status().isOk());
+        String approved = mvc.perform(get(PATH + "/{id}", id).with(as("ANALYST", secondAnalyst)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String download = JsonPath.read(approved, "$.body"); // the frontend downloads this stored Markdown
+        assertThat(download).contains("[REDACTED]").doesNotContain("alice@example.test", "opaque-credential", owner.getName());
+        assertThat(drafter.requests()).filteredOn(sent -> sent.findingId().equals(id)).hasSize(1).allSatisfy(sent ->
+                assertThat(sent.context()).doesNotContain("alice@example.test", "opaque-credential", owner.getName()));
+    }
+
+    @Test
+    void theMemoKeepsItsEvidenceAndCitationsAfterTheEstateAndFeedChange() throws Exception {
+        Vulnerability v = vulnerability();
+        String created = mvc.perform(post(PATH).with(as("ANALYST", analyst)).contentType(MediaType.APPLICATION_JSON)
+                        .content(request(v.advisory().id())))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String id = JsonPath.read(created, "$.id");
+        String originalBody = JsonPath.read(created, "$.body");
+        String oldName = v.service().getName();
+
+        inventory.updateBusinessService(v.service().getId(), oldName + " renamed", BusinessCriticality.LOW,
+                ServiceExposure.ISOLATED);
+        Advisory old = v.advisory();
+        advisories.upsert(new Advisory(old.id(), old.sourceId(), old.externalId(), old.canonicalId(),
+                "Revised advisory text.", old.publishedAt(), Instant.now(), old.cvss(), old.affected()));
+
+        mvc.perform(get(PATH + "/{id}", id).with(as("COMPLIANCE_ADMIN", secondAnalyst)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.body").value(originalBody));
+        assertThat(originalBody).contains(oldName, "Source excerpt: A flaw in memo-lib.", "> C1 quoted context")
+                .doesNotContain("Revised advisory text.");
     }
 
     @Test
@@ -95,6 +147,9 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
                 .contains("- com.acme:" + v.artifact() + " 1.0.0 (maven)")
                 .contains("| " + v.service().getName() + " | HIGH | INTERNET_FACING |")
                 .contains(FakeAiDrafter.MEMO.measures())
+                .contains("Source: osv / " + v.advisory().externalId(), "Source excerpt: A flaw in memo-lib.")
+                .contains("Score calculation: severity 0.91 x exposure 1 x criticality 0.8 x confidence 1 x 100 = 72.8")
+                .contains("### Sources the AI draft quotes (unverified)", "> C1 quoted context")
                 .doesNotContain("{{");
         assertThat(drafter.requests()).anySatisfy(sent -> {
             assertThat(sent.findingId()).isEqualTo(id);
@@ -218,6 +273,8 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.aiDrafted").value(false))
                 .andExpect(jsonPath("$.citations").isEmpty())
+                .andExpect(jsonPath("$.body").value(containsString("Source excerpt: A flaw in memo-lib.")))
+                .andExpect(jsonPath("$.body").value(containsString("Score calculation: severity ")))
                 .andExpect(jsonPath("$.summary").value("Vulnerability " + v.cve() + ": A flaw in memo-lib."))
                 .andExpect(jsonPath("$.impact").value(startsWith(
                         "Aegis assessed 1 service as materially affected: " + v.service().getName() + " (")))

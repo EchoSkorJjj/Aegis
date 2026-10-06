@@ -16,6 +16,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import com.aegis.core.actions.evidence.DraftEvidence;
 import com.aegis.core.actions.memo.RegulatorMemo.AffectedService;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 
@@ -60,6 +61,10 @@ final class MemoTemplate {
     }
 
     static String render(MemoKind kind, Facts facts, Sections sections) {
+        return render(kind, facts, sections, List.of());
+    }
+
+    static String render(MemoKind kind, Facts facts, Sections sections, List<String> citations) {
         Map<String, String> values = Map.ofEntries(
                 Map.entry("reference", facts.reference()),
                 Map.entry("change", facts.change()),
@@ -86,9 +91,15 @@ final class MemoTemplate {
             if (value == null) {
                 throw new IllegalStateException("Unknown memo placeholder " + placeholder.group(1));
             }
-            placeholder.appendReplacement(memo, Matcher.quoteReplacement(value.strip()));
+            placeholder.appendReplacement(memo, Matcher.quoteReplacement(DraftEvidence.inert(value.strip())));
         }
         placeholder.appendTail(memo);
+        if (!citations.isEmpty()) {
+            memo.append("\n\n### Sources the AI draft quotes (unverified)\n\n");
+            for (String citation : citations) {
+                memo.append(DraftEvidence.quote(citation)).append("\n\n");
+            }
+        }
         return memo.toString();
     }
 
@@ -113,7 +124,8 @@ final class MemoTemplate {
     }
 
     private static String bullets(List<String> items) {
-        return items.stream().map(item -> "- " + item.strip().replaceAll("\\s+", " ")).collect(Collectors.joining("\n"));
+        return items.stream().map(item -> "- " + DraftEvidence.inert(item.strip().replaceAll("\\s+", " ")))
+                .collect(Collectors.joining("\n"));
     }
 
     /** A table cell: a pipe or line break in a name must not break the row. */

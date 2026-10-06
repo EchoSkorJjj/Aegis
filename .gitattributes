@@ -1,0 +1,2 @@
+# Match aegis-core's Spotless line-ending policy on Windows and Linux.
+backend/aegis-core/**/*.java text eol=lf

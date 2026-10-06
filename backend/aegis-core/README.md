@@ -321,6 +321,88 @@ domain. See `ARCHITECTURE.md` for the topology.
 The vendor and news feed lists are YAML (`aegis.ingestion.vendor-status.vendors`,
 `aegis.ingestion.news.feeds`), not env vars — each entry needs several fields.
 
+## Evidence on every draft (E8 story 7)
+
+Risk tickets, upgrade proposals and regulator memos retain the evidence available when they were drafted:
+the canonical change and its feed reference, a source-text excerpt (up to 4,000 characters, with truncation
+marked), its time and URL when supplied, the affected service and owner count, matching paths and confidence,
+and the impact score, tier, materiality, arithmetic and configured factors. Missing source metadata is
+explicit. The evidence remains available when AI drafting fails and Aegis uses its deterministic fallback.
+
+Tickets persist it in `evidence` and include it when filed in Jira or copied as ServiceNow fields. Upgrade
+proposals persist it in the reviewed PR body, up to 20,000 characters: a service reached through many
+dependency paths keeps the first paths and the score and source lines, and the body says how many lines
+in between are left out, so it stays within the 60,000 characters a draft PR may have.
+Memos persist it in their body for review and Markdown download; the download also includes the AI's
+server-resolved cited passages, quoted separately from the deterministic facts. Later changes to the estate
+or feed do not recompute a stored draft's evidence. Existing drafts are not retrospectively enriched;
+V32 only redacts historical owner-name lists as described below. Evidence exports and the decision audit
+remain E10 work.
+
+## Draft guardrails (E8 story 8)
+
+Drafting creates only local `PROPOSED` responses. Filing a ticket and opening a GitHub **draft** PR
+still require the existing human approval and role checks; Aegis has no merge operation. Regulator
+memos become final on a second analyst's approval and are never sent. AI text cannot choose actions,
+versions, scores, priorities or workflow states.
+
+`platform.common.SensitiveText` redacts recognisable secrets and personal data from AI-port inputs
+and outputs, draft narratives, evidence, citations, PR metadata, Jira blocks and ServiceNow fields.
+Redaction precedes excerpt/title/citation truncation and Markdown escaping. Owner names and user IDs
+are omitted from evidence and AI context; the assigned count is retained. `DraftEvidence` also removes
+known owner display names embedded in matching explanations before persistence or an AI call. Private-key blocks,
+credential-bearing URLs, Bearer/Basic credentials, common API/cloud/VCS token formats, JWTs,
+labelled passwords/tokens, email addresses, SSNs, international phone numbers, and labelled personal
+names/addresses/phone/identity fields are replaced with `[REDACTED]`. Each rule matches the shape of a
+credential or contact detail and redacts only its value, so package specs (`lodash@4.17.21`, purls)
+and prose such as "Basic authentication" or "CSRF token: the server…" reach drafts intact. Keep the
+Java policy aligned with ai-service's `_guardrails.py` and their regression cases.
+
+The AI service screens whole sources for recognisable control instructions before calling a
+provider, then redacts and XML-escapes numbered passages. It validates its strict narrative schema,
+rejects tool/function requests and selected false execution claims, and redacts generated text.
+Citations are resolved only from those protected passages. A screened request or invalid AI output
+uses the same deterministic fallback as an AI outage; source evidence and computed scores remain.
+Memo interpolation is one pass, with feed/model text made inert as Markdown. Logs carry IDs and
+exception types, never source text or model output.
+
+These are layered safeguards, not general PII detection or a guarantee against every semantic
+injection. Arbitrary unlabelled names/addresses, unknown or encoded secret formats and paraphrased
+attacks can evade pattern matching. Raw ingestion/inventory storage is unchanged, and existing
+repository file content is not rewritten for redaction. Text is redacted where it enters a draft (feed
+text, evidence, AI output, dismissal reasons and upstream errors) and again at the AI, Jira and GitHub
+ports; drafts stored before E8 story 8 are shown as stored. Identity fields needed for internal
+authorization and auditing remain intact. The approval boundary applies regardless of model output.
+
+### Historical owner evidence cleanup
+
+Flyway migration `V32__redact_historical_draft_owner_evidence.sql` removes the owner-name list appended
+by matching (`; owners: ...`) from stored ticket evidence, upgrade PR bodies and memo bodies of responses
+that can still be decided or sent: `PROPOSED` ones, and `FAILED` tickets and PRs, which a retry files or
+opens. A decided response (filed, opened, approved or dismissed), or one being filed or opened, keeps the
+record its decision was made on. PR bodies drafted before V32 hold every explanation on one line; each
+owner clause there is redacted on its own. It preserves dependency paths, possible-match warnings,
+source references, scores, array order, creation and decision metadata, and statuses. It uses the
+historical clause rather than
+today's owner assignments, so renamed or removed owners are covered. Changed records receive an updated
+timestamp and version; already protected records are unchanged. Forced tenant isolation is restored in
+the same migration transaction, and the cleanup can be rerun without changing protected records.
+
+The migration runs automatically when the updated core service starts. For an already running Compose
+stack, rebuild and restart it from the project root:
+
+```bash
+docker compose up -d --build --no-deps aegis-core
+```
+
+This is a targeted cleanup of generated evidence clauses. It does not detect arbitrary unlabelled names
+elsewhere in old AI narratives, rewrite repository contents, or edit previously filed Jira issues and
+opened GitHub PRs. Any copies already published externally need separate review and cleanup.
+
+Tests cover redaction formats, truncation boundaries, all AI draft shapes and citations, safe
+provider failures, inert memo rendering, and fallback snapshot persistence. Database integration
+tests require Docker; `PackageStructureArchTest` and the text/AI-port tests do not.
+
 ## Build & test
 
 ```bash

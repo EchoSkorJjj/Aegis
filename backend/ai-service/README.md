@@ -52,7 +52,7 @@ The model returns an internal Pydantic schema with citation IDs. A schema transf
 object closed (`additionalProperties: false`) and every property required for strict structured
 output. Responses are validated locally too: malformed JSON, forbidden fields, invalid severity,
 unknown citation IDs, and material assessments without citations are rejected. Citations are
-resolved from the exact input snippets sent to the model, each at most 1,000 characters; the model
+resolved from the redacted input snippets sent to the model, each at most 1,000 characters; the model
 does not supply citation text. The public contract continues to return those snippets as strings.
 
 There is one retry for invalid model output and at most two status retries for 429/5xx responses.
@@ -61,6 +61,7 @@ attempts, validation retries, and retry waits. Other 4xx responses and timeouts 
 Errors use the existing `{timestamp, status, error, message, path}` shape:
 
 - **400:** invalid request or oversized input; text is never silently truncated.
+- **400:** recognisable source control instructions; no provider call and no source text in the error.
 - **502:** invalid provider output after the validation retry.
 - **503:** exhausted local limits/budget, timeout, or provider unavailability.
 
@@ -68,6 +69,36 @@ Logs contain operational metadata, including prompt version, rather than prompts
 text, or raw provider error bodies. Metrics record requests by provider/model/capability/outcome,
 token usage by direction, latency, and prompt versions. The Compose Prometheus container is on a
 different network and does not scrape ai-service; the metrics endpoint can be inspected locally.
+
+### Guardrails (E8 story 8)
+
+`capabilities/_guardrails.py` screens advisory and service context for recognisable instruction
+attacks, including role/control delimiters, requests to ignore prior rules, reveal secrets/prompts,
+or bypass approval. Only instructions are screened, text that starts a sentence or addresses the
+model ("your"): an advisory describing what an attacker can do ("allows an attacker to expose
+credentials", "lets members bypass the approval rules") is drafted as usual. Screening normalises
+Unicode compatibility characters and invisible format
+controls and runs before passage splitting. Rejection is a generic 400; aegis-core falls back to
+its deterministic draft without filing, opening or sending anything.
+
+Whole sources are redacted before prompt splitting. Recognisable private keys, credential-bearing
+URLs, Bearer/Basic credentials, common API/cloud/VCS tokens, JWTs, labelled passwords/tokens,
+emails, SSNs, international phone numbers and labelled personal names/addresses/identity/contact
+fields become `[REDACTED]`. Generated narratives are redacted and revalidated against their schema
+bounds. Server-resolved citations use the same protected passages, so they cannot reintroduce raw
+matches. No original-to-redacted mapping or text is logged. The policy is mirrored in aegis-core's
+`platform.common.SensitiveText`, protecting its deterministic evidence, fallback and export paths too.
+
+Prompts forbid reconstructing redacted values or following encoded/embedded instructions. The
+provider is given no tools; tool/function responses, unknown execution fields and selected claims
+that Aegis has already filed, opened, merged or sent a response are invalid output. The existing
+single validation retry never echoes that output into its next prompt. Human decisions and all
+execution remain exclusively in aegis-core's existing workflow.
+
+Pattern matching cannot detect every secret, unlabelled name/address, encoding or semantic attack.
+Escaping and system instructions do not guarantee model obedience. No-tools execution, closed
+schemas, server-resolved citations, deterministic business facts and human approval remain
+independent safeguards. These guards protect the AI/draft boundaries, not raw ingestion storage.
 
 ## Configuration and cost controls
 
@@ -178,6 +209,58 @@ Provider references: [Groq structured outputs](https://console.groq.com/docs/str
 and [reasoning parameters](https://console.groq.com/docs/reasoning). Other compatible servers or
 models must accept this adapter's structured-output and reasoning fields.
 
+## Draft quality evaluation (E8 story 9 → E14)
+
+The standalone harness evaluates the AI narratives for risk tickets, upgrade rationales and
+regulator memos. It uses 20 versioned synthetic golden cases: direct/transitive vulnerabilities,
+vendor outages, Maven/npm/PyPI upgrades, missing fixes/context, multiple affected services,
+long evidence, redaction and injection. It calls the same guarded draft capability and structured
+generator as the API, with no database, core workflow action, or running stack required.
+
+The [rubric](src/ai_service/evaluation/rubric.md) defines weighted format, grounding, citations,
+actionability, uncertainty and safety criteria. Automated anchor checks produce quality **proxies**,
+with critical-failure gates and separate human review. They cannot prove factual/semantic quality.
+Core's final document templates, version selection and approval/execution remain covered by core tests.
+
+After installing `pip install -e '.[dev]'`, run from `backend/ai-service`:
+
+```bash
+# Offline reference replay: validates the harness/pipeline, not live-model quality
+python -m ai_service.evaluation --provider golden --output evaluation-results/golden
+
+# The generic development stub should fail the quality rubric (exit 1), while attacks stay blocked
+python -m ai_service.evaluation --provider stub --output evaluation-results/stub
+
+# Compare the same corpus/rubric/selection; regression or failed case exits 1
+python -m ai_service.evaluation --output evaluation-results/next --baseline evaluation-results/golden/report.json
+
+# Explicit paid-provider evaluation only; use your process environment's GROQ_API_KEY
+python -m ai_service.evaluation --provider groq --case upgrade-maven --output evaluation-results/groq-maven
+```
+
+On Windows use `.\.venv\Scripts\python.exe` in place of `python`. `--case` can be repeated;
+`--model` overrides the Groq model; `--corpus` loads a validated alternative corpus;
+`--max-score-drop` allows a chosen numeric decline from the baseline (a pass-to-fail regression
+still fails); `--delay-seconds` paces multi-case live runs. Default mode is always offline golden
+replay, even if `LLM_PROVIDER=groq` is configured. Live runs retain configured token/rate/daily
+budgets; rate limits and provider failures are recorded separately and fail the affected case.
+No live model run or API-key availability is implied by offline checks.
+
+Each output folder contains `report.json` (versioned E14 input), `report.md` (context, candidate,
+diagnostics), and `human-review.json` (null scores pending a reviewer). Reports include corpus,
+rubric/scorer, prompt and guardrail fingerprints; provider/model/mode; outcomes; per-case dimensions;
+latency and known token usage; aggregate scores and baseline regressions. Expected blocked cases
+have a separate pass rate and are excluded from quality averages. `mean_auto_score` counts failed
+quality generations as zero; `mean_generated_auto_score` covers produced drafts only, alongside
+`generation_success_rate`, so availability is visible separately from narrative quality.
+
+Exit codes: **0** proxy checks passed; **1** failed cases or regressions; **2** invalid corpus,
+selection, provider configuration or incompatible baseline. Passing automated checks leaves
+human review pending and never approves a response. Complete the separate review file using the
+rubric and retain it with the reports for E14. This story provides that handoff, not the full E14
+benchmark/reporting application. CI runs offline replay, uploads its reports, and checks packaged
+evaluation resources. Local `evaluation-results/` is ignored; do not commit keys or real estate data.
+
 ## Layout
 
 ```text
@@ -189,6 +272,7 @@ src/ai_service/
   capabilities/     assessment/drafting, internal outputs, citation validation
   prompts/          versioned templates and prompt construction
   llm/              provider port/adapters, structured generation, limits
+  evaluation/       versioned golden cases, rubric, standalone CLI and E14 report exports
 ```
 
 Dependencies flow `api → capabilities → llm`, with shared plumbing in `core` and wire models in

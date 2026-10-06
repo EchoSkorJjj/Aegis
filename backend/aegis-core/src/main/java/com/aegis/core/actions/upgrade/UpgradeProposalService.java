@@ -17,6 +17,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import com.aegis.core.actions.evidence.DraftEvidence;
 import com.aegis.core.actions.pr.FileChange;
 import com.aegis.core.actions.pr.PrProvider;
 import com.aegis.core.actions.pr.PrProviders;
@@ -27,8 +28,6 @@ import com.aegis.core.actions.pr.RepositoryRef;
 import com.aegis.core.actions.upgrade.UpgradeProposal.Edit;
 import com.aegis.core.actions.upgrade.UpgradePullRequestText.Facts;
 import com.aegis.core.actions.upgrade.UpgradePullRequestText.Rationale;
-import com.aegis.core.advisories.Advisory;
-import com.aegis.core.advisories.AdvisoryStore;
 import com.aegis.core.ai.AiDrafter;
 import com.aegis.core.ai.AiDtos;
 import com.aegis.core.inventory.InventoryService;
@@ -36,17 +35,18 @@ import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.RepositoryUrl;
 import com.aegis.core.inventory.sbom.SbomGenerationProperties;
-import com.aegis.core.matching.MatchingDtos.ChangeRef;
 import com.aegis.core.matching.MatchingDtos.ComponentRef;
 import com.aegis.core.matching.MatchingDtos.EvidenceChain;
 import com.aegis.core.matching.MatchingDtos.MatchConfidence;
 import com.aegis.core.matching.UpgradeTargets;
 import com.aegis.core.matching.UpgradeTargets.UpgradeTarget;
 import com.aegis.core.platform.common.ApiExceptions;
+import com.aegis.core.platform.common.SensitiveText;
 import com.aegis.core.scoring.ScoringDtos.ChangeImpactResponse;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.scoring.ScoringService;
 import com.aegis.core.signals.ChangeSignal;
+import com.aegis.core.signals.ChangeSignalStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -77,14 +77,13 @@ public class UpgradeProposalService {
 
     /** An approval interrupted mid-way (a crash while opening) may be retried after this long. */
     static final Duration STALE_OPENING = Duration.ofMinutes(10);
-    private static final int MAX_ADVISORY_CONTEXT = 4_000;
     private static final int MAX_FAILURE_MESSAGE = 1_000;
 
     private final InventoryService inventory;
     private final InventoryStore inventoryStore;
     private final ScoringService scoring;
     private final UpgradeTargets targets;
-    private final AdvisoryStore advisories;
+    private final ChangeSignalStore signals;
     private final AiDrafter drafter;
     private final PrProviders providers;
     private final UpgradeProposalStore store;
@@ -96,7 +95,7 @@ public class UpgradeProposalService {
             InventoryStore inventoryStore,
             ScoringService scoring,
             UpgradeTargets targets,
-            AdvisoryStore advisories,
+            ChangeSignalStore signals,
             AiDrafter drafter,
             PrProviders providers,
             UpgradeProposalStore store,
@@ -106,7 +105,7 @@ public class UpgradeProposalService {
         this.inventoryStore = inventoryStore;
         this.scoring = scoring;
         this.targets = targets;
-        this.advisories = advisories;
+        this.signals = signals;
         this.drafter = drafter;
         this.providers = providers;
         this.store = store;
@@ -159,7 +158,9 @@ public class UpgradeProposalService {
         Set<String> notCleared = new LinkedHashSet<>();
         Map<String, ManifestEditor> editors = new LinkedHashMap<>();
         Map<String, Set<String>> edited = new LinkedHashMap<>();
-        Set<String> evidence = new LinkedHashSet<>();
+        List<String> evidence = new ArrayList<>(DraftEvidence.service(scored));
+        // The same source the response's ticket records, so the two never disagree on it.
+        evidence.addAll(DraftEvidence.source(impact.change(), signals.findById(changeSignalId).orElse(null)));
         MatchConfidence confidence = MatchConfidence.CONFIRMED;
         for (EvidenceChain chain : byComponent.values()) {
             ComponentRef component = chain.componentPath().getFirst();
@@ -212,9 +213,6 @@ public class UpgradeProposalService {
                     notAutomated.add(component.name() + " " + component.version() + " is also found in "
                             + String.join(", ", elsewhere) + ", which Aegis doesn't edit; upgrade it there by hand");
                 }
-                if (chain.explanation() != null && !chain.explanation().isBlank()) {
-                    evidence.add(chain.explanation());
-                }
                 if (chain.confidence() != MatchConfidence.CONFIRMED) {
                     confidence = MatchConfidence.POSSIBLE;
                 }
@@ -255,8 +253,8 @@ public class UpgradeProposalService {
         UUID id = UUID.randomUUID();
         Facts facts = new Facts(id, plan.vulnerabilityId(), planned.checked(), planned.notCleared(),
                 planned.serviceName(), planned.criticality(), planned.exposure(), planned.score(), planned.tier(),
-                plan.edits(), planned.confidence().name(), String.join(" ", planned.evidence()), planned.followUps());
-        String body = UpgradePullRequestText.body(facts, rationale(id, plan.change(), facts));
+                plan.edits(), planned.confidence().name(), planned.evidence(), planned.followUps());
+        String body = UpgradePullRequestText.body(facts, rationale(id, facts));
         Edit first = plan.edits().getFirst();
         return Optional.of(store.create(new UpgradeProposal(
                 id, plan.serviceId(), plan.changeSignalId(), plan.vulnerabilityId(), riskTicketId, plan.edits(),
@@ -357,7 +355,8 @@ public class UpgradeProposalService {
             return Map.of();
         }
         Map<UUID, String> names = new HashMap<>();
-        inventoryStore.findBusinessServicesByIds(serviceIds).forEach((id, service) -> names.put(id, service.getName()));
+        inventoryStore.findBusinessServicesByIds(serviceIds)
+                .forEach((id, service) -> names.put(id, SensitiveText.redact(service.getName())));
         return names;
     }
 
@@ -411,9 +410,9 @@ public class UpgradeProposalService {
         }
     }
 
-    private Rationale rationale(UUID proposalId, ChangeRef change, Facts facts) {
+    private Rationale rationale(UUID proposalId, Facts facts) {
         try {
-            AiDtos.Draft draft = drafter.draft(new AiDtos.DraftRequest(proposalId.toString(), "upgrade", context(change, facts)));
+            AiDtos.Draft draft = drafter.draft(new AiDtos.DraftRequest(proposalId.toString(), "upgrade", context(facts)));
             return Rationale.drafted(draft.content(), draft.citations());
         } catch (RuntimeException unavailable) {
             // The deterministic facts stand on their own: an AI outage must never block a fix.
@@ -423,25 +422,20 @@ public class UpgradeProposalService {
     }
 
     /** The ai-service's grounding: the advisory's own text and the deterministic facts, nothing else. */
-    private String context(ChangeRef change, Facts facts) {
-        String description = advisories.findByExternalId(change.sourceId(), change.externalId())
-                .map(Advisory::description)
-                .filter(text -> text != null && !text.isBlank())
-                .map(text -> text.length() <= MAX_ADVISORY_CONTEXT ? text : text.substring(0, MAX_ADVISORY_CONTEXT))
-                .orElse("(the advisory publishes no description)");
+    private static String context(Facts facts) {
         String upgrades = facts.edits().stream()
                 .map(edit -> edit.packageName() + " " + edit.fromVersion() + " to " + edit.toVersion() + " in "
                         + edit.manifestPath())
                 .collect(Collectors.joining("; "));
         return """
-                Vulnerability %s: %s
+                Vulnerability %s
                 Proposed upgrades: %s. Each target is the lowest version outside every published affected range \
                 with a fix (checked against %s).
                 Service: %s (%s criticality, %s), impact score %s (%s).
                 Evidence: %s
-                """.formatted(facts.vulnerabilityId(), description, upgrades, String.join(", ", facts.checked()),
+                """.formatted(facts.vulnerabilityId(), upgrades, String.join(", ", facts.checked()),
                 facts.serviceName(), facts.criticality(), facts.exposure(), facts.score(), facts.tier(),
-                facts.evidence());
+                String.join("\n", facts.evidence()));
     }
 
     /**

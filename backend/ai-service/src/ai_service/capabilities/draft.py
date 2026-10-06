@@ -15,6 +15,7 @@ from ai_service.capabilities._grounding import (
     resolve_citations,
     validate_citations,
 )
+from ai_service.capabilities._guardrails import check_sources, protect_output
 from ai_service.prompts import build_prompt
 from ai_service.schemas import Draft, DraftRequest, MemoSections, TicketSections
 
@@ -61,11 +62,13 @@ class MemoOutput(BaseModel):
 
 async def draft(request: DraftRequest, engine: "StructuredGenerator") -> Draft:
     check_input_size(request, engine.settings.llm_max_input_chars)
+    check_sources(request.context)
     prompt = build_prompt("draft", [("C", request.context)], draft_type=request.draft_type)
     output_model = {"risk_ticket": TicketOutput, "memo": MemoOutput}.get(request.draft_type, DraftOutput)
 
     def validate(output: BaseModel) -> None:
         validate_citations(output.cited_passage_ids, prompt.passages, required=bool(prompt.passages))
+        protect_output(output)
 
     output = await engine.generate(
         system=prompt.system,

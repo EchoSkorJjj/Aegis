@@ -39,6 +39,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
@@ -77,6 +78,32 @@ class RiskTicketIntegrationTest extends AbstractInventoryIntegrationTest {
     }
 
     @Test
+    void fallbackDraftsAndTheirStoredEvidenceRedactPersonalAndSecretData() throws Exception {
+        Fixture f = fixture();
+        Advisory old = f.advisory();
+        advisories.upsert(new Advisory(old.id(), old.sourceId(), old.externalId(), old.canonicalId(),
+                "Affected library; contact alice@example.test; password=opaque-credential", old.publishedAt(),
+                Instant.now(), old.cvss(), old.affected()));
+        Owner owner = owners.assign(f.service().getId(), "Personal Owner " + f.tag());
+        drafter.unavailable(true);
+
+        String created = mvc.perform(post(PATH).with(as("ANALYST", analyst)).contentType(MediaType.APPLICATION_JSON)
+                        .content(request(f.advisory().id(), f.service().getId())))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("PROPOSED"))
+                .andExpect(jsonPath("$.aiDrafted").value(false))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(created).contains("[REDACTED]", "1 assigned (personal details omitted)")
+                .doesNotContain("alice@example.test", "opaque-credential", owner.getName(), owner.getUserId().toString());
+        String id = JsonPath.read(created, "$.id");
+        String stored = mvc.perform(get(PATH + "/{id}", id).with(as("COMPLIANCE_ADMIN", approver)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(stored).doesNotContain("alice@example.test", "opaque-credential", owner.getName());
+        assertThat(drafter.requests()).filteredOn(sent -> sent.findingId().equals(id)).hasSize(1).allSatisfy(sent ->
+                assertThat(sent.context()).doesNotContain("alice@example.test", "opaque-credential", owner.getName()));
+        assertThat(tracker.filed()).noneMatch(issue -> issue.title().contains(f.cve()));
+    }
+
+    @Test
     void aTicketIsDraftedFromTheImpactAndFiledOnlyWhenApproved() throws Exception {
         Fixture f = fixture();
 
@@ -92,8 +119,11 @@ class RiskTicketIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.actions[0]").value("Upgrade the library."))
                 .andExpect(jsonPath("$.evidence[0]").value(containsString(f.component().getName())))
                 .andExpect(jsonPath("$.evidence[1]").value(startsWith("Impact score ")))
-                .andExpect(jsonPath("$.evidence[2]").value("Not automated: Link the service's repository so Aegis can "
-                        + "draft the upgrade pull request for " + f.component().getName()))
+                .andExpect(jsonPath("$.evidence").value(hasItem("Not automated: Link the service's repository so Aegis can "
+                        + "draft the upgrade pull request for " + f.component().getName())))
+                .andExpect(jsonPath("$.evidence").value(hasItem(startsWith("Source: osv / "))))
+                .andExpect(jsonPath("$.evidence").value(hasItem("Source excerpt: A flaw in ticket-lib.")))
+                .andExpect(jsonPath("$.evidence").value(hasItem(startsWith("Score calculation: severity "))))
                 .andExpect(jsonPath("$.pullRequests").isEmpty())
                 .andExpect(jsonPath("$.aiDrafted").value(true))
                 .andExpect(jsonPath("$.citations[0]").value("C1 quoted context"))
