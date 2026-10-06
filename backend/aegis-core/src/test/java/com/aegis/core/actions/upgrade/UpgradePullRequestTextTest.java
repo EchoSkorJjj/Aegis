@@ -50,7 +50,7 @@ class UpgradePullRequestTextTest {
                 List.of(), "Payments", "CRITICAL", "INTERNET_FACING", 91.0, "CRITICAL",
                 List.of(edit("axios", "1.5.1", "1.8.2", "backend/package.json"),
                         edit("axios", "1.6.0", "1.8.2", "frontend/package.json")),
-                "CONFIRMED", null, List.of()), Rationale.unavailable("none"));
+                "CONFIRMED", List.of(), List.of()), Rationale.unavailable("none"));
 
         assertThat(body)
                 .contains("Remediates **CVE-2024-39338** for the Payments service by upgrading every declaration below.")
@@ -68,7 +68,7 @@ class UpgradePullRequestTextTest {
                 List.of(), "HealthcareApp", "HIGH", "INTERNET_FACING", 80.0, "HIGH",
                 List.of(edit("axios", "1.5.0", "1.18.0", "client/package.json"),
                         edit("axios", "1.5.1", "1.18.0", "server/package.json")),
-                "CONFIRMED", null, followUps), Rationale.unavailable("none"));
+                "CONFIRMED", List.of(), followUps), Rationale.unavailable("none"));
 
         assertThat(body)
                 .containsSubsequence(
@@ -105,7 +105,7 @@ class UpgradePullRequestTextTest {
                 + "<img src=x onerror=alert(1)>";
         String body = UpgradePullRequestText.body(
                 new Facts(PROPOSAL, "CVE-2099-1", List.of("CVE-2099-1"), List.of(), "Svc @ops", "HIGH", "INTERNAL",
-                        null, null, List.of(edit("lib`name", "1", "2", "pom.xml")), "CONFIRMED", hostile, List.of()),
+                        null, null, List.of(edit("lib`name", "1", "2", "pom.xml")), "CONFIRMED", List.of(hostile), List.of()),
                 Rationale.drafted(hostile, List.of(hostile)));
 
         assertThat(body)
@@ -131,17 +131,29 @@ class UpgradePullRequestTextTest {
         List<String> many = IntStream.range(0, 25).mapToObj(i -> "CVE-2099-%04d".formatted(i)).toList();
         String body = UpgradePullRequestText.body(
                 new Facts(PROPOSAL, "CVE-2099-0000", many, List.of(), "Svc", "LOW", "ISOLATED", 1.0, "NEGLIGIBLE",
-                        List.of(edit("lib", "1", "2", "pom.xml")), "CONFIRMED", null, List.of()),
+                        List.of(edit("lib", "1", "2", "pom.xml")), "CONFIRMED", List.of(), List.of()),
                 Rationale.unavailable("none"));
 
         assertThat(body).contains("CVE-2099-0019 and 5 more").doesNotContain("CVE-2099-0020");
+    }
+
+    @Test
+    void evidenceIsKeptAsSeparateLinesWithoutDroppingLaterPathsOrSourceDetails() {
+        String longPath = "Dependency path: " + "x".repeat(2_100);
+        String body = UpgradePullRequestText.body(new Facts(PROPOSAL, "CVE-1", List.of("CVE-1"), List.of(),
+                "Payments", "HIGH", "INTERNAL", 72.0, "HIGH", List.of(edit("lib", "1", "2", "pom.xml")),
+                "CONFIRMED", List.of(longPath, "Source: osv / GHSA-1.", "Score calculation: 0.9 x 1 x 0.8 x 1 x 100 = 72.0."),
+                List.of()), Rationale.unavailable("none"));
+
+        assertThat(body).contains("### Evidence at drafting", "- " + longPath, "- Source: osv / GHSA-1.",
+                "- Score calculation: 0.9 x 1 x 0.8 x 1 x 100 = 72.0.");
     }
 
     private static Facts facts(String confidence, List<String> notCleared) {
         return new Facts(PROPOSAL, "CVE-2021-44228", List.of("CVE-2021-44228", "CVE-2021-45046"), notCleared,
                 "Order Service", "HIGH", "INTERNAL", 72.0, "HIGH",
                 List.of(edit("org.apache.logging.log4j:log4j-core", "2.14.1", "2.17.1", "pom.xml")), confidence,
-                "log4j-core 2.14.1 is in the affected range",
+                List.of("log4j-core 2.14.1 is in the affected range"),
                 List.of("Run `npm install` so `package-lock.json` resolves the new version."));
     }
 

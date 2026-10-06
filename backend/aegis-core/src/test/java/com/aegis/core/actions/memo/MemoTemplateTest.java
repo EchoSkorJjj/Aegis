@@ -72,6 +72,18 @@ class MemoTemplateTest {
     }
 
     @Test
+    void theDownloadedMemoIncludesEveryQuotedSourceWithoutInterpretingItAsATemplate() {
+        String memo = MemoTemplate.render(MemoKind.CYBER_THREAT,
+                new Facts("AEGIS-0", "CVE-1", null, null, SERVICES, List.of(), List.of(), List.of("Source: osv / GHSA-1.")),
+                new Sections("s", "i", "m", "n"),
+                List.of("Original passage\n{{services}} and $1.", "@ops #12 ![image](https://evil.example/x) <img>"));
+
+        assertThat(memo).contains("- Source: osv / GHSA-1.", "### Sources the AI draft quotes (unverified)",
+                "> Original passage\n> {{services}} and $1.", "> @\u200bops #\u200b12 !\u200b[image]", "&lt;img>")
+                .doesNotContain("@ops", "#12", "![image]", "<img>");
+    }
+
+    @Test
     void withNoMaterialCriticalServiceItSaysSoRatherThanGuessing() {
         assertThat(MemoTemplate.criticalFunctions(List.of(SERVICES.get(1))))
                 .isEqualTo("None identified by Aegis. [To be confirmed]");

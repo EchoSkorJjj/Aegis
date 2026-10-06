@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import com.aegis.core.actions.evidence.DraftEvidence;
 import com.aegis.core.actions.ticket.RiskTicketText.Sections;
 import com.aegis.core.actions.tracker.IssueTracker;
 import com.aegis.core.actions.upgrade.UpgradePlan;
@@ -113,6 +114,7 @@ public class RiskTicketService {
         if (plan != null) {
             plan.notAutomated().forEach(reason -> evidence.add("Not automated: " + reason));
         }
+        evidence.addAll(DraftEvidence.source(impact.change(), signal));
         UUID id = UUID.randomUUID();
         Sections sections = sections(id, type, title, changeTitle, signal, scored, evidence);
         LocalDate drafted = LocalDate.now(ZoneOffset.UTC);

@@ -321,6 +321,21 @@ domain. See `ARCHITECTURE.md` for the topology.
 The vendor and news feed lists are YAML (`aegis.ingestion.vendor-status.vendors`,
 `aegis.ingestion.news.feeds`), not env vars — each entry needs several fields.
 
+## Evidence on every draft (E8 story 7)
+
+Risk tickets, upgrade proposals and regulator memos retain the evidence available when they were drafted:
+the canonical change and its feed reference, a source-text excerpt (up to 4,000 characters, with truncation
+marked), its time and URL when supplied, the affected service and owners, matching paths and confidence,
+and the impact score, tier, materiality, arithmetic and configured factors. Missing source metadata is
+explicit. The evidence remains available when AI drafting fails and Aegis uses its deterministic fallback.
+
+Tickets persist it in `evidence` and include it when filed in Jira or copied as ServiceNow fields. Upgrade
+proposals persist it in the reviewed PR body, without the old combined 2,000-character evidence cutoff.
+Memos persist it in their body for review and Markdown download; the download also includes the AI's
+server-resolved cited passages, quoted separately from the deterministic facts. Later changes to the estate
+or feed do not recompute a stored draft's evidence. Existing drafts retain their original evidence; no
+migration or retrospective enrichment is performed. Evidence exports and the decision audit remain E10 work.
+
 ## Build & test
 
 ```bash

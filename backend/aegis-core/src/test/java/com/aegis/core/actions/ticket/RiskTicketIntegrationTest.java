@@ -39,6 +39,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
@@ -92,8 +93,11 @@ class RiskTicketIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.actions[0]").value("Upgrade the library."))
                 .andExpect(jsonPath("$.evidence[0]").value(containsString(f.component().getName())))
                 .andExpect(jsonPath("$.evidence[1]").value(startsWith("Impact score ")))
-                .andExpect(jsonPath("$.evidence[2]").value("Not automated: Link the service's repository so Aegis can "
-                        + "draft the upgrade pull request for " + f.component().getName()))
+                .andExpect(jsonPath("$.evidence").value(hasItem("Not automated: Link the service's repository so Aegis can "
+                        + "draft the upgrade pull request for " + f.component().getName())))
+                .andExpect(jsonPath("$.evidence").value(hasItem(startsWith("Source: osv / "))))
+                .andExpect(jsonPath("$.evidence").value(hasItem("Source excerpt: A flaw in ticket-lib.")))
+                .andExpect(jsonPath("$.evidence").value(hasItem(startsWith("Score calculation: severity "))))
                 .andExpect(jsonPath("$.pullRequests").isEmpty())
                 .andExpect(jsonPath("$.aiDrafted").value(true))
                 .andExpect(jsonPath("$.citations[0]").value("C1 quoted context"))

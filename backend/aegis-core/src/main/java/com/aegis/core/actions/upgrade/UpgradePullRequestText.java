@@ -7,6 +7,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import com.aegis.core.actions.evidence.DraftEvidence;
 import com.aegis.core.actions.upgrade.UpgradeProposal.Edit;
 
 /**
@@ -23,7 +24,6 @@ import com.aegis.core.actions.upgrade.UpgradeProposal.Edit;
 final class UpgradePullRequestText {
 
     static final int MAX_TITLE = 256;
-    private static final int MAX_EXPLANATION = 2_000;
     private static final int MAX_RATIONALE = 8_000;
     private static final int MAX_CITATIONS = 5;
     private static final int MAX_CITATION = 500;
@@ -49,11 +49,12 @@ final class UpgradePullRequestText {
             String tier,
             List<Edit> edits,
             String matchConfidence,
-            String evidence,
+            List<String> evidence,
             List<String> followUps) {
 
         Facts {
             edits = List.copyOf(edits);
+            evidence = List.copyOf(evidence);
         }
     }
 
@@ -164,8 +165,12 @@ final class UpgradePullRequestText {
             body.append("**The match is POSSIBLE, not confirmed:** check that this service really uses the ")
                     .append("affected package before merging.\n\n");
         }
-        if (facts.evidence() != null && !facts.evidence().isBlank()) {
-            body.append("**Evidence:** ").append(inline(bounded(facts.evidence(), MAX_EXPLANATION))).append("\n\n");
+        if (!facts.evidence().isEmpty()) {
+            body.append("### Evidence at drafting\n\n");
+            for (String line : facts.evidence()) {
+                body.append("- ").append(inline(line)).append('\n');
+            }
+            body.append('\n');
         }
 
         body.append("### Before merging\n\n");
@@ -207,14 +212,7 @@ final class UpgradePullRequestText {
 
     /** Text safe inside Markdown prose: nothing that notifies, cross-links, embeds or renders HTML. */
     static String inert(String text) {
-        if (text == null) {
-            return "";
-        }
-        return text.replace("\r", "")
-                .replace("<", "&lt;")
-                .replace("@", "@​")
-                .replaceAll("#(\\d)", "#​$1")
-                .replace("![", "!​[");
+        return DraftEvidence.inert(text);
     }
 
     private static String inline(String text) {

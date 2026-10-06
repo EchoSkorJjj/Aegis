@@ -7,12 +7,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import com.aegis.core.actions.evidence.DraftEvidence;
 import com.aegis.core.actions.tracker.IssueTracker.Block;
 import com.aegis.core.actions.tracker.IssueTracker.IssueDraft;
 import com.aegis.core.actions.tracker.IssueTracker.Priority;
 import com.aegis.core.actions.upgrade.UpgradeProposal;
 import com.aegis.core.actions.upgrade.UpgradeProposalStatus;
-import com.aegis.core.matching.MatchingDtos.EvidenceChain;
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.signals.ChangeSignal.SignalType;
@@ -82,16 +82,7 @@ final class RiskTicketText {
 
     /** Why the change reaches the service, one line per path, then how the score came out. */
     static List<String> evidence(ScoredService scored) {
-        List<String> lines = new ArrayList<>();
-        for (EvidenceChain chain : scored.evidence()) {
-            if (chain.explanation() != null && !chain.explanation().isBlank()) {
-                lines.add(chain.explanation().strip());
-            }
-        }
-        lines.add(String.format(Locale.ROOT, "Impact score %.1f (%s%s). %s", scored.score(), scored.tier(),
-                scored.material() ? ", material" : "", scored.explanation() == null ? "" : scored.explanation().strip())
-                .strip());
-        return lines;
+        return DraftEvidence.service(scored);
     }
 
     /** What the ticket says when the AI could not draft it: only facts Aegis holds, plainly put. */

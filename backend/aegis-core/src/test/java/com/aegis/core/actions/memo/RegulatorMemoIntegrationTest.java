@@ -68,6 +68,28 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
     }
 
     @Test
+    void theMemoKeepsItsEvidenceAndCitationsAfterTheEstateAndFeedChange() throws Exception {
+        Vulnerability v = vulnerability();
+        String created = mvc.perform(post(PATH).with(as("ANALYST", analyst)).contentType(MediaType.APPLICATION_JSON)
+                        .content(request(v.advisory().id())))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String id = JsonPath.read(created, "$.id");
+        String originalBody = JsonPath.read(created, "$.body");
+        String oldName = v.service().getName();
+
+        inventory.updateBusinessService(v.service().getId(), oldName + " renamed", BusinessCriticality.LOW,
+                ServiceExposure.ISOLATED);
+        Advisory old = v.advisory();
+        advisories.upsert(new Advisory(old.id(), old.sourceId(), old.externalId(), old.canonicalId(),
+                "Revised advisory text.", old.publishedAt(), Instant.now(), old.cvss(), old.affected()));
+
+        mvc.perform(get(PATH + "/{id}", id).with(as("COMPLIANCE_ADMIN", secondAnalyst)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.body").value(originalBody));
+        assertThat(originalBody).contains(oldName, "Source excerpt: A flaw in memo-lib.", "> C1 quoted context")
+                .doesNotContain("Revised advisory text.");
+    }
+
+    @Test
     void aVulnerabilityIsDraftedAsACyberThreatAndFinalOnlyWhenASecondAnalystApproves() throws Exception {
         Vulnerability v = vulnerability();
 
@@ -95,6 +117,9 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
                 .contains("- com.acme:" + v.artifact() + " 1.0.0 (maven)")
                 .contains("| " + v.service().getName() + " | HIGH | INTERNET_FACING |")
                 .contains(FakeAiDrafter.MEMO.measures())
+                .contains("Source: osv / " + v.advisory().externalId(), "Source excerpt: A flaw in memo-lib.")
+                .contains("Score calculation: severity 0.91 x exposure 1 x criticality 0.8 x confidence 1 x 100 = 72.8")
+                .contains("### Sources the AI draft quotes (unverified)", "> C1 quoted context")
                 .doesNotContain("{{");
         assertThat(drafter.requests()).anySatisfy(sent -> {
             assertThat(sent.findingId()).isEqualTo(id);
@@ -218,6 +243,8 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.aiDrafted").value(false))
                 .andExpect(jsonPath("$.citations").isEmpty())
+                .andExpect(jsonPath("$.body").value(containsString("Source excerpt: A flaw in memo-lib.")))
+                .andExpect(jsonPath("$.body").value(containsString("Score calculation: severity ")))
                 .andExpect(jsonPath("$.summary").value("Vulnerability " + v.cve() + ": A flaw in memo-lib."))
                 .andExpect(jsonPath("$.impact").value(startsWith(
                         "Aegis assessed 1 service as materially affected: " + v.service().getName() + " (")))

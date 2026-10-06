@@ -1,6 +1,7 @@
 package com.aegis.core.actions.memo;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
@@ -11,6 +12,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import com.aegis.core.actions.evidence.DraftEvidence;
 import com.aegis.core.actions.memo.MemoTemplate.Facts;
 import com.aegis.core.actions.memo.MemoTemplate.Sections;
 import com.aegis.core.actions.memo.RegulatorMemo.AffectedService;
@@ -92,13 +94,14 @@ public class RegulatorMemoService {
                 .toList();
         Facts facts = new Facts("AEGIS-" + id.toString().substring(0, 8).toUpperCase(Locale.ROOT), changeTitle,
                 severity(impact.severity(), signal), detectedAt(impact.change(), signal), services, thirdParties(scored),
-                components(scored), evidence(scored));
+                components(scored), evidence(impact.change(), signal, scored));
         Drafted drafted = draft(id, kind, type, changeTitle, signal, facts);
         Sections sections = drafted.sections();
         return store.create(new RegulatorMemo(id, changeSignalId, type, changeTitle, kind, facts.reference(),
                 facts.detectedAt(), services, sections.summary(), sections.impact(), sections.measures(),
                 sections.nextSteps(), drafted.aiDrafted(), drafted.citations(),
-                MemoTemplate.render(kind, facts, sections), RegulatorMemoStatus.PROPOSED, drafterId, null, null, null,
+                MemoTemplate.render(kind, facts, sections, drafted.citations()), RegulatorMemoStatus.PROPOSED,
+                drafterId, null, null, null,
                 null, 0));
     }
 
@@ -243,14 +246,10 @@ public class RegulatorMemoService {
         return List.copyOf(lines);
     }
 
-    private static List<String> evidence(List<ScoredService> services) {
-        Set<String> lines = new LinkedHashSet<>();
+    private static List<String> evidence(ChangeRef change, ChangeSignal signal, List<ScoredService> services) {
+        List<String> lines = new ArrayList<>(DraftEvidence.source(change, signal));
         for (ScoredService service : services) {
-            for (EvidenceChain chain : service.evidence()) {
-                if (!blank(chain.explanation())) {
-                    lines.add(service.service().name() + ": " + chain.explanation().strip());
-                }
-            }
+            DraftEvidence.service(service).forEach(line -> lines.add(service.service().name() + ": " + line));
         }
         return List.copyOf(lines);
     }
