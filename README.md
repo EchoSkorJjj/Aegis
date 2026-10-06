@@ -150,7 +150,6 @@ and is stopped between demos. Prod is written but not applied yet.
 Where to go next:
 - [terraform/README.md](terraform/README.md): the layout and how to run it.
 - [terraform/environments/README.md](terraform/environments/README.md): a first deploy, step by step.
-- [todo/aws-deployment.md](todo/aws-deployment.md): why each setting is what it is.
 
 ## Testing
 
@@ -158,7 +157,7 @@ Where to go next:
 |---|---|---|
 | identity-service | `./mvnw verify` | Docker (Testcontainers) |
 | aegis-core | `./mvnw verify` | Docker. `./mvnw -Dtest=PackageStructureArchTest test` checks the module boundaries without it |
-| gateway | `mvn verify` | Docker |
+| gateway | `mvn verify` | Nothing else |
 | ai-service | `pip install -e '.[dev]'`, then `pytest` | Nothing else |
 | frontend | `pnpm exec tsc --noEmit`, `pnpm lint`, `pnpm build` | Nothing else |
 | frontend end to end | `pnpm exec playwright install chromium`, then `pnpm test:e2e` | The stack running (`docker compose up`) |
@@ -179,6 +178,5 @@ frontend/             Next.js UI and backend-for-frontend
 terraform/            AWS: bootstrap, global, environments/dev and prod, modules
 ops/                  Prometheus configuration and PromQL
 assets/diagrams/      the README's diagrams: SVG sources and their PNGs
-todo/                 deployment notes
 docker-compose.yml    the whole stack, locally
 ```
