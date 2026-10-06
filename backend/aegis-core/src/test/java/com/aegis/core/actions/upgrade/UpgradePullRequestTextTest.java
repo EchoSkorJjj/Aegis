@@ -161,6 +161,23 @@ class UpgradePullRequestTextTest {
                 "- Score calculation: 0.9 x 1 x 0.8 x 1 x 100 = 72.0.");
     }
 
+    @Test
+    void evidenceFromManyDependencyPathsStaysWithinTheBodyLimitAndKeepsTheScoreAndSource() {
+        List<String> evidence = new java.util.ArrayList<>(IntStream.range(0, 400)
+                .mapToObj(i -> "CVE-1 affects minimist 1.2.5; dependency path app -> lib%03d -> minimist reaches service "
+                        .formatted(i) + "Portal; owners: [REDACTED] " + "x".repeat(120))
+                .toList());
+        evidence.addAll(List.of("Score calculation: 0.9 x 1 x 0.8 x 1 x 100 = 72.0.", "Source: osv / GHSA-1."));
+        String body = UpgradePullRequestText.body(new Facts(PROPOSAL, "CVE-1", List.of("CVE-1"), List.of(),
+                "Portal", "HIGH", "INTERNAL", 72.0, "HIGH", List.of(edit("minimist", "1.2.5", "1.2.6", "package.json")),
+                "CONFIRMED", evidence, List.of()), Rationale.drafted("r".repeat(8_000), List.of("c".repeat(500))));
+
+        assertThat(body.length()).isLessThan(60_000);
+        assertThat(body).contains("lib000 -> minimist", "lib399 -> minimist",
+                "- Score calculation: 0.9 x 1 x 0.8 x 1 x 100 = 72.0.", "- Source: osv / GHSA-1.")
+                .containsPattern("- … \\d+ more lines of evidence left out").doesNotContain("lib200 -> minimist");
+    }
+
     private static Facts facts(String confidence, List<String> notCleared) {
         return new Facts(PROPOSAL, "CVE-2021-44228", List.of("CVE-2021-44228", "CVE-2021-45046"), notCleared,
                 "Order Service", "HIGH", "INTERNAL", 72.0, "HIGH",

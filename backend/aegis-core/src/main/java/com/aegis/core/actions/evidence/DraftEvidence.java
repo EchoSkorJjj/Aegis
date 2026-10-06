@@ -38,7 +38,8 @@ public final class DraftEvidence {
         lines.add("Change: " + change.signalType() + " "
                 + (blank(change.title()) ? change.externalId() : change.title()) + " (" + change.id() + ").");
         lines.add("Source: " + change.sourceId() + " / " + change.externalId() + ".");
-        lines.add("Source URL: " + (blank(url) ? "not published" : url.strip()));
+        // Aegis records no link for an advisory, only for vendor incidents and news; the source still publishes one.
+        lines.add("Source URL: " + (blank(url) ? "not recorded" : url.strip()));
         lines.add("Source time: " + (occurredAt == null ? "not published" : occurredAt.toString()));
         String excerpt = blank(summary) ? "not published" : SensitiveText.redact(summary.strip());
         if (excerpt.length() > MAX_EXCERPT) {

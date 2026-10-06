@@ -330,7 +330,9 @@ and the impact score, tier, materiality, arithmetic and configured factors. Miss
 explicit. The evidence remains available when AI drafting fails and Aegis uses its deterministic fallback.
 
 Tickets persist it in `evidence` and include it when filed in Jira or copied as ServiceNow fields. Upgrade
-proposals persist it in the reviewed PR body, without the old combined 2,000-character evidence cutoff.
+proposals persist it in the reviewed PR body, up to 20,000 characters: a service reached through many
+dependency paths keeps the first paths and the score and source lines, and the body says how many lines
+in between are left out, so it stays within the 60,000 characters a draft PR may have.
 Memos persist it in their body for review and Markdown download; the download also includes the AI's
 server-resolved cited passages, quoted separately from the deterministic facts. Later changes to the estate
 or feed do not recompute a stored draft's evidence. Existing drafts are not retrospectively enriched;
@@ -351,8 +353,10 @@ are omitted from evidence and AI context; the assigned count is retained. `Draft
 known owner display names embedded in matching explanations before persistence or an AI call. Private-key blocks,
 credential-bearing URLs, Bearer/Basic credentials, common API/cloud/VCS token formats, JWTs,
 labelled passwords/tokens, email addresses, SSNs, international phone numbers, and labelled personal
-names/addresses/phone/identity fields are replaced with `[REDACTED]`. Keep the Java policy aligned
-with ai-service's `_guardrails.py` and their regression cases.
+names/addresses/phone/identity fields are replaced with `[REDACTED]`. Each rule matches the shape of a
+credential or contact detail and redacts only its value, so package specs (`lodash@4.17.21`, purls)
+and prose such as "Basic authentication" or "CSRF token: the server…" reach drafts intact. Keep the
+Java policy aligned with ai-service's `_guardrails.py` and their regression cases.
 
 The AI service screens whole sources for recognisable control instructions before calling a
 provider, then redacts and XML-escapes numbered passages. It validates its strict narrative schema,
@@ -365,16 +369,21 @@ exception types, never source text or model output.
 These are layered safeguards, not general PII detection or a guarantee against every semantic
 injection. Arbitrary unlabelled names/addresses, unknown or encoded secret formats and paraphrased
 attacks can evade pattern matching. Raw ingestion/inventory storage is unchanged, and existing
-repository file content is not rewritten for redaction. Stored draft text is protected on construction
-and reads, including older drafts. Identity fields needed for internal
+repository file content is not rewritten for redaction. Text is redacted where it enters a draft (feed
+text, evidence, AI output, dismissal reasons and upstream errors) and again at the AI, Jira and GitHub
+ports; drafts stored before E8 story 8 are shown as stored. Identity fields needed for internal
 authorization and auditing remain intact. The approval boundary applies regardless of model output.
 
 ### Historical owner evidence cleanup
 
 Flyway migration `V32__redact_historical_draft_owner_evidence.sql` removes the owner-name list appended
-by matching (`; owners: ...`) from stored ticket evidence, upgrade PR bodies and memo bodies, including
-decided records. It preserves dependency paths, possible-match warnings, source references, scores,
-array order, creation and decision metadata, and statuses. It uses the historical clause rather than
+by matching (`; owners: ...`) from stored ticket evidence, upgrade PR bodies and memo bodies of responses
+that can still be decided or sent: `PROPOSED` ones, and `FAILED` tickets and PRs, which a retry files or
+opens. A decided response (filed, opened, approved or dismissed), or one being filed or opened, keeps the
+record its decision was made on. PR bodies drafted before V32 hold every explanation on one line; each
+owner clause there is redacted on its own. It preserves dependency paths, possible-match warnings,
+source references, scores, array order, creation and decision metadata, and statuses. It uses the
+historical clause rather than
 today's owner assignments, so renamed or removed owners are covered. Changed records receive an updated
 timestamp and version; already protected records are unchanged. Forced tenant isolation is restored in
 the same migration transaction, and the cleanup can be rerun without changing protected records.

@@ -28,8 +28,6 @@ import com.aegis.core.actions.pr.RepositoryRef;
 import com.aegis.core.actions.upgrade.UpgradeProposal.Edit;
 import com.aegis.core.actions.upgrade.UpgradePullRequestText.Facts;
 import com.aegis.core.actions.upgrade.UpgradePullRequestText.Rationale;
-import com.aegis.core.advisories.Advisory;
-import com.aegis.core.advisories.AdvisoryStore;
 import com.aegis.core.ai.AiDrafter;
 import com.aegis.core.ai.AiDtos;
 import com.aegis.core.inventory.InventoryService;
@@ -48,6 +46,7 @@ import com.aegis.core.scoring.ScoringDtos.ChangeImpactResponse;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.scoring.ScoringService;
 import com.aegis.core.signals.ChangeSignal;
+import com.aegis.core.signals.ChangeSignalStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -84,7 +83,7 @@ public class UpgradeProposalService {
     private final InventoryStore inventoryStore;
     private final ScoringService scoring;
     private final UpgradeTargets targets;
-    private final AdvisoryStore advisories;
+    private final ChangeSignalStore signals;
     private final AiDrafter drafter;
     private final PrProviders providers;
     private final UpgradeProposalStore store;
@@ -96,7 +95,7 @@ public class UpgradeProposalService {
             InventoryStore inventoryStore,
             ScoringService scoring,
             UpgradeTargets targets,
-            AdvisoryStore advisories,
+            ChangeSignalStore signals,
             AiDrafter drafter,
             PrProviders providers,
             UpgradeProposalStore store,
@@ -106,7 +105,7 @@ public class UpgradeProposalService {
         this.inventoryStore = inventoryStore;
         this.scoring = scoring;
         this.targets = targets;
-        this.advisories = advisories;
+        this.signals = signals;
         this.drafter = drafter;
         this.providers = providers;
         this.store = store;
@@ -160,10 +159,8 @@ public class UpgradeProposalService {
         Map<String, ManifestEditor> editors = new LinkedHashMap<>();
         Map<String, Set<String>> edited = new LinkedHashMap<>();
         List<String> evidence = new ArrayList<>(DraftEvidence.service(scored));
-        Advisory advisory = advisories.findByExternalId(impact.change().sourceId(), impact.change().externalId())
-                .orElse(null);
-        evidence.addAll(DraftEvidence.source(impact.change(), advisory == null ? null : advisory.description(),
-                advisory == null ? null : advisory.publishedAt(), null));
+        // The same source the response's ticket records, so the two never disagree on it.
+        evidence.addAll(DraftEvidence.source(impact.change(), signals.findById(changeSignalId).orElse(null)));
         MatchConfidence confidence = MatchConfidence.CONFIRMED;
         for (EvidenceChain chain : byComponent.values()) {
             ComponentRef component = chain.componentPath().getFirst();

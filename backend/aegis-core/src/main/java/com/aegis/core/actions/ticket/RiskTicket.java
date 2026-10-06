@@ -50,17 +50,10 @@ public record RiskTicket(
         long version) {
 
     public RiskTicket {
-        changeTitle = SensitiveText.redact(changeTitle);
-        title = SensitiveText.redact(title);
-        labels = List.copyOf(SensitiveText.redact(labels));
-        summary = SensitiveText.redact(summary);
-        risk = SensitiveText.redact(risk);
-        impact = SensitiveText.redact(impact);
-        actions = List.copyOf(SensitiveText.redact(actions));
-        evidence = List.copyOf(SensitiveText.redact(evidence));
-        citations = List.copyOf(SensitiveText.redact(citations));
-        dismissReason = SensitiveText.redact(dismissReason);
-        failureMessage = SensitiveText.redact(failureMessage);
+        labels = List.copyOf(labels);
+        actions = List.copyOf(actions);
+        evidence = List.copyOf(evidence);
+        citations = List.copyOf(citations);
     }
 
     /** Approved by {@code approver}; the issue is about to be filed. */
@@ -72,12 +65,13 @@ public record RiskTicket(
         return transition(RiskTicketStatus.FILED, decidedBy, decidedAt, null, issue.key(), issue.url(), null);
     }
 
+    /** An upstream error can quote the request it rejected, so it is redacted as it enters the record. */
     RiskTicket failed(String reason) {
-        return transition(RiskTicketStatus.FAILED, decidedBy, decidedAt, null, null, null, reason);
+        return transition(RiskTicketStatus.FAILED, decidedBy, decidedAt, null, null, null, SensitiveText.redact(reason));
     }
 
     RiskTicket dismissed(UUID by, Instant at, String reason) {
-        return transition(RiskTicketStatus.DISMISSED, by, at, reason, null, null, failureMessage);
+        return transition(RiskTicketStatus.DISMISSED, by, at, SensitiveText.redact(reason), null, null, failureMessage);
     }
 
     private RiskTicket transition(RiskTicketStatus status, UUID decidedBy, Instant decidedAt, String dismissReason,

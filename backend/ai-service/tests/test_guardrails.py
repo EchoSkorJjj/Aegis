@@ -25,8 +25,9 @@ SENSITIVE = [
     "Basic dXNlcjpwYXNzd29yZA==",
     "ghp_" + "a" * 36,
     "github_pat_" + "b" * 30,
-    "gsk_" + "c" * 30,
-    "sk-" + "d" * 30,
+    "gsk_" + "c7" * 15,
+    "sk-" + "d4" * 15,
+    "sk-proj-" + "Ab3" * 10,
     "xoxb-" + "e" * 30,
     "AKIA" + "F" * 16,
     "eyJhbGci.eyJzdWI.signature",
@@ -38,6 +39,7 @@ SENSITIVE = [
     "DATABASE_PASSWORD=opaque-credential",
     "Cookie: session=opaque-credential; extra=another-credential",
     "alice.smith@example.test",
+    "user@163.com",
     "123-45-6789",
     "phone: 555-123-4567",
     "full_name: Alice Smith",
@@ -52,6 +54,33 @@ def test_recognisable_secrets_and_pii_are_removed_idempotently(sensitive):
     assert sensitive not in protected
     assert REDACTED in protected
     assert redact(protected) == protected
+
+
+ADVISORY_PROSE = [
+    "Upgrade to lodash@4.17.21 or later.",
+    "Affected: pkg:npm/lodash@4.17.20 and pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+    "Fixed in pkg:maven/org.springframework/spring-core@5.3.20.RELEASE",
+    "axios before 1.6.0 does not validate Basic authentication headers.",
+    "Bearer tokens in the Authorization header are written to logs.",
+    "The skip_certificate_verification option disables TLS checks.",
+    "Service sk-payments-gateway-service-prod depends on the library.",
+    "A CSRF token: the server never checks it.",
+    "The Set-Cookie: header lacks the Secure flag.",
+]
+
+
+@pytest.mark.parametrize("prose", ADVISORY_PROSE)
+def test_package_specs_and_security_vocabulary_survive_redaction(prose):
+    assert redact(prose) == prose
+
+
+def test_only_the_value_is_redacted_not_the_rest_of_the_line():
+    assert (redact("Contact phone: 555-123-4567. Check the continuity plan.")
+            == "Contact [REDACTED]. Check the continuity plan.")
+    assert (redact("full_name: Alice Smith, then confirm the impact.")
+            == "[REDACTED], then confirm the impact.")
+    assert (redact("Authorization: Bearer opaque-credential and nothing else")
+            == "Authorization: [REDACTED] and nothing else")
 
 
 def test_redaction_preserves_scoring_and_matching_identifiers():
@@ -132,6 +161,36 @@ def test_injected_draft_context_is_rejected_before_any_provider_call(injection, 
         ), engine))
     assert injection not in str(error.value)
     assert engine.calls == []
+
+
+ADVISORY_WORDING = [
+    ("An information disclosure flaw allows a remote attacker to expose credentials stored in "
+     "environment variables."),
+    "Improper access control lets project members bypass the approval rules of protected branches.",
+    ("A crafted request can disable safety checks in the template engine, leading to code "
+     "execution."),
+    "Debug mode may print secrets to application logs.",
+]
+
+
+@pytest.mark.parametrize("wording", ADVISORY_WORDING)
+@pytest.mark.parametrize("draft_type", list(OUTPUTS))
+def test_vulnerability_descriptions_are_drafted_not_mistaken_for_injection(wording, draft_type):
+    # Describing what an attacker can do is the advisory itself; only instructions to the model
+    # are screened.
+    output = {**OUTPUTS[draft_type]}
+    if draft_type == "upgrade":
+        output["content"] = wording
+    elif draft_type == "risk_ticket":
+        output["risk"] = wording
+    else:
+        output["impact"] = wording
+    engine = RecordingEngine(output)
+    result = asyncio.run(draft(DraftRequest(
+        finding_id="id", draft_type=draft_type, context=wording,
+    ), engine))
+    assert len(engine.calls) == 1
+    assert wording in result.content
 
 
 @pytest.mark.parametrize("field", ["advisory_text", "service_context"])

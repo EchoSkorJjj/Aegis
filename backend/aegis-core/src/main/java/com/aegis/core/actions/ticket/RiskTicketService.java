@@ -108,11 +108,13 @@ public class RiskTicketService {
         UpgradePlan plan = type == SignalType.VULNERABILITY ? upgrades.plan(changeSignalId, serviceId) : null;
 
         ChangeSignal signal = signals.findById(changeSignalId).orElse(null);
-        String changeTitle = impact.change().title() == null ? impact.change().externalId() : impact.change().title();
+        // Feed text: redacted as it enters the draft, like the evidence and the AI's sections.
+        String changeTitle = SensitiveText.redact(
+                impact.change().title() == null ? impact.change().externalId() : impact.change().title());
         String title = RiskTicketText.title(type, changeTitle, scored.service().name());
         List<String> evidence = new ArrayList<>(RiskTicketText.evidence(scored));
         if (plan != null) {
-            plan.notAutomated().forEach(reason -> evidence.add("Not automated: " + reason));
+            plan.notAutomated().forEach(reason -> evidence.add("Not automated: " + SensitiveText.redact(reason)));
         }
         evidence.addAll(DraftEvidence.source(impact.change(), signal));
         UUID id = UUID.randomUUID();
@@ -129,7 +131,8 @@ public class RiskTicketService {
                 upgrades.draft(plan, ticket.id(), drafterId);
             } catch (RuntimeException failure) {
                 // The ticket stands on its own; the pull request can be drafted again from the response.
-                log.warn("response {}: the upgrade pull request was not drafted ({})", ticket.id(), failure.getClass().getSimpleName());
+                log.warn("response {}: the upgrade pull request was not drafted ({})", ticket.id(),
+                        SensitiveText.redact(failure.toString()));
             }
         }
         return ticket;

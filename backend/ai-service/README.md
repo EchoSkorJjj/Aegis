@@ -74,7 +74,10 @@ different network and does not scrape ai-service; the metrics endpoint can be in
 
 `capabilities/_guardrails.py` screens advisory and service context for recognisable instruction
 attacks, including role/control delimiters, requests to ignore prior rules, reveal secrets/prompts,
-or bypass approval. Screening normalises Unicode compatibility characters and invisible format
+or bypass approval. Only instructions are screened, text that starts a sentence or addresses the
+model ("your"): an advisory describing what an attacker can do ("allows an attacker to expose
+credentials", "lets members bypass the approval rules") is drafted as usual. Screening normalises
+Unicode compatibility characters and invisible format
 controls and runs before passage splitting. Rejection is a generic 400; aegis-core falls back to
 its deterministic draft without filing, opening or sending anything.
 

@@ -1,5 +1,6 @@
 package com.aegis.core.actions.upgrade;
 
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -28,6 +29,8 @@ final class UpgradePullRequestText {
     private static final int MAX_RATIONALE = 8_000;
     private static final int MAX_CITATIONS = 5;
     private static final int MAX_CITATION = 500;
+    /** Keeps the whole body well inside the 60,000 characters a draft pull request may have. */
+    private static final int MAX_EVIDENCE = 20_000;
     private static final int MAX_LISTED = 20;
 
     private UpgradePullRequestText() {
@@ -168,8 +171,8 @@ final class UpgradePullRequestText {
         }
         if (!facts.evidence().isEmpty()) {
             body.append("### Evidence at drafting\n\n");
-            for (String line : facts.evidence()) {
-                body.append("- ").append(inline(line)).append('\n');
+            for (String line : evidence(facts.evidence())) {
+                body.append("- ").append(line).append('\n');
             }
             body.append('\n');
         }
@@ -218,6 +221,32 @@ final class UpgradePullRequestText {
 
     private static String inline(String text) {
         return inert(text).replace('\n', ' ');
+    }
+
+    /**
+     * The evidence lines within {@value #MAX_EVIDENCE} characters. The dependency paths come first and the score
+     * and source last, so a service reached by many paths keeps both ends and says how many lines are left out.
+     */
+    static List<String> evidence(List<String> lines) {
+        List<String> items = lines.stream().map(UpgradePullRequestText::inline).toList();
+        if (items.stream().mapToInt(String::length).sum() <= MAX_EVIDENCE) {
+            return items;
+        }
+        int tail = items.size();
+        int used = 0;
+        while (tail > 0 && used + items.get(tail - 1).length() <= MAX_EVIDENCE / 2) {
+            used += items.get(--tail).length();
+        }
+        int head = 0;
+        while (head < tail && used + items.get(head).length() <= MAX_EVIDENCE) {
+            used += items.get(head++).length();
+        }
+        List<String> kept = new ArrayList<>(items.subList(0, head));
+        if (tail > head) {
+            kept.add("… " + (tail - head) + " more lines of evidence left out to stay within GitHub's size limit");
+        }
+        kept.addAll(items.subList(tail, items.size()));
+        return kept;
     }
 
     private static String cell(String text) {

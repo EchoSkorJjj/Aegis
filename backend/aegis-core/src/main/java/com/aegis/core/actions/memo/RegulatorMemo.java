@@ -43,23 +43,13 @@ public record RegulatorMemo(
         long version) {
 
     public RegulatorMemo {
-        changeTitle = SensitiveText.redact(changeTitle);
         services = List.copyOf(services);
-        summary = SensitiveText.redact(summary);
-        impact = SensitiveText.redact(impact);
-        measures = SensitiveText.redact(measures);
-        nextSteps = SensitiveText.redact(nextSteps);
-        citations = List.copyOf(SensitiveText.redact(citations));
-        body = SensitiveText.redact(body);
-        dismissReason = SensitiveText.redact(dismissReason);
+        citations = List.copyOf(citations);
     }
 
     /** A service the change affects, as Aegis scored it when the memo was drafted. */
     public record AffectedService(UUID serviceId, String name, BusinessCriticality criticality,
                                   ServiceExposure exposure, double score, ImpactTier tier, boolean material) {
-        public AffectedService {
-            name = SensitiveText.redact(name);
-        }
     }
 
     RegulatorMemo approved(UUID by, Instant at) {
@@ -67,7 +57,7 @@ public record RegulatorMemo(
     }
 
     RegulatorMemo dismissed(UUID by, Instant at, String reason) {
-        return decided(RegulatorMemoStatus.DISMISSED, by, at, reason);
+        return decided(RegulatorMemoStatus.DISMISSED, by, at, SensitiveText.redact(reason));
     }
 
     private RegulatorMemo decided(RegulatorMemoStatus status, UUID by, Instant at, String reason) {

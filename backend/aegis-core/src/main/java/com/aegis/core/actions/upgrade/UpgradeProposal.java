@@ -46,10 +46,6 @@ public record UpgradeProposal(
 
     public UpgradeProposal {
         edits = List.copyOf(edits);
-        title = SensitiveText.redact(title);
-        body = SensitiveText.redact(body);
-        dismissReason = SensitiveText.redact(dismissReason);
-        failureMessage = SensitiveText.redact(failureMessage);
     }
 
     /** One package moved from one version to another in one manifest. */
@@ -67,12 +63,15 @@ public record UpgradeProposal(
                 pullRequest.url(), pullRequest.number(), null, title);
     }
 
+    /** An upstream error can quote the request it rejected, so it is redacted as it enters the record. */
     UpgradeProposal failed(String reason) {
-        return transition(UpgradeProposalStatus.FAILED, decidedBy, decidedAt, null, null, null, reason, title);
+        return transition(UpgradeProposalStatus.FAILED, decidedBy, decidedAt, null, null, null,
+                SensitiveText.redact(reason), title);
     }
 
     UpgradeProposal dismissed(UUID by, Instant at, String reason) {
-        return transition(UpgradeProposalStatus.DISMISSED, by, at, reason, null, null, failureMessage, title);
+        return transition(UpgradeProposalStatus.DISMISSED, by, at, SensitiveText.redact(reason), null, null,
+                failureMessage, title);
     }
 
     private UpgradeProposal transition(

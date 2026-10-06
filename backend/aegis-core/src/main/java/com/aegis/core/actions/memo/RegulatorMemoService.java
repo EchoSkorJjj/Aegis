@@ -85,7 +85,9 @@ public class RegulatorMemoService {
         ChangeSignal signal = signals.findById(changeSignalId).orElse(null);
         MemoKind kind = type == SignalType.VENDOR_OUTAGE ? MemoKind.MAJOR_INCIDENT : MemoKind.CYBER_THREAT;
         UUID id = UUID.randomUUID();
-        String changeTitle = impact.change().title() == null ? impact.change().externalId() : impact.change().title();
+        // Feed text: redacted as it enters the draft, like the evidence and the AI's sections.
+        String changeTitle = SensitiveText.redact(
+                impact.change().title() == null ? impact.change().externalId() : impact.change().title());
         List<ScoredService> scored = impact.services().stream()
                 .sorted(Comparator.comparingDouble(ScoredService::score).reversed()).toList();
         List<AffectedService> services = scored.stream()

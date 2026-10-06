@@ -38,7 +38,7 @@ class DraftEvidenceTest {
 
         assertThat(source).contains("Change: VULNERABILITY CVE-1 (" + SIGNAL + ").", "Source: osv / GHSA-1.",
                 "Source time: 2026-09-26T08:30:00Z", "Source excerpt: Published advisory text.",
-                "Source URL: not published");
+                "Source URL: not recorded");
     }
 
     @Test
