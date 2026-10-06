@@ -3,12 +3,15 @@ package com.aegis.core.actions.evidence;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.aegis.core.matching.MatchingDtos.ChangeRef;
 import com.aegis.core.matching.MatchingDtos.EvidenceChain;
+import com.aegis.core.matching.MatchingDtos.OwnerRef;
 import com.aegis.core.platform.common.SensitiveText;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.signals.ChangeSignal;
@@ -76,7 +79,17 @@ public final class DraftEvidence {
                     + (factor.limiting() ? "; limiting factor" : "")
                     + (factor.setting() == null ? "" : "; setting " + factor.setting()) + "."));
         }
-        return SensitiveText.redact(lines);
+        // Matching explanations include display names for the authorized impact view. Drafts
+        // and AI context retain only the owner count; ordinary names are not regex-detectable PII.
+        String ownerNames = scored.owners().stream().map(OwnerRef::name).filter(name -> !blank(name))
+                .map(String::strip).distinct().sorted(Comparator.comparingInt(String::length).reversed())
+                .map(Pattern::quote).collect(Collectors.joining("|"));
+        List<String> protectedLines = lines;
+        if (!ownerNames.isEmpty()) {
+            Pattern names = Pattern.compile("(?<![\\p{L}\\p{N}_])(?:" + ownerNames + ")(?![\\p{L}\\p{N}_])");
+            protectedLines = lines.stream().map(line -> names.matcher(line).replaceAll(SensitiveText.REDACTED)).toList();
+        }
+        return SensitiveText.redact(protectedLines);
     }
 
     /** A quoted source passage must remain text when the memo is downloaded as Markdown. */

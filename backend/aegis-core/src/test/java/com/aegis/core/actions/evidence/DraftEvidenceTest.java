@@ -66,6 +66,33 @@ class DraftEvidenceTest {
     }
 
     @Test
+    void knownOwnerNamesAreRemovedFromBothMatchKindsWithoutLosingTheReasoning() {
+        ScoredService base = scored(true);
+        List<OwnerRef> owners = List.of(new OwnerRef(UUID.randomUUID(), USER, "Alice"),
+                new OwnerRef(UUID.randomUUID(), UUID.randomUUID(), "Alice Smith"),
+                new OwnerRef(UUID.randomUUID(), UUID.randomUUID(), "D. [Ops]"),
+                new OwnerRef(UUID.randomUUID(), UUID.randomUUID(), "Ann"),
+                new OwnerRef(UUID.randomUUID(), UUID.randomUUID(), "李明"));
+        ScoredService withOwners = new ScoredService(base.service(), base.score(), base.tier(), base.material(),
+                base.confidence(), base.breakdown(), base.factors(), base.explanation(), owners,
+                List.of(new EvidenceChain(EvidenceKind.ADVISORY_COMPONENT, MatchConfidence.POSSIBLE,
+                                "CVE-1 affects Annotation 1.0; dependency path Annotation reaches service Payments; owners: "
+                                        + "Alice Smith, Alice, Ann (possible match — version is unknown, review before acting)",
+                                null, List.of(), null),
+                        new EvidenceChain(EvidenceKind.VENDOR_DEPENDENCY, MatchConfidence.CONFIRMED,
+                                "Outage affects vendor Cloud; service Payments depends on that vendor; owners: D. [Ops], 李明",
+                                null, List.of(), null)));
+
+        String evidence = String.join("\n", DraftEvidence.service(withOwners));
+
+        assertThat(evidence).contains("CVE-1 affects Annotation 1.0; dependency path Annotation reaches service Payments",
+                "owners: [REDACTED], [REDACTED], [REDACTED] (possible match — version is unknown, review before acting)",
+                "Outage affects vendor Cloud; service Payments depends on that vendor; owners: [REDACTED], [REDACTED]",
+                "Service owners: 5 assigned (personal details omitted).", "Impact score 64.8", "Score calculation:")
+                .doesNotContain("Alice", "D. [Ops]", "李明", USER.toString());
+    }
+
+    @Test
     void sourceSecretsAreRedactedBeforeTheExcerptCanSplitThem() {
         String secret = "ghp_" + "a".repeat(36);
         String summary = "x".repeat(3_990) + " " + secret + " alice@example.test";

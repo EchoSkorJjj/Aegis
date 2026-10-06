@@ -4,11 +4,17 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.AclEntry;
+import java.nio.file.attribute.AclEntryPermission;
+import java.nio.file.attribute.AclEntryType;
+import java.nio.file.attribute.AclFileAttributeView;
+import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -288,8 +294,19 @@ class RepoSbomGenerator {
         try {
             Path script = work.resolve("askpass.sh");
             Files.writeString(script, "#!/bin/sh\nprintf '%s' \"$AEGIS_GIT_TOKEN\"\n");
-            Files.setPosixFilePermissions(script, Set.of(
-                    PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE));
+            PosixFileAttributeView posix = Files.getFileAttributeView(script, PosixFileAttributeView.class);
+            if (posix != null) {
+                posix.setPermissions(Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE,
+                        PosixFilePermission.OWNER_EXECUTE));
+            } else {
+                // Windows has ACLs rather than POSIX permissions. Keep the helper owner-only there too.
+                AclFileAttributeView acl = Files.getFileAttributeView(script, AclFileAttributeView.class);
+                if (acl == null) {
+                    throw new IOException("The filesystem cannot restrict access to the credential helper");
+                }
+                acl.setAcl(List.of(AclEntry.newBuilder().setType(AclEntryType.ALLOW).setPrincipal(acl.getOwner())
+                        .setPermissions(EnumSet.allOf(AclEntryPermission.class)).build()));
+            }
             return script;
         } catch (IOException ex) {
             throw new IllegalStateException("Could not prepare credentials for the clone", ex);

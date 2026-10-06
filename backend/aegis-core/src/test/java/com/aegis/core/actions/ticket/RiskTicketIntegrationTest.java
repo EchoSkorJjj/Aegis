@@ -97,8 +97,8 @@ class RiskTicketIntegrationTest extends AbstractInventoryIntegrationTest {
         String id = JsonPath.read(created, "$.id");
         String stored = mvc.perform(get(PATH + "/{id}", id).with(as("COMPLIANCE_ADMIN", approver)))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
-        assertThat(stored).doesNotContain("alice@example.test", "opaque-credential");
-        assertThat(drafter.requests()).filteredOn(sent -> sent.findingId().equals(id)).allSatisfy(sent ->
+        assertThat(stored).doesNotContain("alice@example.test", "opaque-credential", owner.getName());
+        assertThat(drafter.requests()).filteredOn(sent -> sent.findingId().equals(id)).hasSize(1).allSatisfy(sent ->
                 assertThat(sent.context()).doesNotContain("alice@example.test", "opaque-credential", owner.getName()));
         assertThat(tracker.filed()).noneMatch(issue -> issue.title().contains(f.cve()));
     }

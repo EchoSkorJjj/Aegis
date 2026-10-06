@@ -14,6 +14,7 @@ import com.aegis.core.incidents.VendorIncidentStore;
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
+import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
@@ -23,6 +24,7 @@ import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.platform.tenant.CurrentOrg;
 import com.aegis.core.support.AbstractInventoryIntegrationTest;
 import com.aegis.core.support.FakeAiDrafter;
+import com.aegis.core.support.TestOwners;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -56,6 +58,7 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
     @Autowired private VendorIncidentStore incidents;
     @Autowired private NewsItemStore newsItems;
     @Autowired private FakeAiDrafter drafter;
+    @Autowired private TestOwners owners;
     @Autowired private CurrentOrg currentOrg;
     @Autowired private RegulatorMemoService memos;
 
@@ -70,6 +73,7 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
     @Test
     void aFallbackMemoRedactsSourceDataBeforePersistenceAndMarkdownDownload() throws Exception {
         Vulnerability v = vulnerability();
+        Owner owner = owners.assign(v.service().getId(), "Personal Owner " + UUID.randomUUID());
         Advisory old = v.advisory();
         advisories.upsert(new Advisory(old.id(), old.sourceId(), old.externalId(), old.canonicalId(),
                 "Affected library; alice@example.test; password=opaque-credential", old.publishedAt(),
@@ -80,14 +84,17 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("PROPOSED"))
                 .andExpect(jsonPath("$.aiDrafted").value(false))
                 .andReturn().getResponse().getContentAsString();
-        assertThat(created).contains("[REDACTED]").doesNotContain("alice@example.test", "opaque-credential");
+        assertThat(created).contains("[REDACTED]", "1 assigned (personal details omitted)")
+                .doesNotContain("alice@example.test", "opaque-credential", owner.getName());
         String id = JsonPath.read(created, "$.id");
         mvc.perform(post(PATH + "/{id}/approve", id).with(as("ANALYST", secondAnalyst)))
                 .andExpect(status().isOk());
         String approved = mvc.perform(get(PATH + "/{id}", id).with(as("ANALYST", secondAnalyst)))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String download = JsonPath.read(approved, "$.body"); // the frontend downloads this stored Markdown
-        assertThat(download).contains("[REDACTED]").doesNotContain("alice@example.test", "opaque-credential");
+        assertThat(download).contains("[REDACTED]").doesNotContain("alice@example.test", "opaque-credential", owner.getName());
+        assertThat(drafter.requests()).filteredOn(sent -> sent.findingId().equals(id)).hasSize(1).allSatisfy(sent ->
+                assertThat(sent.context()).doesNotContain("alice@example.test", "opaque-credential", owner.getName()));
     }
 
     @Test

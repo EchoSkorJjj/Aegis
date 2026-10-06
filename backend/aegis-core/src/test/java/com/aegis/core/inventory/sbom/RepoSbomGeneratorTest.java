@@ -2,6 +2,11 @@ package com.aegis.core.inventory.sbom;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.AclEntryPermission;
+import java.nio.file.attribute.AclEntryType;
+import java.nio.file.attribute.AclFileAttributeView;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -81,6 +86,38 @@ class RepoSbomGeneratorTest {
         List<String> git = runner.commandStartingWith("git");
         assertThat(git).contains("https://x-access-token@github.com/acme/private.git");
         assertThat(git).noneMatch(arg -> arg.contains(token));
+    }
+
+    @Test
+    void theCredentialHelperIsOwnerOnlyOnTheHostsFilesystemAndContainsNoSecret() {
+        FakeCommandRunner runner = new FakeCommandRunner();
+        String token = "ghp_secret_TOKEN_123";
+        CommandRunner checked = (command, work, env, timeout) -> {
+            if (env.containsKey("GIT_ASKPASS")) {
+                Path script = Path.of(env.get("GIT_ASKPASS"));
+                assertThat(Files.readString(script)).contains("$AEGIS_GIT_TOKEN").doesNotContain(token);
+                PosixFileAttributeView posix = Files.getFileAttributeView(script, PosixFileAttributeView.class);
+                if (posix != null) {
+                    assertThat(posix.readAttributes().permissions()).containsExactlyInAnyOrder(
+                            PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE);
+                } else {
+                    AclFileAttributeView acl = Files.getFileAttributeView(script, AclFileAttributeView.class);
+                    assertThat(acl).isNotNull();
+                    assertThat(acl.getAcl()).singleElement().satisfies(entry -> {
+                        assertThat(entry.type()).isEqualTo(AclEntryType.ALLOW);
+                        assertThat(entry.principal()).isEqualTo(acl.getOwner());
+                        assertThat(entry.permissions()).contains(AclEntryPermission.READ_DATA, AclEntryPermission.EXECUTE);
+                    });
+                }
+            }
+            return runner.run(command, work, env, timeout);
+        };
+        RepositoryUrl repo = RepositoryUrl.parse("https://github.com/acme/private", properties.allowedHosts());
+
+        new RepoSbomGenerator(properties, checked).generate(repo, null,
+                CloneAccess.token(CloneCredential.forToken(repo.host(), token, null)));
+
+        assertThat(runner.lastWorkingDir).doesNotExist();
     }
 
     @Test

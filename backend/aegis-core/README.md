@@ -333,8 +333,9 @@ Tickets persist it in `evidence` and include it when filed in Jira or copied as 
 proposals persist it in the reviewed PR body, without the old combined 2,000-character evidence cutoff.
 Memos persist it in their body for review and Markdown download; the download also includes the AI's
 server-resolved cited passages, quoted separately from the deterministic facts. Later changes to the estate
-or feed do not recompute a stored draft's evidence. Existing drafts retain their original evidence; no
-migration or retrospective enrichment is performed. Evidence exports and the decision audit remain E10 work.
+or feed do not recompute a stored draft's evidence. Existing drafts are not retrospectively enriched;
+V32 only redacts historical owner-name lists as described below. Evidence exports and the decision audit
+remain E10 work.
 
 ## Draft guardrails (E8 story 8)
 
@@ -346,7 +347,8 @@ versions, scores, priorities or workflow states.
 `platform.common.SensitiveText` redacts recognisable secrets and personal data from AI-port inputs
 and outputs, draft narratives, evidence, citations, PR metadata, Jira blocks and ServiceNow fields.
 Redaction precedes excerpt/title/citation truncation and Markdown escaping. Owner names and user IDs
-are omitted from evidence and AI context; the assigned count is retained. Private-key blocks,
+are omitted from evidence and AI context; the assigned count is retained. `DraftEvidence` also removes
+known owner display names embedded in matching explanations before persistence or an AI call. Private-key blocks,
 credential-bearing URLs, Bearer/Basic credentials, common API/cloud/VCS token formats, JWTs,
 labelled passwords/tokens, email addresses, SSNs, international phone numbers, and labelled personal
 names/addresses/phone/identity fields are replaced with `[REDACTED]`. Keep the Java policy aligned
@@ -364,8 +366,29 @@ These are layered safeguards, not general PII detection or a guarantee against e
 injection. Arbitrary unlabelled names/addresses, unknown or encoded secret formats and paraphrased
 attacks can evade pattern matching. Raw ingestion/inventory storage is unchanged, and existing
 repository file content is not rewritten for redaction. Stored draft text is protected on construction
-and reads, including older drafts, without a database backfill. Identity fields needed for internal
+and reads, including older drafts. Identity fields needed for internal
 authorization and auditing remain intact. The approval boundary applies regardless of model output.
+
+### Historical owner evidence cleanup
+
+Flyway migration `V32__redact_historical_draft_owner_evidence.sql` removes the owner-name list appended
+by matching (`; owners: ...`) from stored ticket evidence, upgrade PR bodies and memo bodies, including
+decided records. It preserves dependency paths, possible-match warnings, source references, scores,
+array order, creation and decision metadata, and statuses. It uses the historical clause rather than
+today's owner assignments, so renamed or removed owners are covered. Changed records receive an updated
+timestamp and version; already protected records are unchanged. Forced tenant isolation is restored in
+the same migration transaction, and the cleanup can be rerun without changing protected records.
+
+The migration runs automatically when the updated core service starts. For an already running Compose
+stack, rebuild and restart it from the project root:
+
+```bash
+docker compose up -d --build --no-deps aegis-core
+```
+
+This is a targeted cleanup of generated evidence clauses. It does not detect arbitrary unlabelled names
+elsewhere in old AI narratives, rewrite repository contents, or edit previously filed Jira issues and
+opened GitHub PRs. Any copies already published externally need separate review and cleanup.
 
 Tests cover redaction formats, truncation boundaries, all AI draft shapes and citations, safe
 provider failures, inert memo rendering, and fallback snapshot persistence. Database integration
@@ -382,6 +405,9 @@ mvn spring-boot:run     # run locally (needs Postgres on :5432 and identity-serv
 
 In Docker Compose it builds and starts alongside identity-service and the ai-service. API docs at
 `http://localhost:8082/swagger-ui.html`.
+
+Spotless explicitly uses LF line endings, matching the root `.gitattributes` policy for core Java files.
+Run `spotless:apply` after changing formatting; the same check applies on Windows and Linux.
 
 The integration tests connect to their Testcontainers PostgreSQL as a plain role (`aegis`, created by
 `src/test/resources/testcontainers/app-role.sql`), not the container's superuser, so row-level security applies
