@@ -1,14 +1,9 @@
 import type { Metadata } from "next";
 
-import { PlaceholderPage } from "@/components/app/placeholder-page";
+import { FindingQueue } from "@/components/app/findings/finding-queue";
 
 export const metadata: Metadata = { title: "Triage queue" };
 
 export default function TriageQueuePage() {
-  return (
-    <PlaceholderPage
-      title="Triage queue"
-      description="All findings across services, ranked by impact for analyst triage."
-    />
-  );
+  return <FindingQueue />;
 }

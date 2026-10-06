@@ -1,14 +1,9 @@
 import type { Metadata } from "next";
 
-import { PlaceholderPage } from "@/components/app/placeholder-page";
+import { FindingQueue } from "@/components/app/findings/finding-queue";
 
 export const metadata: Metadata = { title: "My services" };
 
 export default function MyServicesFindingsPage() {
-  return (
-    <PlaceholderPage
-      title="My services"
-      description="Findings for the services you own."
-    />
-  );
+  return <FindingQueue mine />;
 }

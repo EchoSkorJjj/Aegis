@@ -17,7 +17,6 @@ import {
   formatDateTime,
 } from "@/components/app/responses/response-status";
 import { describeEdits } from "@/components/app/responses/upgrade-edits";
-import { RecommendedUpgrades } from "@/components/app/responses/upgrade-recommendations";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -42,8 +41,8 @@ const VIEW_COPY: Record<QueueView, { title: string; description: string }> = {
   review: {
     title: "Review & approve",
     description:
-      "What Aegis recommends and what has been drafted, waiting for a person. Nothing leaves Aegis until " +
-      "someone other than its drafter approves it.",
+      "Drafted responses waiting for a decision. Approving a response with a pull request requires " +
+      "someone other than its drafter.",
   },
   history: {
     title: "Response history",
@@ -54,8 +53,7 @@ const VIEW_COPY: Record<QueueView, { title: string; description: string }> = {
 /**
  * A queue of drafted responses, each kind in its own section with its own paging: responses (a risk ticket
  * with the upgrade pull request that fixes it), regulator memos, and — only while there are any — upgrade pull
- * requests drafted on their own before responses existed. The review view leads with what Aegis recommends
- * responding to, found without anyone searching for a CVE.
+ * requests drafted on their own before responses existed. Material changes live in the findings triage queue.
  */
 export function ResponseQueue({ view }: { view: QueueView }) {
   const { user, isLoading: authLoading } = useAuth();
@@ -78,7 +76,7 @@ export function ResponseQueue({ view }: { view: QueueView }) {
         </div>
       ) : (
         <>
-          {review && <RecommendedUpgrades enabled={enabled} orgId={orgId} />}
+          {review && <Link href="/findings" className="text-sm text-primary hover:underline">Triage material findings →</Link>}
           <QueueSection<RiskTicket>
             id="responses"
             title={review ? "Responses awaiting a decision" : "Responses"}
@@ -96,7 +94,7 @@ export function ResponseQueue({ view }: { view: QueueView }) {
             columns={["Response", "Service", "Status", review ? "Drafted" : "Decided"]}
             empty={
               review
-                ? "No response is waiting for a decision. Draft one from the recommended upgrades above, or from a change's impact page."
+                ? "No response is waiting for a decision. Draft one from the triage queue, a service's vulnerable dependencies, or a change's impact page."
                 : "No response has been filed or dismissed yet."
             }
             row={(ticket) => (

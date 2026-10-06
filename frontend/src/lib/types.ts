@@ -641,11 +641,24 @@ export interface GitHubConnectResult {
 export type RiskTicketStatus = "PROPOSED" | "FILING" | "FILED" | "FAILED" | "DISMISSED";
 export type TicketPriority = "HIGHEST" | "HIGH" | "MEDIUM" | "LOW" | "LOWEST";
 
+/** One live material change, grouped by service and ranked within the selected estate scope. */
+export interface FindingItem {
+  change: MatchedChangeRef;
+  score: number;
+  tier: ImpactTier;
+  services: Pick<ScoredService, "service" | "score" | "tier" | "confidence" | "owners" | "explanation">[];
+}
+
+export interface FindingQueueResponse {
+  items: Page<FindingItem>;
+  services: MatchedServiceRef[];
+  owners: OwnerRef[];
+  ownedServiceCount: number;
+}
+
 /**
- * GET /api/actions/risk-tickets/{id} — a response (E8 story 5): the risk ticket for one change in one service,
- * its service's current name, and its upgrade pull requests. The title, priority, due date, labels and evidence
- * are Aegis's own; the summary, risk, impact and actions are the AI's draft (`aiDrafted`) or Aegis's plain
- * fallback. Approving files it in the organization's Jira, then opens its pull request under the ticket's key.
+ * GET /api/actions/risk-tickets/{id} — the response for one change in one service.
+ * Approving files its ticket in Jira, then opens its upgrade pull request as a draft.
  */
 export interface RiskTicket {
   id: string;

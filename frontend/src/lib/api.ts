@@ -10,6 +10,7 @@ import type {
   ChangeSignalFacets,
   CreateOrgInput,
   ForgotPasswordInput,
+  FindingQueueResponse,
   GitHubConnectResult,
   GitHubIntegration,
   InviteUserInput,
@@ -410,6 +411,9 @@ export const inventoryApi = {
 
 /** The unified change-signals feed (advisories + vendor outages + security news), read-only. */
 export const signalApi = {
+  get(id: string) {
+    return bffFetch<ChangeSignal>(`/api/change-signals/${id}`);
+  },
   list(
     params: ListParams & { type?: string; severity?: string; source?: string; ecosystem?: string } = {},
   ) {
@@ -428,6 +432,13 @@ export const signalApi = {
 export const matchApi = {
   matchChange(signalId: string) {
     return bffFetch<ChangeMatchResponse>(`/api/matching/change-signals/${signalId}`);
+  },
+};
+
+/** Material findings, recomputed from the active organization's estate; paging follows ranking. */
+export const findingApi = {
+  list(params: { serviceId?: string; ownerId?: string; mine?: string; page?: number; size?: number } = {}) {
+    return bffFetch<FindingQueueResponse>(`/api/findings${qs(params)}`);
   },
 };
 
