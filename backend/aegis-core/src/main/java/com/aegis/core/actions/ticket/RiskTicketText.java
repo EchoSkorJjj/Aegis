@@ -133,9 +133,20 @@ final class RiskTicketText {
             blocks.add(Block.heading("Sources the draft quotes"));
             blocks.add(Block.bullets(ticket.citations().stream().map(quote -> cut(quote.strip(), MAX_QUOTED)).toList()));
         }
+        if (ticket.override() != null) {
+            RiskTicket.AssessmentOverride override = ticket.override();
+            blocks.add(Block.heading("Priority and due date"));
+            blocks.add(Block.paragraph("Set by the reviewer: " + words(ticket.priority()) + " priority, "
+                    + due(ticket.dueDate()) + ". Aegis assessed " + words(override.assessedPriority()) + " priority, "
+                    + due(override.assessedDueDate()) + ". Why: " + override.reason()));
+        }
+        boolean edited = ticket.edit() != null;
+        String drafted = ticket.aiDrafted()
+                ? " (the summary, risk, impact and actions are an AI draft a person reviewed"
+                        + (edited ? " and edited" : "") + ")"
+                : edited ? " (its summary, risk, impact and actions edited by a person)" : "";
         blocks.add(Block.paragraph("Service: " + (serviceName == null ? "a deleted service" : serviceName)
-                + ". Drafted by Aegis" + (ticket.aiDrafted() ? " (the summary, risk, impact and actions are an "
-                + "AI draft a person reviewed)" : "") + " and approved there by a second person."));
+                + ". Drafted by Aegis" + drafted + " and approved there by a second person."));
         return new IssueDraft(ticket.title(), blocks, ticket.priority(), ticket.dueDate(), ticket.labels());
     }
 
@@ -161,6 +172,14 @@ final class RiskTicketText {
             fields.put("due_date", ticket.dueDate() + " 00:00:00");
         }
         return fields;
+    }
+
+    private static String words(Priority priority) {
+        return priority.name().toLowerCase(Locale.ROOT);
+    }
+
+    private static String due(LocalDate dueDate) {
+        return dueDate == null ? "no due date" : "due " + dueDate;
     }
 
     static String plainText(List<Block> blocks) {

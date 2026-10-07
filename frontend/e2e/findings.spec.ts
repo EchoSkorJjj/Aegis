@@ -17,6 +17,8 @@ test("the triage queue ranks vulnerable dependencies and outages with their fix 
   await expect(outage).toContainText("90.0");
   await expect(outage).toContainText("Critical");
   await expect(outage.getByText("Awaiting decision", { exact: true })).toBeVisible();
+  // Where each item stands: drafted and in review, or new until someone drafts a response.
+  await expect(outage.getByText("In review", { exact: true })).toBeVisible();
   await expect(outage.getByRole("link", { name: "View response →" })).toHaveAttribute("href", `/responses/tickets/${TICKET.id}`);
   await expect(outage.getByRole("button")).toHaveCount(0);
 
@@ -28,6 +30,7 @@ test("the triage queue ranks vulnerable dependencies and outages with their fix 
   await expect(axios.getByRole("link", { name: "CVE-2026-40175" })).toHaveAttribute("href", "/findings/signal-axios");
   await expect(axios.getByRole("link", { name: OTHER.name })).toHaveAttribute("href", `/inventory/services/${OTHER.id}`);
   await expect(axios).toContainText("No owners assigned");
+  await expect(axios.getByText("New", { exact: true })).toBeVisible();
 
   // Nothing to automate until the repository is linked: the response is the ticket alone.
   const minimist = rows.filter({ hasText: "minimist" });

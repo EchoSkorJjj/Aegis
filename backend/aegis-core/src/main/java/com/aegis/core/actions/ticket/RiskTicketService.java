@@ -57,6 +57,11 @@ import org.springframework.stereotype.Service;
  * drafter; a response with no pull request only records a risk, so its drafter may file it. Each part can then
  * be retried on its own. <b>Dismiss</b> declines the whole response with a reason; leaving the pull request out
  * alone is dismissing just that ({@link UpgradeProposalService#dismiss}).
+ *
+ * <p>Before deciding, a reviewer may <b>edit</b> the drafted narrative and <b>override</b> Aegis's priority and due
+ * date, with a reason (E9 story 3); both stay on record. Every decision may name the version the reviewer saw, so
+ * someone deciding on a response that has changed since — edited, overridden or decided by someone else — gets a
+ * conflict rather than a decision about something they never read.
  */
 @Service
 public class RiskTicketService {
@@ -125,7 +130,7 @@ public class RiskTicketService {
                 scored.tier(), RiskTicketText.labels(type, changeTitle, scored.tier()), sections.summary(),
                 sections.risk(), sections.impact(), sections.actions(), evidence, sections.aiDrafted(),
                 sections.citations(),
-                RiskTicketStatus.PROPOSED, drafterId, null, null, null, null, null, null, null, 0));
+                RiskTicketStatus.PROPOSED, drafterId, null, null, null, null, null, null, null, null, null, 0));
         if (plan != null && plan.automatable()) {
             try {
                 upgrades.draft(plan, ticket.id(), drafterId);
@@ -146,7 +151,13 @@ public class RiskTicketService {
      * and is rethrown. A pull request that then fails to open is recorded on it, to be approved again on its own.
      */
     public RiskTicket approve(UUID ticketId, UUID approver) {
+        return approve(ticketId, approver, null);
+    }
+
+    /** As {@link #approve(UUID, UUID)}, refused if the response is no longer the version the approver saw. */
+    public RiskTicket approve(UUID ticketId, UUID approver, Long seenVersion) {
         RiskTicket ticket = get(ticketId);
+        expectVersion(ticket, seenVersion);
         UpgradeProposal pullRequest = currentPullRequest(ticketId).orElse(null);
         boolean opens = pullRequest != null && (pullRequest.status() == UpgradeProposalStatus.PROPOSED
                 || pullRequest.status() == UpgradeProposalStatus.FAILED);
@@ -225,6 +236,29 @@ public class RiskTicketService {
                         : "Nothing Aegis can automate: " + String.join("; ", plan.notAutomated())));
     }
 
+    /**
+     * The version a reviewer saw, if they name one, must still be the ticket's: otherwise someone else edited,
+     * overrode or decided it meanwhile, and they decide again on what it is now.
+     */
+    private static void expectVersion(RiskTicket ticket, Long seenVersion) {
+        if (seenVersion != null && seenVersion != ticket.version()) {
+            throw new ApiExceptions.Conflict("This response changed after you opened it: someone else edited or "
+                    + "decided it. Reload it and decide again");
+        }
+    }
+
+    private static void awaitingDecision(RiskTicket ticket, String change) {
+        if (ticket.status() != RiskTicketStatus.PROPOSED) {
+            throw new ApiExceptions.Conflict("A risk ticket that is " + ticket.status().name().toLowerCase(Locale.ROOT)
+                    + " cannot be " + change + ": only one awaiting a decision can");
+        }
+    }
+
+    /** A reviewer's text, as it enters the record: trimmed, and redacted like everything else drafted. */
+    private static String text(String value) {
+        return value == null ? "" : SensitiveText.redact(value.strip());
+    }
+
     /** The pull requests of these responses, newest first, by ticket. */
     public Map<UUID, List<UpgradeProposal>> pullRequests(Collection<UUID> ticketIds) {
         Map<UUID, List<UpgradeProposal>> byTicket = new HashMap<>();
@@ -235,7 +269,13 @@ public class RiskTicketService {
 
     /** Dismiss the response: the ticket, and its pull request if it hasn't opened, with the same reason. */
     public RiskTicket dismiss(UUID ticketId, UUID by, String reason) {
+        return dismiss(ticketId, by, reason, null);
+    }
+
+    /** As {@link #dismiss(UUID, UUID, String)}, refused if the response is no longer the version they saw. */
+    public RiskTicket dismiss(UUID ticketId, UUID by, String reason, Long seenVersion) {
         RiskTicket ticket = get(ticketId);
+        expectVersion(ticket, seenVersion);
         if (ticket.status() != RiskTicketStatus.PROPOSED && ticket.status() != RiskTicketStatus.FAILED) {
             throw new ApiExceptions.Conflict("A risk ticket that is "
                     + ticket.status().name().toLowerCase(Locale.ROOT) + " cannot be dismissed");
@@ -246,6 +286,53 @@ public class RiskTicketService {
                         || pullRequest.status() == UpgradeProposalStatus.FAILED)
                 .ifPresent(pullRequest -> upgrades.dismiss(pullRequest.id(), by, reason));
         return dismissed;
+    }
+
+    /**
+     * Rewrite the drafted narrative before deciding: the summary, risk, impact and recommended actions, exactly as
+     * they will be filed. Only while the response awaits a decision; the draft as it first was stays on record.
+     */
+    public RiskTicket edit(UUID ticketId, UUID by, long seenVersion, String summary, String risk, String impact,
+            List<String> actions) {
+        RiskTicket ticket = get(ticketId);
+        expectVersion(ticket, seenVersion);
+        awaitingDecision(ticket, "edited");
+        String newSummary = text(summary);
+        String newRisk = text(risk);
+        String newImpact = text(impact);
+        List<String> newActions = actions.stream().map(RiskTicketService::text).filter(action -> !action.isEmpty())
+                .map(action -> action.replaceAll("\\s+", " ")).toList();
+        if (newSummary.isEmpty() || newRisk.isEmpty() || newImpact.isEmpty() || newActions.isEmpty()) {
+            throw new ApiExceptions.BadRequest("A ticket needs a summary, a risk, an impact and at least one action");
+        }
+        if (newSummary.equals(ticket.summary()) && newRisk.equals(ticket.risk()) && newImpact.equals(ticket.impact())
+                && newActions.equals(ticket.actions())) {
+            throw new ApiExceptions.BadRequest("Nothing was changed");
+        }
+        return store.update(ticket.edited(newSummary, newRisk, newImpact, newActions, by, Instant.now()));
+    }
+
+    /**
+     * Replace Aegis's priority and due date (worked out from the impact tier) before deciding, with a reason. Only
+     * while the response awaits a decision; Aegis's own assessment and the reason stay on record, and the ticket
+     * is filed with the reviewer's. A null due date means none.
+     */
+    public RiskTicket override(UUID ticketId, UUID by, long seenVersion, IssueTracker.Priority priority,
+            LocalDate dueDate, String reason) {
+        RiskTicket ticket = get(ticketId);
+        expectVersion(ticket, seenVersion);
+        awaitingDecision(ticket, "overridden");
+        String why = text(reason);
+        if (why.isEmpty()) {
+            throw new ApiExceptions.BadRequest("Say why Aegis's assessment is being overridden");
+        }
+        if (dueDate != null && dueDate.isBefore(LocalDate.now(ZoneOffset.UTC))) {
+            throw new ApiExceptions.BadRequest("The due date can't be in the past");
+        }
+        if (priority == ticket.priority() && Objects.equals(dueDate, ticket.dueDate())) {
+            throw new ApiExceptions.BadRequest("That is already the ticket's priority and due date");
+        }
+        return store.update(ticket.overridden(priority, dueDate, why, by, Instant.now()));
     }
 
     public RiskTicket get(UUID ticketId) {

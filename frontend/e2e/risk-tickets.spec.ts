@@ -75,7 +75,7 @@ function ticket(overrides: Partial<RiskTicket> = {}): RiskTicket {
     evidence: ["log4j-core 2.14.1 is in the affected range.", "Impact score 91.0 (CRITICAL)"], aiDrafted: true,
     citations: ["C1 NVD description"], status: "PROPOSED", createdBy: "analyst-1", createdAt: "2026-09-26T02:00:00Z",
     decidedBy: null, decidedAt: null, dismissReason: null, issueKey: null, issueUrl: null, failureMessage: null,
-    version: 0, pullRequests: [pullRequest()],
+    edit: null, override: null, version: 0, stage: "IN_REVIEW", pullRequests: [pullRequest()],
     serviceNow: {
       short_description: "CVE-2021-44228 affects Payments API", description: "Summary",
       impact: "1", urgency: "1", cmdb_ci: "Payments API", due_date: "2026-10-03 00:00:00",
@@ -98,9 +98,16 @@ type Options = {
   jira?: JiraIntegration;
   /** The pull request fails to open when the response is approved. */
   pullRequestFailure?: string;
+  /** Someone else changes the response just before the first decision on it reaches Aegis. */
+  changedMeanwhile?: Partial<RiskTicket>;
 };
 
-async function fakeBff(page: Page, role: Role, { owners = [], tickets = [], jira = JIRA, pullRequestFailure }: Options = {}) {
+async function fakeBff(
+  page: Page,
+  role: Role,
+  { owners = [], tickets = [], jira = JIRA, pullRequestFailure, changedMeanwhile }: Options = {},
+) {
+  let meanwhile = changedMeanwhile;
   const store = tickets.map((candidate) => ({ ...candidate, pullRequests: [...candidate.pullRequests] }));
   const writes: { path: string; body: unknown }[] = [];
   const listed: string[] = [];
@@ -185,14 +192,42 @@ async function fakeBff(page: Page, role: Role, { owners = [], tickets = [], jira
         existing.id === approvePr[2] ? open(existing, store[index].issueKey ?? "SEC-7") : existing) };
       return route.fulfill({ json: store[index] });
     }
-    const match = path.match(/^\/api\/actions\/risk-tickets\/([^/]+)(?:\/(approve|dismiss))?$/);
+    const match = path.match(/^\/api\/actions\/risk-tickets\/([^/]+)(?:\/(approve|dismiss|edit|override))?$/);
     if (match) {
       const index = find(match[1]);
       if (index < 0) return route.fulfill({ status: 404, json: { message: "Risk ticket not found" } });
       if (match[2]) writes.push({ path, body: request.postDataJSON() });
+      if (match[2] && meanwhile) {
+        store[index] = { ...store[index], ...meanwhile, version: store[index].version + 1 };
+        meanwhile = undefined;
+      }
+      // As aegis-core: a decision on a version that is no longer the response's is a conflict.
+      const seen = match[2] ? request.postDataJSON()?.version : undefined;
+      if (seen !== undefined && seen !== store[index].version) {
+        return route.fulfill({ status: 409, json: {
+          message: "This response changed after you opened it: someone else edited or decided it. Reload it and decide again",
+        } });
+      }
+      if (match[2] === "edit") {
+        const body = request.postDataJSON();
+        const current = store[index];
+        store[index] = { ...current, summary: body.summary, risk: body.risk, impact: body.impact, actions: body.actions,
+          version: current.version + 1,
+          edit: { draftedSummary: current.edit?.draftedSummary ?? current.summary,
+            draftedRisk: current.edit?.draftedRisk ?? current.risk, draftedImpact: current.edit?.draftedImpact ?? current.impact,
+            draftedActions: current.edit?.draftedActions ?? current.actions, by: "me", at: "2026-09-26T08:00:00Z" } };
+      }
+      if (match[2] === "override") {
+        const body = request.postDataJSON();
+        const current = store[index];
+        store[index] = { ...current, priority: body.priority, dueDate: body.dueDate, version: current.version + 1,
+          override: { assessedPriority: current.override?.assessedPriority ?? current.priority,
+            assessedDueDate: current.override ? current.override.assessedDueDate : current.dueDate,
+            reason: body.reason, by: "me", at: "2026-09-26T08:30:00Z" } };
+      }
       if (match[2] === "approve") {
-        const filed = { ...store[index], ...decided, status: "FILED" as const, issueKey: "SEC-7",
-          issueUrl: "https://acme.atlassian.net/browse/SEC-7" };
+        const filed = { ...store[index], ...decided, status: "FILED" as const, stage: "ACTIONED" as const,
+          issueKey: "SEC-7", issueUrl: "https://acme.atlassian.net/browse/SEC-7", version: store[index].version + 2 };
         filed.pullRequests = filed.pullRequests.map((existing) =>
           existing.status !== "PROPOSED" && existing.status !== "FAILED" ? existing
             : pullRequestFailure ? { ...existing, ...decided, status: "FAILED", failureMessage: pullRequestFailure }
@@ -201,7 +236,8 @@ async function fakeBff(page: Page, role: Role, { owners = [], tickets = [], jira
       }
       if (match[2] === "dismiss") {
         const reason = request.postDataJSON().reason;
-        store[index] = { ...store[index], ...decided, status: "DISMISSED", dismissReason: reason,
+        store[index] = { ...store[index], ...decided, status: "DISMISSED", stage: "CLOSED", dismissReason: reason,
+          version: store[index].version + 1,
           pullRequests: store[index].pullRequests.map((existing) => existing.status === "PROPOSED"
             ? { ...existing, ...decided, status: "DISMISSED", dismissReason: reason } : existing) };
       }
@@ -263,7 +299,8 @@ test("approving a response files its ticket, then opens its pull request under t
   await expect(upgrade.getByText("SEC-7: Upgrade org.apache.logging.log4j:log4j-core", { exact: false })).toBeVisible();
   await expect(upgrade.getByRole("link", { name: "Pull request #42" }))
     .toHaveAttribute("href", "https://github.com/acme/payments/pull/42");
-  expect(writes).toEqual([{ path: "/api/actions/risk-tickets/ticket-1/approve", body: null }]);
+  // The approval names the version the approver read, so a response changed meanwhile isn't approved blind.
+  expect(writes).toEqual([{ path: "/api/actions/risk-tickets/ticket-1/approve", body: { version: 0 } }]);
 });
 
 test("whoever drafted a response can't approve its pull request, but can leave it out and file the ticket", async ({ page }) => {
@@ -286,7 +323,7 @@ test("whoever drafted a response can't approve its pull request, but can leave i
   await expect(decision.getByText("Filed in Jira")).toBeVisible();
   expect(writes).toEqual([
     { path: "/api/actions/upgrade-proposals/pr-1/dismiss", body: { reason: "We upgrade by hand with the next release." } },
-    { path: "/api/actions/risk-tickets/ticket-1/approve", body: null },
+    { path: "/api/actions/risk-tickets/ticket-1/approve", body: { version: 0 } },
   ]);
 });
 
@@ -418,4 +455,119 @@ test("the review queue holds responses that need a person, history holds the dec
   const queries = distinct(listed).map((query) => new URLSearchParams(query));
   expect(queries.some((query) => query.get("pending") === "true" && !query.has("status"))).toBe(true);
   expect(queries.some((query) => query.get("pending") === "false" && query.get("status") === "FILED,DISMISSED")).toBe(true);
+});
+
+test("a reviewer edits the draft before deciding, and the draft as first written stays on record", async ({ page }) => {
+  const { writes } = await fakeBff(page, "ANALYST", { tickets: [outage()] });
+  await page.goto("/responses/tickets/ticket-2");
+  const content = page.getByRole("region", { name: "Ticket" });
+
+  await content.getByRole("button", { name: "Edit draft" }).click();
+  const form = content.getByRole("form", { name: "Edit the draft" });
+  await form.getByLabel("Summary").fill("Card payments fail while Acme Pay is down.");
+  await form.getByLabel("Recommended actions, one per line").fill("Switch to the fallback provider.\n\n  Tell support. ");
+  await form.getByRole("button", { name: "Save draft" }).click();
+
+  await expect(content.getByText("Card payments fail while Acme Pay is down.")).toBeVisible();
+  await expect(content.getByText("Edited by you", { exact: false })).toBeVisible();
+  await content.getByText("The draft as first written").click();
+  await expect(content.getByText("Payments API runs a vulnerable log4j-core.")).toBeVisible();
+  expect(writes).toEqual([{
+    path: "/api/actions/risk-tickets/ticket-2/edit",
+    body: {
+      version: 0, summary: "Card payments fail while Acme Pay is down.", risk: "Remote code execution.",
+      impact: "Takeover of the service.", actions: ["Switch to the fallback provider.", "Tell support."],
+    },
+  }]);
+});
+
+test("overriding the priority and due date needs a reason, and Aegis's assessment stays on record", async ({ page }) => {
+  const { writes } = await fakeBff(page, "ANALYST", { tickets: [ticket()] });
+  await page.goto("/responses/tickets/ticket-1");
+  const content = page.getByRole("region", { name: "Ticket" });
+
+  await content.getByRole("button", { name: "Override priority" }).click();
+  await page.getByLabel("Priority", { exact: true }).selectOption("LOW");
+  await page.getByLabel("Due date (empty: none)").fill("");
+  const override = page.getByRole("button", { name: "Override", exact: true });
+  await expect(override).toBeDisabled();
+  await page.getByLabel("Why is Aegis's assessment wrong here?").fill("The vulnerable lookup is disabled by configuration.");
+  await override.click();
+
+  await expect(content.getByText("Priority and due date overridden")).toBeVisible();
+  await expect(content.getByText("Aegis assessed Highest priority, due", { exact: false })).toBeVisible();
+  await expect(content.getByText("The vulnerable lookup is disabled by configuration.")).toBeVisible();
+  const lifecycle = page.getByRole("list", { name: "Lifecycle" });
+  await expect(lifecycle).toContainText("Overridden");
+
+  // Approving names the version that includes the override.
+  const decision = page.getByRole("region", { name: "Decision" });
+  await decision.getByRole("button", { name: "Approve", exact: true }).click();
+  await page.getByRole("button", { name: "Approve response", exact: true }).click();
+  await expect(decision.getByText("Filed in Jira")).toBeVisible();
+  await expect(lifecycle.locator('[aria-current="step"]')).toHaveCount(0);
+  await expect(lifecycle).toContainText("Filed as SEC-7.");
+  expect(writes).toEqual([
+    {
+      path: "/api/actions/risk-tickets/ticket-1/override",
+      body: { version: 0, priority: "LOW", dueDate: null, reason: "The vulnerable lookup is disabled by configuration." },
+    },
+    { path: "/api/actions/risk-tickets/ticket-1/approve", body: { version: 1 } },
+  ]);
+});
+
+test("the lifecycle shows where a response stands, and dismissing it with a reason closes it", async ({ page }) => {
+  const { writes } = await fakeBff(page, "ANALYST", { tickets: [outage()] });
+  await page.goto("/responses/tickets/ticket-2");
+  const lifecycle = page.getByRole("list", { name: "Lifecycle" });
+  await expect(lifecycle.getByRole("listitem")).toHaveCount(4);
+  await expect(lifecycle.locator('[aria-current="step"]')).toContainText("In review");
+  await expect(lifecycle).toContainText("Approved or overridden");
+  await expect(lifecycle).toContainText("Actioned or closed");
+
+  const decision = page.getByRole("region", { name: "Decision" });
+  await decision.getByRole("button", { name: "Dismiss", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Dismiss response" })).toBeDisabled();
+  await page.getByLabel("Why is no response needed?").fill("Acme Pay no longer takes card payments.");
+  await page.getByRole("button", { name: "Dismiss response" }).click();
+
+  await expect(decision.getByText("Dismissed by you", { exact: false })).toBeVisible();
+  await expect(lifecycle).toContainText("Closed");
+  await expect(lifecycle).toContainText("Not approved.");
+  expect(writes).toEqual([{
+    path: "/api/actions/risk-tickets/ticket-2/dismiss",
+    body: { reason: "Acme Pay no longer takes card payments.", version: 0 },
+  }]);
+});
+
+test("a decision on a response someone changed meanwhile is refused, and the page shows it as it is now", async ({ page }) => {
+  const { writes } = await fakeBff(page, "ANALYST", {
+    tickets: [outage()],
+    changedMeanwhile: { summary: "Rewritten by a colleague." },
+  });
+  await page.goto("/responses/tickets/ticket-2");
+  const decision = page.getByRole("region", { name: "Decision" });
+  await decision.getByRole("button", { name: "File ticket", exact: true }).click();
+  await page.getByRole("button", { name: "File ticket", exact: true }).last().click();
+
+  await expect(page.getByText("This response changed after you opened it", { exact: false })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Ticket" }).getByText("Rewritten by a colleague.")).toBeVisible();
+  await expect(decision.getByText("Awaiting a decision")).toBeVisible();
+  expect(writes).toEqual([{ path: "/api/actions/risk-tickets/ticket-2/approve", body: { version: 0 } }]);
+});
+
+test("only someone who decides may edit or override, and only before the decision", async ({ page }) => {
+  await fakeBff(page, "COMPLIANCE_ADMIN", { tickets: [ticket()] });
+  await page.goto("/responses/tickets/ticket-1");
+  const content = page.getByRole("region", { name: "Ticket" });
+  await expect(content.getByRole("heading", { name: "Ticket" })).toBeVisible();
+  await expect(content.getByRole("button")).toHaveCount(0);
+
+  await fakeBff(page, "ANALYST", {
+    tickets: [ticket({ status: "FILED", stage: "ACTIONED", issueKey: "SEC-7", decidedBy: "analyst-1" })],
+  });
+  await page.goto("/responses/tickets/ticket-1");
+  await expect(content.getByRole("heading", { name: "Ticket" })).toBeVisible();
+  await expect(content.getByRole("button", { name: "Edit draft" })).toHaveCount(0);
+  await expect(content.getByRole("button", { name: "Override priority" })).toHaveCount(0);
 });

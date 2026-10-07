@@ -106,12 +106,12 @@ class JpaRiskTicketStore implements RiskTicketStore {
     @Override
     @Transactional
     public RiskTicket update(RiskTicket ticket) {
-        RiskTicketEntity entity = tickets.findByIdAndOrgId(ticket.id(), scope())
+        RiskTicketEntity entity = tickets.findForUpdateByIdAndOrgId(ticket.id(), scope())
                 .orElseThrow(() -> new ApiExceptions.NotFound("Risk ticket not found: " + ticket.id()));
         if (entity.getVersion() != ticket.version()) {
             throw changedMeanwhile();
         }
-        entity.applyDecision(ticket);
+        entity.apply(ticket);
         try {
             return tickets.saveAndFlush(entity).toDomain();
         } catch (OptimisticLockingFailureException concurrentDecision) {

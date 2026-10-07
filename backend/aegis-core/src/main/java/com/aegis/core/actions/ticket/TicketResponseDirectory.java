@@ -23,7 +23,8 @@ class TicketResponseDirectory implements ResponseDirectory {
         Map<ServiceChange, ResponseRef> current = new LinkedHashMap<>();
         for (RiskTicket ticket : store.findCurrent(serviceIds)) {
             current.putIfAbsent(new ServiceChange(ticket.serviceId(), ticket.changeSignalId()), new ResponseRef(
-                    ticket.id(), ticket.changeSignalId(), ticket.status().name(), ticket.issueKey(), ticket.issueUrl()));
+                    ticket.id(), ticket.changeSignalId(), ticket.status().name(), ResponseStage.of(ticket).name(),
+                    ticket.issueKey(), ticket.issueUrl()));
         }
         return current;
     }

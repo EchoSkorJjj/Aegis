@@ -35,7 +35,8 @@ export const TICKET: RiskTicket = {
   score: 75, tier: "HIGH", labels: [], summary: "Vendor disruption affects payments.", risk: "Transactions may fail.",
   impact: "Customers cannot pay.", actions: ["Activate the fallback provider."], evidence: [], aiDrafted: true,
   citations: ["C1 Vendor status"], status: "PROPOSED", createdBy: "analyst-1", createdAt: "2026-10-06T00:00:00Z",
-  decidedBy: null, decidedAt: null, dismissReason: null, issueKey: null, issueUrl: null, failureMessage: null, version: 0, pullRequests: [],
+  decidedBy: null, decidedAt: null, dismissReason: null, issueKey: null, issueUrl: null, failureMessage: null,
+  edit: null, override: null, version: 0, stage: "IN_REVIEW", pullRequests: [],
 };
 export const PR: UpgradeProposal = {
   id: "pr-1", serviceId: SERVICE.id, serviceName: SERVICE.name, changeSignalId: CHANGE.id,
@@ -68,7 +69,7 @@ function vulnerability(index: number, overrides: Partial<Omit<UpgradeRecommendat
   return {
     kind: "VULNERABILITY", changeSignalId: upgrade.changeSignalId, service, owners: service === SERVICE ? [OWNER] : [],
     score: upgrade.score, tier: upgrade.tier, confidence: upgrade.confidence, upgrade, outage: null,
-    response: upgrade.response, canDraft: false,
+    response: upgrade.response, stage: upgrade.response?.stage ?? "NEW", canDraft: false,
   };
 }
 
@@ -79,8 +80,8 @@ const ITEMS: TriageItem[] = [
     confidence: "CONFIRMED", upgrade: null,
     outage: { id: CHANGE.id, title: CHANGE.title, vendorName: "Acme Pay", status: "investigating", impact: "major",
       startedAt: "2026-10-06T00:00:00Z", lastUpdateAt: "2026-10-06T01:00:00Z", url: "https://status.example.test/incident-1" },
-    response: { ticketId: TICKET.id, changeSignalId: CHANGE.id, status: "PROPOSED", issueKey: null, issueUrl: null },
-    canDraft: false,
+    response: { ticketId: TICKET.id, changeSignalId: CHANGE.id, status: "PROPOSED", stage: "IN_REVIEW", issueKey: null, issueUrl: null },
+    stage: "IN_REVIEW", canDraft: false,
   },
   vulnerability(1, {
     component: { id: "axios-0211", ecosystem: "npm", name: "axios", version: "0.21.1" }, toVersion: "1.15.0",

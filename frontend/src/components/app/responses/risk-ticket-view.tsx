@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import Link from "next/link";
-import { Copy, ExternalLink, GitBranch, GitPullRequest } from "lucide-react";
+import { Copy, ExternalLink, GitBranch, GitPullRequest, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -17,6 +17,7 @@ import {
   useMemberNames,
   useServiceDecisionRight,
 } from "@/components/app/responses/response-parts";
+import { ResponseLifecycle } from "@/components/app/responses/response-lifecycle";
 import {
   TicketStatusBadge,
   UpgradeStatusBadge,
@@ -25,24 +26,36 @@ import {
 } from "@/components/app/responses/response-status";
 import { UpgradeEditsTable } from "@/components/app/responses/upgrade-edits";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, integrationsApi, ticketApi, upgradeApi } from "@/lib/api";
 import { canReadInventory } from "@/lib/roles";
-import type { JiraIntegration, RiskTicket, UpgradeProposal } from "@/lib/types";
+import type { JiraIntegration, RiskTicket, TicketPriority, UpgradeProposal } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
 
 /** A filing interrupted mid-way may be retried after this long — aegis-core's STALE_FILING. */
 const STALE_FILING_MS = 10 * 60 * 1000;
 
 type LoadState = "loading" | "ok" | "forbidden" | "notfound" | "error";
-type Busy = "approve" | "dismiss" | "pr-approve" | "pr-leave-out" | "pr-draft" | null;
+type Busy = "approve" | "dismiss" | "edit" | "override" | "pr-approve" | "pr-leave-out" | "pr-draft" | null;
+
+const PRIORITIES: TicketPriority[] = ["HIGHEST", "HIGH", "MEDIUM", "LOW", "LOWEST"];
+const MAX_REASON = 1000;
+const FIELD_CLASS =
+  "w-full rounded-md border border-input bg-transparent px-2.5 py-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30";
+
+/** What a reviewer can change before deciding: the drafted narrative, or Aegis's priority and due date. */
+type EditInput = { summary: string; risk: string; impact: string; actions: string[] };
+type OverrideInput = { priority: TicketPriority; dueDate: string | null; reason: string };
 
 /**
  * One response: the risk ticket for a change's impact on a service and, for a vulnerability, the upgrade pull
  * request that fixes it — everything the approver needs, and the decision itself. Approving files the ticket
  * in the organization's Jira, then opens the pull request as a draft under the ticket's key; dismissing records
- * why. The pull request can also be left out, retried or drafted on its own. The ticket is shown as ServiceNow
- * incident fields too, for an organization that tracks risk there.
+ * why. The pull request can also be left out, retried or drafted on its own. Before deciding, a reviewer may edit
+ * the drafted narrative or override Aegis's priority and due date with a reason; both stay on record, and every
+ * decision carries the version the reviewer read, so one made on an outdated view is refused. The ticket is shown
+ * as ServiceNow incident fields too, for an organization that tracks risk there.
  */
 export function RiskTicketView({ ticketId }: { ticketId: string }) {
   const { user, isLoading: authLoading } = useAuth();
@@ -57,6 +70,7 @@ export function RiskTicketView({ ticketId }: { ticketId: string }) {
   // Undefined while loading; null when it couldn't be read.
   const [jira, setJira] = useState<JiraIntegration | null | undefined>(undefined);
   const [busy, setBusy] = useState<Busy>(null);
+  const [editing, setEditing] = useState(false);
   const personName = useMemberNames(!authLoading && canRead, user?.orgId, userId);
   const canDecide = useServiceDecisionRight(roles, loaded?.ticket.serviceId, userId);
 
@@ -128,7 +142,7 @@ export function RiskTicketView({ ticketId }: { ticketId: string }) {
   function approve() {
     void decide(
       "approve",
-      () => ticketApi.approve(ticketId),
+      () => ticketApi.approve(ticketId, loaded?.ticket.version),
       (ticket) => {
         const pullRequest = current(ticket);
         const key = ticket.issueKey ?? "a ticket";
@@ -145,9 +159,31 @@ export function RiskTicketView({ ticketId }: { ticketId: string }) {
   function dismiss(reason: string) {
     return decide(
       "dismiss",
-      () => ticketApi.dismiss(ticketId, reason),
+      () => ticketApi.dismiss(ticketId, reason, loaded?.ticket.version),
       () => toast.success("Response dismissed"),
       "Could not dismiss the response.",
+    );
+  }
+
+  async function saveEdit(input: EditInput): Promise<boolean> {
+    const version = loaded?.ticket.version ?? 0;
+    const saved = await decide(
+      "edit",
+      () => ticketApi.edit(ticketId, { version, ...input }),
+      () => toast.success("Draft updated — the first draft stays on record"),
+      "Could not save the edit.",
+    );
+    if (saved) setEditing(false);
+    return saved;
+  }
+
+  function override(input: OverrideInput) {
+    const version = loaded?.ticket.version ?? 0;
+    return decide(
+      "override",
+      () => ticketApi.override(ticketId, { version, ...input }),
+      () => toast.success("Priority and due date overridden — Aegis's assessment stays on record"),
+      "Could not override the priority and due date.",
     );
   }
 
@@ -258,6 +294,8 @@ export function RiskTicketView({ ticketId }: { ticketId: string }) {
         </p>
       </div>
 
+      <ResponseLifecycle ticket={ticket} personName={personName} />
+
       <Decision
         ticket={ticket}
         pullRequest={pullRequest}
@@ -288,19 +326,54 @@ export function RiskTicketView({ ticketId }: { ticketId: string }) {
       )}
 
       <section aria-labelledby="ticket-content" className="rounded-lg border">
-        <div className="border-b px-4 py-3">
-          <h2 id="ticket-content" className="text-sm font-medium">
-            Ticket
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            {ticket.aiDrafted
-              ? "Exactly what will be filed. The summary, risk, impact and actions are AI-drafted and unverified; the title, priority, due date, labels and evidence come from Aegis's matching and scoring."
-              : "Exactly what will be filed. The AI couldn't draft this one, so it holds only Aegis's own facts."}
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
+          <div className="min-w-0">
+            <h2 id="ticket-content" className="text-sm font-medium">
+              Ticket
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              {ticket.aiDrafted
+                ? "Exactly what will be filed. The summary, risk, impact and actions are AI-drafted and unverified; the title, priority, due date, labels and evidence come from Aegis's matching and scoring."
+                : "Exactly what will be filed. The AI couldn't draft this one, so it holds only Aegis's own facts."}
+            </p>
+            {ticket.edit && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Edited by {personName(ticket.edit.by)} on {formatDateTime(ticket.edit.at)}.
+              </p>
+            )}
+          </div>
+          {ticket.status === "PROPOSED" && canDecide === true && !editing && (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => setEditing(true)}>
+                <Pencil />
+                Edit draft
+              </Button>
+              <OverrideButton ticket={ticket} busy={busy} onOverride={override} />
+            </div>
+          )}
         </div>
+        {ticket.override && (
+          <div className="space-y-1 border-b bg-sky-500/5 px-4 py-3 text-sm">
+            <p>
+              <span className="font-medium">Priority and due date overridden</span> by {personName(ticket.override.by)}{" "}
+              on {formatDateTime(ticket.override.at)}. Aegis assessed {sentenceCase(ticket.override.assessedPriority)}{" "}
+              priority,{" "}
+              {ticket.override.assessedDueDate ? `due ${formatDate(ticket.override.assessedDueDate)}` : "no due date"}.
+            </p>
+            <blockquote className="border-l-2 pl-3 whitespace-pre-wrap text-muted-foreground">
+              {ticket.override.reason}
+            </blockquote>
+          </div>
+        )}
         <dl className="grid gap-x-6 gap-y-3 border-b p-4 text-sm sm:grid-cols-[max-content_1fr]">
-          <Fact label="Priority">{sentenceCase(ticket.priority)}</Fact>
-          <Fact label="Due">{ticket.dueDate ? formatDate(ticket.dueDate) : "No due date"}</Fact>
+          <Fact label="Priority">
+            {sentenceCase(ticket.priority)}
+            {ticket.override && <span className="text-muted-foreground"> (overridden)</span>}
+          </Fact>
+          <Fact label="Due">
+            {ticket.dueDate ? formatDate(ticket.dueDate) : "No due date"}
+            {ticket.override && <span className="text-muted-foreground"> (overridden)</span>}
+          </Fact>
           <Fact label="Labels">
             <span className="flex flex-wrap gap-1.5">
               {ticket.labels.map((label) => (
@@ -320,22 +393,26 @@ export function RiskTicketView({ ticketId }: { ticketId: string }) {
           </Fact>
         </dl>
         <div className="space-y-4 p-4 text-sm">
-          <TicketSection title="Summary">
-            <p className="whitespace-pre-wrap">{ticket.summary}</p>
-          </TicketSection>
-          <TicketSection title="Risk">
-            <p className="whitespace-pre-wrap">{ticket.risk}</p>
-          </TicketSection>
-          <TicketSection title="Impact">
-            <p className="whitespace-pre-wrap">{ticket.impact}</p>
-          </TicketSection>
-          <TicketSection title="Recommended actions">
-            <ul className="list-disc space-y-1 pl-5">
-              {ticket.actions.map((action, index) => (
-                <li key={index}>{action}</li>
-              ))}
-            </ul>
-          </TicketSection>
+          {editing ? (
+            <EditDraftForm ticket={ticket} busy={busy} onSave={saveEdit} onCancel={() => setEditing(false)} />
+          ) : (
+            <Narrative summary={ticket.summary} risk={ticket.risk} impact={ticket.impact} actions={ticket.actions} />
+          )}
+          {ticket.edit && !editing && (
+            <details className="rounded-md border px-3 py-2">
+              <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+                The draft as first written
+              </summary>
+              <div className="mt-3 space-y-4 text-muted-foreground">
+                <Narrative
+                  summary={ticket.edit.draftedSummary}
+                  risk={ticket.edit.draftedRisk}
+                  impact={ticket.edit.draftedImpact}
+                  actions={ticket.edit.draftedActions}
+                />
+              </div>
+            </details>
+          )}
           <TicketSection title="Evidence">
             <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
               {ticket.evidence.map((line, index) => (
@@ -751,6 +828,216 @@ function ServiceNowFields({ fields }: { fields: Record<string, string> }) {
         {json}
       </pre>
     </section>
+  );
+}
+
+function Narrative({
+  summary,
+  risk,
+  impact,
+  actions,
+}: {
+  summary: string;
+  risk: string;
+  impact: string;
+  actions: string[];
+}) {
+  return (
+    <>
+      <TicketSection title="Summary">
+        <p className="whitespace-pre-wrap">{summary}</p>
+      </TicketSection>
+      <TicketSection title="Risk">
+        <p className="whitespace-pre-wrap">{risk}</p>
+      </TicketSection>
+      <TicketSection title="Impact">
+        <p className="whitespace-pre-wrap">{impact}</p>
+      </TicketSection>
+      <TicketSection title="Recommended actions">
+        <ul className="list-disc space-y-1 pl-5">
+          {actions.map((action, index) => (
+            <li key={index}>{action}</li>
+          ))}
+        </ul>
+      </TicketSection>
+    </>
+  );
+}
+
+/** Rewrite the drafted narrative exactly as it will be filed; the draft as first written stays on record. */
+function EditDraftForm({
+  ticket,
+  busy,
+  onSave,
+  onCancel,
+}: {
+  ticket: RiskTicket;
+  busy: Busy;
+  onSave: (input: EditInput) => Promise<boolean>;
+  onCancel: () => void;
+}) {
+  const id = useId();
+  const [summary, setSummary] = useState(ticket.summary);
+  const [risk, setRisk] = useState(ticket.risk);
+  const [impact, setImpact] = useState(ticket.impact);
+  const [actions, setActions] = useState(ticket.actions.join("\n"));
+  const lines = actions
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const complete = summary.trim() !== "" && risk.trim() !== "" && impact.trim() !== "" && lines.length > 0;
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!complete) return;
+    await onSave({ summary: summary.trim(), risk: risk.trim(), impact: impact.trim(), actions: lines });
+  }
+
+  const fields: { key: string; label: string; value: string; set: (value: string) => void; rows: number }[] = [
+    { key: "summary", label: "Summary", value: summary, set: setSummary, rows: 3 },
+    { key: "risk", label: "Risk", value: risk, set: setRisk, rows: 3 },
+    { key: "impact", label: "Impact", value: impact, set: setImpact, rows: 3 },
+    { key: "actions", label: "Recommended actions, one per line", value: actions, set: setActions, rows: 4 },
+  ];
+
+  return (
+    <form onSubmit={submit} aria-label="Edit the draft" className="space-y-3">
+      {fields.map((field) => (
+        <div key={field.key} className="space-y-1">
+          <label htmlFor={`${id}-${field.key}`} className="block text-xs font-medium text-muted-foreground">
+            {field.label}
+          </label>
+          <textarea
+            id={`${id}-${field.key}`}
+            required
+            rows={field.rows}
+            value={field.value}
+            disabled={busy !== null}
+            onChange={(event) => field.set(event.target.value)}
+            className={FIELD_CLASS}
+          />
+        </div>
+      ))}
+      <p className="text-xs text-muted-foreground">
+        Saved exactly as it will be filed. The draft as first written stays on record.
+      </p>
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="ghost" disabled={busy === "edit"} onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={busy !== null || !complete}>
+          {busy === "edit" ? "Saving…" : "Save draft"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** Replace Aegis's priority and due date, with a reason; Aegis's own assessment stays on record. */
+function OverrideButton({
+  ticket,
+  busy,
+  onOverride,
+}: {
+  ticket: RiskTicket;
+  busy: Busy;
+  onOverride: (input: OverrideInput) => Promise<boolean>;
+}) {
+  const id = useId();
+  const [open, setOpen] = useState(false);
+  const [priority, setPriority] = useState<TicketPriority>(ticket.priority);
+  const [dueDate, setDueDate] = useState(ticket.dueDate ?? "");
+  const [reason, setReason] = useState("");
+  const unchanged = priority === ticket.priority && (dueDate || null) === ticket.dueDate;
+
+  function toggle(next: boolean) {
+    if (next) {
+      setPriority(ticket.priority);
+      setDueDate(ticket.dueDate ?? "");
+      setReason("");
+    }
+    setOpen(next);
+  }
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!reason.trim() || unchanged) return;
+    if (await onOverride({ priority, dueDate: dueDate || null, reason: reason.trim() })) {
+      setOpen(false);
+    }
+  }
+
+  return (
+    <Popover open={open} onOpenChange={toggle}>
+      <PopoverTrigger render={<Button variant="outline" size="sm" disabled={busy !== null} />}>
+        {busy === "override" ? "Overriding…" : "Override priority"}
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-96">
+        <form onSubmit={submit} className="space-y-3 text-sm">
+          <p className="font-medium">Override Aegis&apos;s priority and due date</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label htmlFor={`${id}-priority`} className="block text-xs font-medium text-muted-foreground">
+                Priority
+              </label>
+              <select
+                id={`${id}-priority`}
+                value={priority}
+                disabled={busy !== null}
+                onChange={(event) => setPriority(event.target.value as TicketPriority)}
+                className={FIELD_CLASS}
+              >
+                {PRIORITIES.map((option) => (
+                  <option key={option} value={option}>
+                    {sentenceCase(option)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label htmlFor={`${id}-due`} className="block text-xs font-medium text-muted-foreground">
+                Due date (empty: none)
+              </label>
+              <input
+                id={`${id}-due`}
+                type="date"
+                value={dueDate}
+                disabled={busy !== null}
+                onChange={(event) => setDueDate(event.target.value)}
+                className={FIELD_CLASS}
+              />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <label htmlFor={`${id}-reason`} className="block text-xs font-medium text-muted-foreground">
+              Why is Aegis&apos;s assessment wrong here?
+            </label>
+            <textarea
+              id={`${id}-reason`}
+              required
+              rows={3}
+              maxLength={MAX_REASON}
+              value={reason}
+              disabled={busy !== null}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="e.g. The vulnerable endpoint is switched off behind a feature flag."
+              className={FIELD_CLASS}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            The ticket is filed with yours; Aegis&apos;s assessment and your reason stay on record.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={busy !== null || !reason.trim() || unchanged}>
+              Override
+            </Button>
+          </div>
+        </form>
+      </PopoverContent>
+    </Popover>
   );
 }
 

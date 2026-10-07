@@ -158,7 +158,10 @@ class TriageApiIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items.content[2].response.ticketId").value(ticketId))
                 .andExpect(jsonPath("$.items.content[2].response.status").value("PROPOSED"))
+                .andExpect(jsonPath("$.items.content[2].response.stage").value("IN_REVIEW"))
+                .andExpect(jsonPath("$.items.content[2].stage").value("IN_REVIEW"))
                 .andExpect(jsonPath("$.items.content[1].response").doesNotExist())
+                .andExpect(jsonPath("$.items.content[1].stage").value("NEW"))
                 // A service owner drafts for the services assigned to them only.
                 .andExpect(jsonPath("$.items.content[*].canDraft").value(contains(false, true, true)));
         mvc.perform(get(PATH).with(as("COMPLIANCE_ADMIN", owner.getUserId())))

@@ -1,4 +1,10 @@
-import type { MemoKind, RegulatorMemoStatus, RiskTicketStatus, UpgradeProposalStatus } from "@/lib/types";
+import type {
+  MemoKind,
+  RegulatorMemoStatus,
+  ResponseStage,
+  RiskTicketStatus,
+  UpgradeProposalStatus,
+} from "@/lib/types";
 
 /**
  * How far along a drafted response is, whatever its kind: an upgrade pull request, a risk ticket or a
@@ -50,6 +56,23 @@ export const TICKET_STATUS: Record<RiskTicketStatus, { label: string; tone: Resp
 
 export function TicketStatusBadge({ status }: { status: RiskTicketStatus }) {
   return <StatusBadge tone={TICKET_STATUS[status].tone}>{TICKET_STATUS[status].label}</StatusBadge>;
+}
+
+/**
+ * Where an item stands, whatever its response's status: New → In review → Approved or Overridden → Actioned or
+ * Closed (aegis-core's `ResponseStage`).
+ */
+export const RESPONSE_STAGE: Record<ResponseStage, { label: string; tone: ResponseTone }> = {
+  NEW: { label: "New", tone: "waiting" },
+  IN_REVIEW: { label: "In review", tone: "waiting" },
+  APPROVED: { label: "Approved", tone: "working" },
+  OVERRIDDEN: { label: "Overridden", tone: "working" },
+  ACTIONED: { label: "Actioned", tone: "done" },
+  CLOSED: { label: "Closed", tone: "declined" },
+};
+
+export function StageBadge({ stage }: { stage: ResponseStage }) {
+  return <StatusBadge tone={RESPONSE_STAGE[stage].tone}>{RESPONSE_STAGE[stage].label}</StatusBadge>;
 }
 
 /** Decided: filed in the tracker, or dismissed (the review queue asks for pending responses instead). */

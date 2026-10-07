@@ -31,8 +31,8 @@ public interface RiskTicketStore {
             Boolean pending, Pageable pageable);
 
     /**
-     * Persist a state change. {@code ApiExceptions.Conflict} if the ticket changed after it was read, so two
-     * concurrent decisions never both win.
+     * Persist a decision, an edit or an override. {@code ApiExceptions.Conflict} if the ticket changed after it was
+     * read, so two concurrent decisions never both win.
      */
     RiskTicket update(RiskTicket ticket);
 }

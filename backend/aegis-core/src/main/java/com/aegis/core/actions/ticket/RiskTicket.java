@@ -17,6 +17,11 @@ import com.aegis.core.signals.ChangeSignal.SignalType;
  * Aegis's own, worked out from the impact score; the summary, risk, impact and actions are the AI's draft
  * ({@code aiDrafted}), or Aegis's plain fallback when the AI could not draft them.
  *
+ * <p>While it awaits a decision a reviewer may {@linkplain #edited edit} the narrative and
+ * {@linkplain #overridden override} the priority and due date (E9 story 3). The ticket's own fields are always
+ * what will be filed; {@code edit} keeps the narrative as drafted, and {@code override} Aegis's own assessment and
+ * why it was replaced. Each is null until it happens.
+ *
  * <p>{@code version} is the optimistic lock that makes two people deciding at once safe.
  */
 public record RiskTicket(
@@ -47,6 +52,8 @@ public record RiskTicket(
         String issueKey,
         String issueUrl,
         String failureMessage,
+        DraftEdit edit,
+        AssessmentOverride override,
         long version) {
 
     public RiskTicket {
@@ -54,6 +61,46 @@ public record RiskTicket(
         actions = List.copyOf(actions);
         evidence = List.copyOf(evidence);
         citations = List.copyOf(citations);
+    }
+
+    /** The narrative as drafted, before a reviewer first edited it, and who edited it last, when. */
+    public record DraftEdit(String draftedSummary, String draftedRisk, String draftedImpact, List<String> draftedActions,
+                            UUID by, Instant at) {
+
+        public DraftEdit {
+            draftedActions = List.copyOf(draftedActions);
+        }
+    }
+
+    /**
+     * Aegis's own priority and due date (from the impact tier), which a reviewer replaced, why, and who did, when.
+     * The assessed due date is null when the tier sets none.
+     */
+    public record AssessmentOverride(Priority assessedPriority, LocalDate assessedDueDate, String reason, UUID by,
+                                     Instant at) {
+    }
+
+    /** The narrative rewritten by {@code by}; the draft as it first was is kept. */
+    RiskTicket edited(String summary, String risk, String impact, List<String> actions, UUID by, Instant at) {
+        DraftEdit drafted = edit == null
+                ? new DraftEdit(this.summary, this.risk, this.impact, this.actions, by, at)
+                : new DraftEdit(edit.draftedSummary(), edit.draftedRisk(), edit.draftedImpact(), edit.draftedActions(),
+                        by, at);
+        return new RiskTicket(id, serviceId, changeSignalId, signalType, changeTitle, title, priority, dueDate, score,
+                tier, labels, summary, risk, impact, actions, evidence, aiDrafted, citations, status, createdBy,
+                createdAt, decidedBy, decidedAt, dismissReason, issueKey, issueUrl, failureMessage, drafted, override,
+                version);
+    }
+
+    /** Aegis's priority and due date replaced by {@code by}, with why; Aegis's own assessment is kept. */
+    RiskTicket overridden(Priority priority, LocalDate dueDate, String reason, UUID by, Instant at) {
+        AssessmentOverride assessed = override == null
+                ? new AssessmentOverride(this.priority, this.dueDate, reason, by, at)
+                : new AssessmentOverride(override.assessedPriority(), override.assessedDueDate(), reason, by, at);
+        return new RiskTicket(id, serviceId, changeSignalId, signalType, changeTitle, title, priority, dueDate, score,
+                tier, labels, summary, risk, impact, actions, evidence, aiDrafted, citations, status, createdBy,
+                createdAt, decidedBy, decidedAt, dismissReason, issueKey, issueUrl, failureMessage, edit, assessed,
+                version);
     }
 
     /** Approved by {@code approver}; the issue is about to be filed. */
@@ -78,6 +125,7 @@ public record RiskTicket(
             String issueKey, String issueUrl, String failureMessage) {
         return new RiskTicket(id, serviceId, changeSignalId, signalType, changeTitle, title, priority, dueDate, score,
                 tier, labels, summary, risk, impact, actions, evidence, aiDrafted, citations, status, createdBy,
-                createdAt, decidedBy, decidedAt, dismissReason, issueKey, issueUrl, failureMessage, version);
+                createdAt, decidedBy, decidedAt, dismissReason, issueKey, issueUrl, failureMessage, edit, override,
+                version);
     }
 }

@@ -4,7 +4,7 @@ import { useEffect, useId, useState } from "react";
 import Link from "next/link";
 
 import { DataPagination } from "@/components/app/data-pagination";
-import { formatDateTime } from "@/components/app/responses/response-status";
+import { StageBadge, formatDateTime } from "@/components/app/responses/response-status";
 import {
   FilterSelect,
   ImpactBadge,
@@ -23,7 +23,7 @@ import type { TriageItem, TriageQueueResponse, VendorOutage } from "@/lib/types"
 import { useAuth } from "@/providers/auth-provider";
 
 const PAGE_SIZE = 20;
-const COLUMNS = 4;
+const COLUMNS = 5;
 
 interface Filters {
   serviceId: string;
@@ -213,6 +213,7 @@ export function TriageList({
                 <TableHead>Change</TableHead>
                 <TableHead>Service</TableHead>
                 <TableHead>Impact</TableHead>
+                <TableHead>Stage</TableHead>
                 <TableHead className="text-right">
                   <span className="sr-only">Response</span>
                 </TableHead>
@@ -292,6 +293,9 @@ function TriageRow({ item }: { item: TriageItem }) {
         {item.confidence === "POSSIBLE" && (
           <span className="mt-1 block text-xs text-muted-foreground">Possible match — check the evidence</span>
         )}
+      </TableCell>
+      <TableCell className="align-top">
+        <StageBadge stage={item.stage} />
       </TableCell>
       <TableCell className="text-right align-top">
         <ResponseCell

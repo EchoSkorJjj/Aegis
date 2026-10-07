@@ -10,6 +10,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.LockModeType;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 
@@ -25,6 +26,7 @@ import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.type.SqlTypes;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 
 /**
  * A regulator memo row (V25). The drafted memo never changes; only the decision fields do. The affected
@@ -166,6 +168,13 @@ interface RegulatorMemoJpaRepository
         extends JpaRepository<RegulatorMemoEntity, UUID>, JpaSpecificationExecutor<RegulatorMemoEntity> {
 
     Optional<RegulatorMemoEntity> findByIdAndOrgId(UUID id, UUID orgId);
+
+    /**
+     * The row, locked until the transaction ends ({@code select … for update}): a concurrent decision waits, then
+     * sees the version this one wrote, so it is a conflict rather than a second outcome.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    Optional<RegulatorMemoEntity> findForUpdateByIdAndOrgId(UUID id, UUID orgId);
 
     Optional<RegulatorMemoEntity> findFirstByOrgIdAndChangeSignalIdAndStatusIn(
             UUID orgId, UUID changeSignalId, List<RegulatorMemoStatus> statuses);

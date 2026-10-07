@@ -182,8 +182,10 @@ that fixes it, drafted and approved together. Nothing leaves Aegis without an ap
 | POST | `/api/actions/risk-tickets` | an analyst, or the service's assigned owners | Draft a response: `{changeSignalId, serviceId}` → 201, the ticket `PROPOSED` with its `pullRequests` |
 | GET | `/api/actions/risk-tickets?serviceId=&changeSignalId=&status=A,B&pending=` | any domain role | Newest first; `pending=true` keeps those that still need a person (the ticket or its PR awaits a decision, or failed) |
 | GET | `/api/actions/risk-tickets/{id}` | any domain role | With its pull requests and `serviceNow`: the ticket as ServiceNow incident fields |
-| POST | `/api/actions/risk-tickets/{id}/approve` | an analyst, or the service's assigned owners — **never the drafter of a response with a PR** | Files the ticket in Jira → `FILED`, then opens the PR under the ticket's key → `OPENED` (or `FAILED`, with the reason, on the part that failed) |
-| POST | `/api/actions/risk-tickets/{id}/dismiss` | an analyst, or the service's assigned owners (the drafter included) | `{reason}` → the ticket and its PR `DISMISSED` |
+| POST | `/api/actions/risk-tickets/{id}/approve` | an analyst, or the service's assigned owners — **never the drafter of a response with a PR** | Optional `{version}`. Files the ticket in Jira → `FILED`, then opens the PR under the ticket's key → `OPENED` (or `FAILED`, with the reason, on the part that failed) |
+| POST | `/api/actions/risk-tickets/{id}/dismiss` | an analyst, or the service's assigned owners (the drafter included) | `{reason, version?}` (reason required) → the ticket and its PR `DISMISSED` |
+| POST | `/api/actions/risk-tickets/{id}/edit` | an analyst, or the service's assigned owners | While `PROPOSED`: `{version, summary, risk, impact, actions}` → the narrative as it will be filed; the first draft is kept in `edit` |
+| POST | `/api/actions/risk-tickets/{id}/override` | an analyst, or the service's assigned owners | While `PROPOSED`: `{version, priority, dueDate?, reason}` (reason required; no due date is none, never one in the past) → filed with these; Aegis's own assessment is kept in `override` |
 | POST | `/api/actions/risk-tickets/{id}/pull-requests` | an analyst, or the service's assigned owners | Draft the PR of a response that has none (left out, or its repository linked afterwards) |
 | POST | `/api/actions/risk-tickets/{id}/pull-requests/{proposalId}/approve` | an analyst, or the service's assigned owners — **never the PR's drafter** | Open a filed response's PR on its own: drafted afterwards, or failed |
 | POST | `/api/actions/upgrade-proposals/{id}/dismiss` | an analyst, or the service's assigned owners (the drafter included) | Leave the PR out of its response: `{reason}` → `DISMISSED` |
@@ -241,7 +243,25 @@ that fixes it, drafted and approved together. Nothing leaves Aegis without an ap
 - **Decisions are safe under concurrency**: each part is claimed first (optimistic lock) — `FILING`, then
   `OPENING` — so two people approving at once get one issue, one PR and a conflict; a claim interrupted for
   ten minutes can be retried, and a failure is recorded on the part that failed. One current response per
-  service and change (V23, and `FAILED` counts), one current PR per response (V27).
+  service and change (V23, and `FAILED` counts), one current PR per response (V27). Every store locks the row
+  while it checks and writes a decision (`select … for update`), so a decision racing another gets the
+  conflict message, never a server error. A decision may also carry the `version` the reviewer read (edits and
+  overrides must): if someone edited, overrode or decided the response since, it is a 409 — "This response
+  changed after you opened it" — and nothing changes. The UI always sends it.
+- **Edit and override before deciding (E9 story 3, V33)**, only while the ticket is `PROPOSED`, by whoever may
+  decide it; a compliance admin may do neither. *Edit* rewrites the summary, risk, impact and actions in place
+  (blank actions dropped, redacted like every draft) and keeps the draft as first written in `edit`
+  (`draftedSummary`, `draftedRisk`, `draftedImpact`, `draftedActions`, `by`, `at`). *Override* replaces Aegis's
+  priority and due date with a required reason and keeps Aegis's assessment in `override` (`assessedPriority`,
+  `assessedDueDate`, `reason`, `by`, `at`); overriding again keeps Aegis's, not the previous override's. The
+  ticket's own fields are always what gets filed, and the Jira description records an override and its reason
+  and says when the AI's draft was edited. Neither changes who may approve: the four-eyes rule is about the
+  pull request, which neither touches.
+- **Every item has a stage** (`ResponseStage`): **New** (no response yet) → **In review** (drafted) →
+  **Approved**, or **Overridden** when the priority or due date was overridden → **Actioned** (the ticket is
+  filed) or **Closed** (dismissed). A failed filing stays Approved or Overridden: the decision stands and is
+  retried. Each response carries `stage`, and so does each triage item (`GET /api/findings`) and each
+  recommendation's `response`. The response page shows it as a stepper, with who moved it along and when.
 - **Jira is connected per organization** (`jira_connections`, V24): its organization admin grants Aegis one
   Jira site through Atlassian's consent screen under Organization → Integrations, then chooses the project
   and issue type. Tokens are sealed with `AEGIS_SECRETS_KEY`, bound to the organization. Setup, the exact

@@ -17,7 +17,11 @@ public interface ResponseDirectory {
     record ServiceChange(UUID serviceId, UUID changeSignalId) {
     }
 
-    /** A response as a recommendation shows it: its ticket, how far along it is, and its key once filed. */
-    record ResponseRef(UUID ticketId, UUID changeSignalId, String status, String issueKey, String issueUrl) {
+    /**
+     * A response as a recommendation shows it: its ticket, how far along it is — its own status, and its item's
+     * stage (In review, Approved, Overridden, Actioned or Closed) — and its key once filed.
+     */
+    record ResponseRef(UUID ticketId, UUID changeSignalId, String status, String stage, String issueKey,
+                       String issueUrl) {
     }
 }

@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import com.aegis.core.actions.ticket.ResponseStage;
 import com.aegis.core.actions.ticket.RiskTicketStore;
 import com.aegis.core.actions.upgrade.ResponseDirectory;
 import com.aegis.core.actions.upgrade.ResponseDirectory.ResponseRef;
@@ -96,11 +97,12 @@ public class TriageQueue {
     /**
      * One thing to respond to in one service: a vulnerable dependency, with the upgrade that fixes it
      * ({@code upgrade}), or a vendor outage ({@code outage}). {@code changeSignalId} is the change a response
-     * answers, {@code response} the one already drafted, and {@code canDraft} whether the caller may draft one.
+     * answers, {@code response} the one already drafted, {@code stage} where the item stands ({@link ResponseStage}:
+     * New until a response is drafted), and {@code canDraft} whether the caller may draft one.
      */
     public record Item(Kind kind, UUID changeSignalId, ServiceRef service, List<OwnerRef> owners, double score,
                        ImpactTier tier, MatchConfidence confidence, Recommendation upgrade, Outage outage,
-                       ResponseRef response, boolean canDraft) {
+                       ResponseRef response, ResponseStage stage, boolean canDraft) {
     }
 
     /** A page of items, and the filter options of the queue's scope (every service, or the caller's own). */
@@ -221,7 +223,7 @@ public class TriageQueue {
         List<Owner> owners = assignments.getOrDefault(service.getId(), List.of());
         return new Item(Kind.VULNERABILITY, upgrade.changeSignalId(), serviceRef(service), ownerRefs(owners),
                 upgrade.score(), upgrade.tier(), upgrade.confidence(), upgrade, null, upgrade.response(),
-                canDraft(caller, owners));
+                stage(upgrade.response()), canDraft(caller, owners));
     }
 
     /** Each outage in progress, in every selected service it reaches materially. */
@@ -249,13 +251,17 @@ public class TriageQueue {
                     continue;
                 }
                 List<Owner> owners = assignments.getOrDefault(scored.service().id(), List.of());
+                ResponseRef response = answered.get(new ServiceChange(scored.service().id(), incident.id()));
                 items.add(new Item(Kind.VENDOR_OUTAGE, incident.id(), scored.service(), ownerRefs(owners),
-                        scored.score(), scored.tier(), scored.confidence(), null, outage,
-                        answered.get(new ServiceChange(scored.service().id(), incident.id())),
+                        scored.score(), scored.tier(), scored.confidence(), null, outage, response, stage(response),
                         canDraft(caller, owners)));
             }
         }
         return items;
+    }
+
+    private static ResponseStage stage(ResponseRef response) {
+        return response == null ? ResponseStage.NEW : ResponseStage.valueOf(response.stage());
     }
 
     /** As {@code TicketRoles.PROPOSE}: an analyst for any service, a service owner for the ones assigned to them. */

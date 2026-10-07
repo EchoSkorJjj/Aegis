@@ -143,6 +143,6 @@ class RiskTicketTextTest {
                 "Payments API runs a vulnerable log4j-core.", "Remote code execution.", "Takeover of the service.",
                 List.of("Upgrade log4j-core to 2.17.1."), List.of("log4j-core 2.14.1 is in the affected range."),
                 aiDrafted, citations, RiskTicketStatus.PROPOSED, UUID.randomUUID(), Instant.now(), null, null, null,
-                null, null, null, 0);
+                null, null, null, null, null, 0);
     }
 }
