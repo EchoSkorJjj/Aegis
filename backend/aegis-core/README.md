@@ -75,13 +75,18 @@ assigned owner is the JWT subject, by name, with its items (`toRespond`), how ma
 repository a response is the ticket alone, and without an SBOM only the components linked by hand are checked.
 The items are the queue's own, so the two never disagree. Someone who owns no service gets an empty list.
 
+Routing (E9 story 4) is the service's current owner assignment, read on every request: nothing is routed or
+stored per person, so when governance reassigns a service its items, its drafted responses and the right to
+draft and decide them follow the new owner at once, and the previous owner keeps none of them
+(`TriageApiIntegrationTest.reassigningAServiceRoutesItsItemsAndResponsesToTheNewOwner`).
+
 The frontend's `/findings` renders the queue: each row links its response or offers **Draft response**, and a
 drafted response then waits in `/responses/review` for a decision. `/findings/mine` (**My services**) is a service
 owner's page, in the sidebar only for the `SERVICE_OWNER` role (only a service owner can be assigned a service):
 the overview above, then the queue for those services, with no owner to filter by. `/findings/{changeSignalId}`
 is the item detail: the change-impact view with the original change, every
 impacted service and owner, score factors and match evidence, and each service's drafted response and upgrade
-edits. Persisted findings with a lifecycle status, routing and notifications are later stories (E9 s3–s5).
+edits. Persisted findings with a lifecycle status and notifications are later stories (E9 s3, s5).
 
 ## Service repositories and draft PR providers (E8 Story 2)
 

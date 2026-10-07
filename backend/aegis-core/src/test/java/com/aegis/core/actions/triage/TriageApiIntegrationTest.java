@@ -221,6 +221,69 @@ class TriageApiIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void reassigningAServiceRoutesItsItemsAndResponsesToTheNewOwner() throws Exception {
+        String drafted = mvc.perform(post("/api/actions/risk-tickets").with(as("SERVICE_OWNER", owner.getUserId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"changeSignalId\":\"%s\",\"serviceId\":\"%s\"}"
+                                .formatted(critical.id(), internalService.getId())))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String ticketId = JsonPath.read(drafted, "$.id");
+
+        // Governance hands the internal service over: the successor is assigned, the previous owner removed.
+        Owner[] assigned = new Owner[1];
+        currentOrg.runAs(org, () -> {
+            assigned[0] = owners.assign(internalService.getId(), "Successor " + tag);
+            inventory.removeServiceOwner(internalService.getId(), owner.getId());
+        });
+        Owner successor = assigned[0];
+
+        // The service's items now name, and are routed to, the successor alone.
+        mvc.perform(get(PATH).with(as("ANALYST", UUID.randomUUID())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.content[1].owners[*].id").value(contains(successor.getId().toString())))
+                .andExpect(jsonPath("$.items.content[2].owners[*].id").value(contains(successor.getId().toString())))
+                .andExpect(jsonPath("$.owners[*].id").value(contains(successor.getId().toString())));
+        mvc.perform(get(PATH).param("ownerId", successor.getId().toString()).with(as("ANALYST", UUID.randomUUID())))
+                .andExpect(jsonPath("$.items.content[*].score").value(contains(60.0, 40.0)));
+        mvc.perform(get(PATH).param("ownerId", owner.getId().toString()).with(as("ANALYST", UUID.randomUUID())))
+                .andExpect(jsonPath("$.items.totalElements").value(0));
+
+        mvc.perform(get(PATH).param("mine", "true").with(as("SERVICE_OWNER", successor.getUserId())))
+                .andExpect(jsonPath("$.services[*].id").value(contains(internalService.getId().toString())))
+                .andExpect(jsonPath("$.items.content[*].score").value(contains(60.0, 40.0)))
+                .andExpect(jsonPath("$.items.content[*].canDraft").value(contains(true, true)));
+        mvc.perform(get(PATH + "/my-services").with(as("SERVICE_OWNER", successor.getUserId())))
+                .andExpect(jsonPath("$[*].service.id").value(contains(internalService.getId().toString())))
+                .andExpect(jsonPath("$[0].awaitingDecision").value(1));
+
+        // The previous owner keeps nothing: no queue, no services, no right to draft or decide.
+        mvc.perform(get(PATH).param("mine", "true").with(as("SERVICE_OWNER", owner.getUserId())))
+                .andExpect(jsonPath("$.services.length()").value(0))
+                .andExpect(jsonPath("$.items.totalElements").value(0));
+        mvc.perform(get(PATH + "/my-services").with(as("SERVICE_OWNER", owner.getUserId())))
+                .andExpect(jsonPath("$.length()").value(0));
+        mvc.perform(get(PATH).with(as("SERVICE_OWNER", owner.getUserId())))
+                .andExpect(jsonPath("$.items.content[*].canDraft").value(everyItem(is(false))));
+        mvc.perform(post("/api/actions/risk-tickets").with(as("SERVICE_OWNER", owner.getUserId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"changeSignalId\":\"%s\",\"serviceId\":\"%s\"}"
+                                .formatted(outage.id(), internalService.getId())))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/actions/risk-tickets/{id}/dismiss", ticketId)
+                        .with(as("SERVICE_OWNER", owner.getUserId())).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"No longer mine\"}"))
+                .andExpect(status().isForbidden());
+
+        // The response drafted before the handover is the successor's to decide.
+        mvc.perform(post("/api/actions/risk-tickets/{id}/dismiss", ticketId)
+                        .with(as("SERVICE_OWNER", successor.getUserId())).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"Accepted until the migration\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("DISMISSED"));
+    }
+
+    @Test
     void enforcesDomainReadRolesAndRejectsInvalidFilters() throws Exception {
         mvc.perform(get(PATH)).andExpect(status().isUnauthorized());
         mvc.perform(get(PATH + "/my-services")).andExpect(status().isUnauthorized());
