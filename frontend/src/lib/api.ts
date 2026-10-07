@@ -10,7 +10,6 @@ import type {
   ChangeSignalFacets,
   CreateOrgInput,
   ForgotPasswordInput,
-  FindingQueueResponse,
   GitHubConnectResult,
   GitHubIntegration,
   InviteUserInput,
@@ -23,6 +22,7 @@ import type {
   MfaStatus,
   DirectoryMember,
   Owner,
+  OwnedService,
   PackageUsage,
   Page,
   Passkey,
@@ -40,6 +40,7 @@ import type {
   SoftwareComponentInput,
   ThirdPartyVendor,
   TotpInit,
+  TriageQueueResponse,
   UpdateProfileInput,
   UpgradeProposal,
   UpgradeProposalStatus,
@@ -435,10 +436,27 @@ export const matchApi = {
   },
 };
 
-/** Material findings, recomputed from the active organization's estate; paging follows ranking. */
+/**
+ * The triage queue (E9 story 1): material vulnerable dependencies and vendor outages in progress, recomputed from
+ * the active organization's estate; paging follows the ranking.
+ */
 export const findingApi = {
-  list(params: { serviceId?: string; ownerId?: string; mine?: string; page?: number; size?: number } = {}) {
-    return bffFetch<FindingQueueResponse>(`/api/findings${qs(params)}`);
+  list(
+    params: {
+      serviceId?: string;
+      ownerId?: string;
+      mine?: string;
+      ecosystem?: string;
+      tier?: string;
+      page?: number;
+      size?: number;
+    } = {},
+  ) {
+    return bffFetch<TriageQueueResponse>(`/api/findings${qs(params)}`);
+  },
+  /** The services you are an assigned owner of, each with what it needs (E9 story 2). */
+  myServices() {
+    return bffFetch<OwnedService[]>("/api/findings/my-services");
   },
 };
 

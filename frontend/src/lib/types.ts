@@ -641,24 +641,78 @@ export interface GitHubConnectResult {
 export type RiskTicketStatus = "PROPOSED" | "FILING" | "FILED" | "FAILED" | "DISMISSED";
 export type TicketPriority = "HIGHEST" | "HIGH" | "MEDIUM" | "LOW" | "LOWEST";
 
-/** One live material change, grouped by service and ranked within the selected estate scope. */
-export interface FindingItem {
-  change: MatchedChangeRef;
-  score: number;
-  tier: ImpactTier;
-  services: Pick<ScoredService, "service" | "score" | "tier" | "confidence" | "owners" | "explanation">[];
-}
-
-export interface FindingQueueResponse {
-  items: Page<FindingItem>;
-  services: MatchedServiceRef[];
-  owners: OwnerRef[];
-  ownedServiceCount: number;
+/** A vendor outage still in progress, as its status page describes it. */
+export interface VendorOutage {
+  id: string;
+  title: string | null;
+  vendorName: string | null;
+  /** The feed's own word (investigating, identified, monitoring); null from a plain RSS feed. */
+  status: string | null;
+  impact: string | null;
+  startedAt: string | null;
+  lastUpdateAt: string | null;
+  url: string | null;
 }
 
 /**
- * GET /api/actions/risk-tickets/{id} — the response for one change in one service.
- * Approving files its ticket in Jira, then opens its upgrade pull request as a draft.
+ * GET /api/findings — one thing to respond to in one service (E9 story 1): a vulnerable dependency with the upgrade
+ * that fixes it (`upgrade`, the same recommendation a service's page lists), or a vendor outage still in progress
+ * (`outage`). Material only, highest impact first.
+ */
+export interface TriageItem {
+  kind: "VULNERABILITY" | "VENDOR_OUTAGE";
+  /** The change a response answers; null only for a vulnerability with no change signal yet. */
+  changeSignalId: string | null;
+  service: MatchedServiceRef;
+  owners: OwnerRef[];
+  score: number;
+  tier: ImpactTier;
+  confidence: MatchConfidence;
+  upgrade: Omit<UpgradeRecommendation, "canDraft"> | null;
+  outage: VendorOutage | null;
+  /** The response already drafted for it. */
+  response: UpgradeRecommendation["response"];
+  /** Whether you may draft a response: an analyst, or one of the service's owners. */
+  canDraft: boolean;
+}
+
+export interface TriageQueueResponse {
+  items: Page<TriageItem>;
+  /** The queue's scope: every service, or only yours (`mine`). */
+  services: MatchedServiceRef[];
+  owners: OwnerRef[];
+  /** The ecosystems of the material vulnerable dependencies in the services chosen (service and owner filters). */
+  ecosystems: string[];
+}
+
+/**
+ * GET /api/findings/my-services — a service you are an assigned owner of, as its owner looks after it (E9 story 2):
+ * its items in the triage queue, the responses for it waiting in Review & approve, and where Aegis's view of its
+ * dependencies comes from.
+ */
+export interface OwnedService {
+  service: MatchedServiceRef;
+  /** Its material items in the triage queue. */
+  toRespond: number;
+  /** Those with no response drafted yet. */
+  noResponseYet: number;
+  /** The worst item's score and tier; null when there is nothing to respond to. */
+  topScore: number | null;
+  topTier: ImpactTier | null;
+  /** Responses for it that still need a person, as Review & approve counts them. */
+  awaitingDecision: number;
+  /** Null: no repository linked, so a response is the ticket alone. */
+  repositoryUrl: string | null;
+  /** Null: no SBOM imported yet, so Aegis can't see what the service depends on. */
+  sbomImportedAt: string | null;
+  sbomImportSource: SbomImportSource | null;
+}
+
+/**
+ * GET /api/actions/risk-tickets/{id} — a response (E8 story 5): the risk ticket for one change in one service,
+ * its service's current name, and its upgrade pull requests. The title, priority, due date, labels and evidence
+ * are Aegis's own; the summary, risk, impact and actions are the AI's draft (`aiDrafted`) or Aegis's plain
+ * fallback. Approving files it in the organization's Jira, then opens its pull request under the ticket's key.
  */
 export interface RiskTicket {
   id: string;

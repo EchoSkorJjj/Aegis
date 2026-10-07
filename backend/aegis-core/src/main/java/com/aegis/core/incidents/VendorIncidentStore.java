@@ -1,5 +1,7 @@
 package com.aegis.core.incidents;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.domain.Page;
@@ -18,4 +20,10 @@ public interface VendorIncidentStore {
 
     /** A page of incidents, most recently started first. */
     Page<VendorIncident> findPage(Pageable pageable);
+
+    /**
+     * Incidents still in progress: not declared over ({@link VendorIncident#resolved()}) and updated since
+     * {@code since}. A plain RSS feed never says "resolved", so a quiet incident counts as over.
+     */
+    List<VendorIncident> findActive(Instant since);
 }

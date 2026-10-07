@@ -34,7 +34,7 @@ import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.sli
 @AnalyzeClasses(packages = "com.aegis.core", importOptions = ImportOption.DoNotIncludeTests.class)
 class PackageStructureArchTest {
 
-    /** Business capability modules — kept in one place so the rules read consistently. */
+    /** The seven business capability modules — kept in one place so the rules read consistently. */
     private static final String[] DOMAIN_PACKAGES = {
         "com.aegis.core.advisories..",
         "com.aegis.core.incidents..",
@@ -42,8 +42,7 @@ class PackageStructureArchTest {
         "com.aegis.core.signals..",
         "com.aegis.core.inventory..",
         "com.aegis.core.matching..",
-        "com.aegis.core.scoring..",
-        "com.aegis.core.findings.."
+        "com.aegis.core.scoring.."
     };
 
     /**
@@ -111,7 +110,6 @@ class PackageStructureArchTest {
                     "com.aegis.core.inventory..",
                     "com.aegis.core.matching..",
                     "com.aegis.core.scoring..",
-                    "com.aegis.core.findings..",
                     "com.aegis.core.ingestion..",
                     "com.aegis.core.actions..",
                     "com.aegis.core.ai..")

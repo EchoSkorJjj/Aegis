@@ -1,131 +1,339 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import Link from "next/link";
+
 import { DataPagination } from "@/components/app/data-pagination";
+import { formatDateTime } from "@/components/app/responses/response-status";
+import {
+  FilterSelect,
+  ImpactBadge,
+  MessageRow,
+  ResponseCell,
+  TIERS,
+  UpgradeSummary,
+  tierLabel,
+} from "@/components/app/responses/upgrade-recommendations";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ApiError, findingApi } from "@/lib/api";
 import { canReadInventory } from "@/lib/roles";
-import type { FindingQueueResponse } from "@/lib/types";
+import type { TriageItem, TriageQueueResponse, VendorOutage } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
 
-export function FindingQueue({ mine = false }: { mine?: boolean }) {
+const PAGE_SIZE = 20;
+const COLUMNS = 4;
+
+interface Filters {
+  serviceId: string;
+  ownerId: string;
+  ecosystem: string;
+  tier: string;
+  page: number;
+}
+
+const NO_FILTERS: Filters = { serviceId: "", ownerId: "", ecosystem: "", tier: "", page: 0 };
+
+/**
+ * The triage queue (E9 story 1): what to respond to next, highest impact first — each service's material vulnerable
+ * dependencies with the version that fixes them, and the vendor outages still in progress. Each row links the
+ * response already drafted for it or offers to draft one; a drafted response then waits in Review & approve.
+ */
+export function FindingQueue() {
   const { user, isLoading } = useAuth();
   if (isLoading) return <Skeleton className="h-40 w-full" />;
   if (!canReadInventory(user?.roles ?? [])) {
-    return <p>You don&apos;t have access to findings — an Aegis domain role is required.</p>;
+    return (
+      <div className="mx-auto w-full max-w-6xl rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+        You don&apos;t have access to the triage queue — an Aegis domain role is required.
+      </div>
+    );
   }
-  // Reset both filters and results when the workspace or identity changes.
-  return <Queue key={`${user?.orgId}:${user?.id}:${mine}`} mine={mine} />;
-}
-
-function Queue({ mine }: { mine: boolean }) {
-  const [filters, setFilters] = useState({ serviceId: "", ownerId: "", page: 0 });
-  const [data, setData] = useState<FindingQueueResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [refresh, setRefresh] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset the request state for new filters.
-    setLoading(true);
-    setError(null);
-    findingApi.list({
-      serviceId: filters.serviceId || undefined, ownerId: filters.ownerId || undefined,
-      mine: mine ? "true" : undefined, page: filters.page, size: 20,
-    }).then((result) => {
-      if (!cancelled) setData(result);
-    }).catch((err) => {
-      if (!cancelled) setError(err instanceof ApiError && err.status === 403
-        ? "You don't have access to findings — an Aegis domain role is required."
-        : "Could not load findings. Please try again.");
-    }).finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [filters, mine, refresh]);
-
-  const items = data?.items;
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{mine ? "My services" : "Triage queue"}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Triage queue</h1>
         <p className="text-sm text-muted-foreground">
-          Material vulnerabilities and vendor outages, highest impact first{mine ? ", for services you own" : ""}.
-          Each change is ranked by its highest material service score within your filters.
+          What to respond to next, highest impact first: each service&apos;s material vulnerable dependencies, with
+          the version that fixes them, and the vendor outages still in progress. Drafting a response prepares its
+          risk ticket and, where Aegis can automate it, the upgrade pull request; it then waits in{" "}
+          <Link href="/responses/review" className="underline underline-offset-4 hover:text-foreground">
+            Review &amp; approve
+          </Link>
+          .
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Scores reflect the current estate. Security news has no package or vendor identity to score.
-          Draft a response from an item&apos;s detail; decisions are in <Link href="/responses/review" className="underline">Review &amp; approve</Link>.
+          Worked out from the current estate and feeds each time it loads. An outage leaves the queue once its vendor
+          resolves it or it goes quiet for two weeks; security news names no package or vendor, so it isn&apos;t
+          ranked here.
         </p>
       </div>
+      {/* Another workspace or user starts over: its filters may name services this one doesn't have. */}
+      <TriageList key={`${user?.orgId}:${user?.id}`} />
+    </div>
+  );
+}
 
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="space-y-1 text-sm">
-          <span className="block text-xs font-medium">Service</span>
-          <select aria-label="Service" className="h-9 max-w-72 rounded-md border bg-background px-3" value={filters.serviceId}
-            onChange={(event) => setFilters({ ...filters, serviceId: event.target.value, page: 0 })}>
-            <option value="">All services</option>
-            {data?.services.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}
-          </select>
-        </label>
-        <label className="space-y-1 text-sm">
-          <span className="block text-xs font-medium">Owner</span>
-          <select aria-label="Owner" className="h-9 max-w-72 rounded-md border bg-background px-3" value={filters.ownerId}
-            onChange={(event) => setFilters({ ...filters, ownerId: event.target.value, page: 0 })}>
-            <option value="">All owners</option>
-            {data?.owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
-          </select>
-        </label>
-        {(filters.serviceId || filters.ownerId) &&
-          <Button variant="ghost" size="sm" onClick={() => setFilters({ serviceId: "", ownerId: "", page: 0 })}>Clear filters</Button>}
-        <Button variant="outline" size="sm" onClick={() => setRefresh((value) => value + 1)} disabled={loading}>Refresh</Button>
+/**
+ * The queue's items with their filters and paging. `mine` limits it to the services the caller is an assigned
+ * owner of (their own page, so there is no owner to filter by), `initialServiceId` starts it on one of them, and
+ * `onRefresh` also tells the page when the reader asks for fresh data.
+ */
+export function TriageList({
+  mine = false,
+  initialServiceId = "",
+  onRefresh,
+}: {
+  mine?: boolean;
+  initialServiceId?: string;
+  onRefresh?: () => void;
+}) {
+  const [filters, setFilters] = useState<Filters>({ ...NO_FILTERS, serviceId: initialServiceId });
+  const [data, setData] = useState<TriageQueueResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<"forbidden" | "error" | null>(null);
+  const [refresh, setRefresh] = useState(0);
+  const filterId = useId();
+
+  useEffect(() => {
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a new request for the new filters
+    setLoading(true);
+    setError(null);
+    findingApi
+      .list({
+        serviceId: filters.serviceId || undefined,
+        ownerId: filters.ownerId || undefined,
+        ecosystem: filters.ecosystem || undefined,
+        tier: filters.tier || undefined,
+        mine: mine ? "true" : undefined,
+        page: filters.page,
+        size: PAGE_SIZE,
+      })
+      .then((result) => {
+        if (!cancelled) setData(result);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof ApiError && err.status === 403 ? "forbidden" : "error");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [filters, mine, refresh]);
+
+  const filtering = filters.serviceId !== "" || filters.ownerId !== "" || filters.ecosystem !== "" || filters.tier !== "";
+  const filter = (change: Partial<Filters>) => setFilters((current) => ({ ...current, ...change, page: 0 }));
+  // The ecosystems follow the service and owner chosen; keep the one picked selectable when another drops it.
+  const ecosystems = [...new Set([...(data?.ecosystems ?? []), filters.ecosystem].filter(Boolean))].sort();
+  const items = data?.items;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+        <FilterSelect
+          id={`${filterId}-service`}
+          label="Service"
+          value={filters.serviceId}
+          allLabel="All services"
+          onChange={(serviceId) => filter({ serviceId })}
+        >
+          {data?.services.map((service) => (
+            <option key={service.id} value={service.id}>
+              {service.name}
+            </option>
+          ))}
+        </FilterSelect>
+        {!mine && (
+          <FilterSelect
+            id={`${filterId}-owner`}
+            label="Owner"
+            value={filters.ownerId}
+            allLabel="All owners"
+            onChange={(ownerId) => filter({ ownerId })}
+          >
+            {data?.owners.map((owner) => (
+              <option key={owner.id} value={owner.id}>
+                {owner.name}
+              </option>
+            ))}
+          </FilterSelect>
+        )}
+        <FilterSelect
+          id={`${filterId}-ecosystem`}
+          label="Ecosystem"
+          value={filters.ecosystem}
+          allLabel="All ecosystems"
+          onChange={(ecosystem) => filter({ ecosystem })}
+        >
+          {ecosystems.map((ecosystem) => (
+            <option key={ecosystem} value={ecosystem}>
+              {ecosystem}
+            </option>
+          ))}
+        </FilterSelect>
+        <FilterSelect
+          id={`${filterId}-impact`}
+          label="Impact"
+          value={filters.tier}
+          allLabel="All impacts"
+          onChange={(tier) => filter({ tier })}
+        >
+          {TIERS.map((tier) => (
+            <option key={tier} value={tier}>
+              {tierLabel(tier)}
+            </option>
+          ))}
+        </FilterSelect>
+        {filtering && (
+          <Button variant="ghost" onClick={() => setFilters(NO_FILTERS)}>
+            Clear
+          </Button>
+        )}
+        <Button
+          variant="outline"
+          disabled={loading}
+          onClick={() => {
+            setRefresh((count) => count + 1);
+            onRefresh?.();
+          }}
+        >
+          Refresh
+        </Button>
       </div>
 
-      <section aria-label="Material findings" className="space-y-3" aria-busy={loading}>
+      <section aria-label="Items to respond to" aria-busy={loading} className="space-y-3">
         <div className="rounded-lg border">
           <Table>
-            <TableHeader><TableRow>
-              <TableHead>Change</TableHead><TableHead>Impacted services</TableHead>
-              <TableHead>Owners</TableHead><TableHead className="text-right">Impact score</TableHead>
-            </TableRow></TableHeader>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Change</TableHead>
+                <TableHead>Service</TableHead>
+                <TableHead>Impact</TableHead>
+                <TableHead className="text-right">
+                  <span className="sr-only">Response</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
             <TableBody>
-              {loading ? Array.from({ length: 3 }, (_, index) => <TableRow key={index}>
-                {Array.from({ length: 4 }, (_, cell) => <TableCell key={cell}><Skeleton className="h-4 w-24" /></TableCell>)}
-              </TableRow>) : error ? <Message>{error}</Message> : mine && data?.ownedServiceCount === 0 ?
-                <Message>You aren&apos;t assigned as an owner of any service. An analyst can use the <Link href="/findings" className="underline">organization&apos;s triage queue</Link>.</Message>
-                : items?.content.length ? items.content.map((item) => {
-                  const owners = [...new Map(item.services.flatMap((service) => service.owners).map((owner) => [owner.id, owner])).values()];
-                  return <TableRow key={item.change.id}>
-                    <TableCell className="max-w-md align-top whitespace-normal">
-                      <Link href={`/findings/${item.change.id}`} className="font-medium underline-offset-4 hover:underline">{item.change.title ?? item.change.externalId}</Link>
-                      <span className="mt-1 block text-xs text-muted-foreground">{item.change.signalType === "VENDOR_OUTAGE" ? "Vendor outage" : "Vulnerability"} · {item.change.externalId}</span>
-                    </TableCell>
-                    <TableCell className="max-w-xs align-top whitespace-normal">
-                      {item.services.map((impact) => <div key={impact.service.id}>
-                        <Link href={`/inventory/services/${impact.service.id}`} className="hover:underline">{impact.service.name}</Link>
-                        <span className="ml-2 text-xs text-muted-foreground">{impact.score.toFixed(1)}{impact.confidence === "POSSIBLE" && " · Needs review"}</span>
-                      </div>)}
-                    </TableCell>
-                    <TableCell className="max-w-xs align-top whitespace-normal">{owners.map((owner) => owner.name).join(", ") || "No owners assigned"}</TableCell>
-                    <TableCell className="text-right align-top">
-                      <span className="font-mono font-semibold tabular-nums">{item.score.toFixed(1)}</span>
-                      <span className="block text-xs text-muted-foreground">{item.tier.charAt(0) + item.tier.slice(1).toLowerCase()} impact</span>
-                    </TableCell>
-                  </TableRow>;
-                }) : <Message>{filters.serviceId || filters.ownerId ? "No material findings match these filters." : "No material changes affect these services."}</Message>}
+              {loading ? (
+                Array.from({ length: 3 }).map((_, row) => (
+                  <TableRow key={row}>
+                    {Array.from({ length: COLUMNS }).map((__, cell) => (
+                      <TableCell key={cell}>
+                        <Skeleton className="h-4 w-28" />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : error ? (
+                <MessageRow columns={COLUMNS}>
+                  {error === "forbidden"
+                    ? "You don't have access to the triage queue — an Aegis domain role is required."
+                    : "Could not load the triage queue. Please try again."}
+                </MessageRow>
+              ) : items && items.content.length > 0 ? (
+                items.content.map((item) => <TriageRow key={rowKey(item)} item={item} />)
+              ) : (
+                <MessageRow columns={COLUMNS}>
+                  {filtering
+                    ? "Nothing matches these filters."
+                    : mine
+                      ? "Nothing to respond to in your services."
+                      : "Nothing to respond to: no known vulnerability or vendor outage materially affects your " +
+                        "services. Aegis checks again as advisories arrive and SBOMs are imported."}
+                </MessageRow>
+              )}
             </TableBody>
           </Table>
         </div>
-        {!loading && !error && items && items.totalElements > 0 && <DataPagination page={items.number}
-          totalPages={items.totalPages} totalElements={items.totalElements} pageSize={items.size}
-          itemsOnPage={items.content.length} onPageChange={(page) => setFilters({ ...filters, page })} />}
+        {!loading && !error && items && items.totalElements > 0 && (
+          <DataPagination
+            page={items.number}
+            totalPages={items.totalPages}
+            totalElements={items.totalElements}
+            pageSize={items.size}
+            itemsOnPage={items.content.length}
+            onPageChange={(page) => setFilters((current) => ({ ...current, page }))}
+          />
+        )}
       </section>
     </div>
   );
 }
 
-function Message({ children }: { children: React.ReactNode }) {
-  return <TableRow><TableCell colSpan={4} className="py-10 text-center whitespace-normal text-muted-foreground">{children}</TableCell></TableRow>;
+function rowKey(item: TriageItem): string {
+  return `${item.kind}:${item.service.id}:${item.upgrade?.component.id ?? item.changeSignalId}`;
+}
+
+function TriageRow({ item }: { item: TriageItem }) {
+  return (
+    <TableRow>
+      <TableCell className="max-w-md align-top whitespace-normal">
+        {item.upgrade ? (
+          <UpgradeSummary item={item.upgrade} changeHref={(changeSignalId) => `/findings/${changeSignalId}`} />
+        ) : (
+          item.outage && <OutageSummary outage={item.outage} />
+        )}
+      </TableCell>
+      <TableCell className="max-w-xs align-top whitespace-normal">
+        <Link href={`/inventory/services/${item.service.id}`} className="font-medium underline-offset-4 hover:underline">
+          {item.service.name}
+        </Link>
+        <span className="mt-0.5 block text-xs text-muted-foreground">
+          {item.owners.length > 0 ? item.owners.map((owner) => owner.name).join(", ") : "No owners assigned"}
+        </span>
+      </TableCell>
+      <TableCell className="align-top">
+        <ImpactBadge score={item.score} tier={item.tier} />
+        {item.confidence === "POSSIBLE" && (
+          <span className="mt-1 block text-xs text-muted-foreground">Possible match — check the evidence</span>
+        )}
+      </TableCell>
+      <TableCell className="text-right align-top">
+        <ResponseCell
+          response={item.response}
+          proposal={item.upgrade?.proposal ?? null}
+          changeSignalId={item.changeSignalId}
+          serviceId={item.service.id}
+          canDraft={item.canDraft}
+        />
+      </TableCell>
+    </TableRow>
+  );
+}
+
+/** A vendor outage still in progress: what its status page calls it, and since when. */
+function OutageSummary({ outage }: { outage: VendorOutage }) {
+  return (
+    <>
+      <Link href={`/findings/${outage.id}`} className="font-medium underline-offset-4 hover:underline">
+        {outage.title ?? "Untitled incident"}
+      </Link>
+      <span className="mt-0.5 block text-xs text-muted-foreground">
+        Vendor outage
+        {outage.vendorName && ` · ${outage.vendorName}`}
+        {outage.status && ` · ${outage.status}`}
+        {outage.startedAt
+          ? ` · since ${formatDateTime(outage.startedAt)}`
+          : outage.lastUpdateAt && ` · updated ${formatDateTime(outage.lastUpdateAt)}`}
+        {outage.url && /^https?:\/\//i.test(outage.url) && (
+          <>
+            {" · "}
+            <a
+              href={outage.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary underline-offset-4 hover:underline"
+            >
+              Status page ↗
+            </a>
+          </>
+        )}
+      </span>
+    </>
+  );
 }

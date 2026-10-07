@@ -53,7 +53,8 @@ const VIEW_COPY: Record<QueueView, { title: string; description: string }> = {
 /**
  * A queue of drafted responses, each kind in its own section with its own paging: responses (a risk ticket
  * with the upgrade pull request that fixes it), regulator memos, and — only while there are any — upgrade pull
- * requests drafted on their own before responses existed. Material changes live in the findings triage queue.
+ * requests drafted on their own before responses existed. What to draft a response for is the triage queue
+ * (`/findings`).
  */
 export function ResponseQueue({ view }: { view: QueueView }) {
   const { user, isLoading: authLoading } = useAuth();
@@ -76,7 +77,11 @@ export function ResponseQueue({ view }: { view: QueueView }) {
         </div>
       ) : (
         <>
-          {review && <Link href="/findings" className="text-sm text-primary hover:underline">Triage material findings →</Link>}
+          {review && (
+            <Link href="/findings" className="text-sm font-medium text-primary underline-offset-4 hover:underline">
+              Draft responses from the triage queue →
+            </Link>
+          )}
           <QueueSection<RiskTicket>
             id="responses"
             title={review ? "Responses awaiting a decision" : "Responses"}

@@ -11,8 +11,11 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
+import type { Role } from "@/lib/types";
+
 export type NavLink = { title: string; href: string; icon: LucideIcon };
-export type NavGroup = { title: string; icon: LucideIcon; items: { title: string; href: string }[] };
+/** A page in a group; `roles`, when set, shows it only to holders of one of them. */
+export type NavGroup = { title: string; icon: LucideIcon; items: { title: string; href: string; roles?: Role[] }[] };
 export type NavItem = NavLink | NavGroup;
 
 // Always available — the landing page for every signed-in user.
@@ -37,7 +40,8 @@ export const domainNav: NavItem[] = [
     icon: ShieldAlert,
     items: [
       { title: "Triage queue", href: "/findings" },
-      { title: "My services", href: "/findings/mine" },
+      // Only an assigned owner has services of their own, and only a service owner can be assigned one.
+      { title: "My services", href: "/findings/mine", roles: ["SERVICE_OWNER"] },
     ],
   },
   {
@@ -64,6 +68,15 @@ export const adminNav: NavLink[] = [{ title: "Users", href: "/admin/users", icon
 
 // The organization's own settings, which only its admin (ORG_ADMIN) may change.
 export const orgAdminNav: NavLink[] = [{ title: "Integrations", href: "/admin/integrations", icon: Plug }];
+
+/** The navigation as these roles see it: a group's pages meant for other roles left out. */
+export function visibleTo(items: NavItem[], roles: readonly Role[]): NavItem[] {
+  return items.map((item) =>
+    "items" in item
+      ? { ...item, items: item.items.filter((sub) => !sub.roles || sub.roles.some((role) => roles.includes(role))) }
+      : item,
+  );
+}
 
 /** Pages reached from inside a section rather than from the sidebar. */
 const unlistedPages = [

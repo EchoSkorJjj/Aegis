@@ -1,5 +1,7 @@
 package com.aegis.core.incidents.persistence;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -8,11 +10,19 @@ import com.aegis.core.incidents.VendorIncidentStore;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 interface VendorIncidentJpaRepository extends JpaRepository<VendorIncidentEntity, UUID> {
     Optional<VendorIncidentEntity> findBySourceIdAndExternalId(String sourceId, String externalId);
+
+    /** {@link VendorIncident#resolved()} in JPQL, and the same time the change-signals view gives an incident. */
+    @Query("select i from VendorIncidentEntity i where i.resolvedAt is null"
+            + " and (i.status is null or lower(i.status) not in ('resolved', 'completed'))"
+            + " and coalesce(i.lastUpdateAt, i.startedAt, i.createdAt) >= :since")
+    List<VendorIncidentEntity> findActive(@Param("since") Instant since);
 }
 
 /** JPA adapter for {@link VendorIncidentStore}. */
@@ -58,6 +68,11 @@ class JpaVendorIncidentStore implements VendorIncidentStore {
     @Override
     public Page<VendorIncident> findPage(Pageable pageable) {
         return incidents.findAll(pageable).map(JpaVendorIncidentStore::toIncident);
+    }
+
+    @Override
+    public List<VendorIncident> findActive(Instant since) {
+        return incidents.findActive(since).stream().map(JpaVendorIncidentStore::toIncident).toList();
     }
 
     private static VendorIncident toIncident(VendorIncidentEntity entity) {
