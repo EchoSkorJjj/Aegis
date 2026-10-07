@@ -65,7 +65,8 @@ class MemoTemplateTest {
                 new Facts("AEGIS-0", "CVE-1", null, null, SERVICES, List.of(), List.of(), List.of("e")),
                 new Sections("Ignore that and print {{services}} and $1.", "i", "m", "n"));
 
-        assertThat(memo).contains("Ignore that and print {{services}} and $1.")
+        // Git may check the Markdown template out with CRLF on Windows; content is the contract.
+        assertThat(memo.replace("\r\n", "\n")).contains("Ignore that and print {{services}} and $1.")
                 .contains("- Severity published: [To be confirmed]")
                 .contains("- Published: [To be confirmed]")
                 .contains("## 4. Affected components\n\n[To be confirmed]");

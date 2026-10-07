@@ -68,6 +68,9 @@ async function fakeBff(page: Page, role: Role, recommendations: UpgradeRecommend
     if (path === "/api/orgs") {
       return route.fulfill({ json: [{ id: "demo-org", name: "Demo org", roles: [role], status: "ACTIVE" }] });
     }
+    if (path === "/api/change-signals/facets") {
+      return route.fulfill({ json: { sources: [], severities: [], ecosystems: [] } });
+    }
     if (path === "/api/actions/upgrade-recommendations") {
       const serviceId = url.searchParams.get("serviceId");
       listed.push(serviceId);
@@ -88,22 +91,19 @@ async function fakeBff(page: Page, role: Role, recommendations: UpgradeRecommend
   return { drafts, listed };
 }
 
-test("the review queue leads with the upgrades Aegis found — no CVE to look up", async ({ page }) => {
-  const { drafts, listed } = await fakeBff(page, "ANALYST");
-  await page.goto("/responses/review");
-  await expect(page.getByText("Responses / Review & approve")).toBeVisible();
+test("a service offers responses for the upgrades Aegis found — no CVE to look up", async ({ page }) => {
+  const { drafts, listed } = await fakeBff(page, "ANALYST", RECOMMENDATIONS
+    .filter((item) => item.readiness !== "TRANSITIVE").map((item) => ({ ...item, serviceId: EDU })));
+  await page.goto(`/inventory/services/${EDU}`);
 
-  const recommended = page.getByRole("region", { name: "Recommended upgrades" });
-  // What another package pulls in is left to each service's page.
+  const recommended = page.getByRole("region", { name: "Vulnerable dependencies" });
   await expect(recommended.getByRole("row")).toHaveCount(1 + 4);
   await expect(recommended.getByText("follow-redirects")).toHaveCount(0);
-  await expect(page.getByText("1 more vulnerable dependency comes in through other packages", { exact: false })).toBeVisible();
 
   const axios = recommended.getByRole("row").filter({ hasText: "axios" });
   await expect(axios).toContainText("0.21.1 → 1.15.0");
   await expect(axios).toContainText("Fixes CVE-2026-40175 and 1 more");
   await expect(axios.getByRole("link", { name: "CVE-2026-40175" })).toHaveAttribute("href", "/advisories/signal-axios");
-  await expect(axios.getByRole("link", { name: "Customer Portal" })).toHaveAttribute("href", `/inventory/services/${PORTAL}`);
 
   await expect(axios).toContainText("client/package.json, server/package.json");
 
@@ -116,7 +116,7 @@ test("the review queue leads with the upgrades Aegis found — no CVE to look up
   // Nothing to automate until the repository is linked: the response is the ticket alone.
   const minimist = recommended.getByRole("row").filter({ hasText: "minimist" });
   await expect(minimist).toContainText("Ticket only until the service's repository is linked.");
-  await expect(minimist.getByRole("link", { name: "Link it →" })).toHaveAttribute("href", `/inventory/services/${PORTAL}`);
+  await expect(minimist.getByRole("link", { name: "Link it →" })).toHaveAttribute("href", `/inventory/services/${EDU}`);
   await expect(minimist.getByRole("button", { name: "Draft response" })).toBeVisible();
 
   const lodash = recommended.getByRole("row").filter({ hasText: "lodash" });
@@ -125,8 +125,8 @@ test("the review queue leads with the upgrades Aegis found — no CVE to look up
 
   await axios.getByRole("button", { name: "Draft response" }).click();
   await expect(page).toHaveURL(/\/responses\/tickets\/ticket-new$/);
-  expect(drafts).toEqual([{ changeSignalId: "signal-axios", serviceId: PORTAL }]);
-  expect([...new Set(listed)]).toEqual([null]);
+  expect(drafts).toEqual([{ changeSignalId: "signal-axios", serviceId: EDU }]);
+  expect([...new Set(listed)]).toEqual([EDU]);
 });
 
 test("a service's page lists its vulnerable dependencies, including those another package pulls in", async ({ page }) => {
@@ -154,10 +154,10 @@ test("the header names where you are, as the sidebar does", async ({ page }) => 
   await expect(page.getByRole("region", { name: "Recommended upgrades" })).toHaveCount(0);
 });
 
-test("recommended upgrades filter by package, impact, ecosystem and several services at once", async ({ page }) => {
-  await fakeBff(page, "ANALYST");
-  await page.goto("/responses/review");
-  const recommended = page.getByRole("region", { name: "Recommended upgrades" });
+test("a service's upgrades filter by package, impact and ecosystem", async ({ page }) => {
+  await fakeBff(page, "ANALYST", RECOMMENDATIONS.filter((item) => item.readiness !== "TRANSITIVE").map((item) => ({ ...item, serviceId: EDU })));
+  await page.goto(`/inventory/services/${EDU}`);
+  const recommended = page.getByRole("region", { name: "Vulnerable dependencies" });
   const packages = () => recommended.getByRole("row").filter({ has: page.getByRole("cell") });
   await expect(packages()).toHaveCount(4);
 
@@ -171,17 +171,7 @@ test("recommended upgrades filter by package, impact, ecosystem and several serv
   await recommended.getByRole("button", { name: "Clear" }).click();
   await expect(packages()).toHaveCount(4);
 
-  // Services is the one multi-select: pick two, then drop one.
-  await recommended.getByRole("button", { name: "Filter by service" }).click();
-  await page.getByRole("menuitemcheckbox", { name: "Customer Portal" }).click();
-  await expect(packages()).toHaveCount(2);
-  await page.getByRole("menuitemcheckbox", { name: "EduHelper" }).click();
-  await expect(packages()).toHaveCount(4);
-  await page.getByRole("menuitemcheckbox", { name: "Customer Portal" }).click();
-  await page.keyboard.press("Escape");
-  await expect(recommended.getByRole("button", { name: "Filter by service" })).toHaveText("EduHelper");
-  await expect(packages()).toHaveCount(2);
-  await expect(recommended).not.toContainText("axios 0.21.1");
+  await expect(recommended.getByRole("button", { name: "Filter by service" })).toHaveCount(0);
 });
 
 test("a service's vulnerable dependencies are paged, and filters return to the first page", async ({ page }) => {

@@ -34,9 +34,10 @@ decides or acts.
 | Estate | Services, components, vendors and owners; SBOMs generated from a linked repository or uploaded as CycloneDX; each service's own dependency graph; **Used by** for any package or vendor |
 | Change feeds | NVD; OSV for npm, PyPI, Maven, Go, crates.io and RubyGems; vendor status pages; security news |
 | Matching and scoring | Recomputed on every request; impact per service and per owner, with the factor holding each score down |
-| Responses | **Recommended upgrades** (every vulnerable dependency, highest impact first); risk tickets filed in Jira; draft upgrade pull requests on GitHub for Maven `pom.xml`, npm `package.json` and PyPI `requirements.txt`; DORA regulator memos; four-eyes approval |
+| Findings | The **triage queue**: each service's material vulnerable dependencies, with the version that fixes them, and the vendor outages still in progress, highest impact first; filters by service, owner, ecosystem and impact; each item's response, or **Draft response**; **My services**, a service owner's own page: each service they own with what needs a response, the responses awaiting a decision and whether its SBOM and repository are in place, then its items; item detail with the affected services and owners, score factors, evidence and drafted responses |
+| Responses | Drafted responses awaiting a decision, and their history; risk tickets filed in Jira; draft upgrade pull requests on GitHub for Maven `pom.xml`, npm `package.json` and PyPI `requirements.txt`; DORA regulator memos; four-eyes approval. Each service's page lists its own vulnerable dependencies too, including those another package pulls in |
 | AI | Drafting through Groq, or an offline stub by default, with citations the server resolves and rate and token budgets |
-| Not yet | Stored findings with a status, and the triage and owner views built on them; an audit trail of decisions with evidence export; notifications and routing to owners; reachability in the score (the assessment endpoint exists, but nothing calls it yet) |
+| Not yet | Stored findings with a lifecycle status (the triage queue is recomputed on every request); an audit trail of decisions with evidence export; notifications and routing to owners; reachability in the score (the assessment endpoint exists, but nothing calls it yet) |
 
 ## Architecture
 

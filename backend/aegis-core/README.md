@@ -41,8 +41,47 @@ and the modules are cycle-free.
 | `inventory`  | Services and their repository links, components, vendors, SBOM dependencies, ownership — the map. Each service has its own dependency graph (`DependencyGraph`, V29): the one walk behind matching, the upgrade recommendations and "Used by" |
 | `matching`   | Advisory package + version range → components → impacted services/owners + evidence chains |
 | `scoring`    | Deterministic impact score per service and owner, with a "why" breakdown |
-| `actions`    | Approved responses: the draft-PR port + GitHub App adapter and safe-upgrade proposals (`pr`, `upgrade`, E8 story 4), the issue-tracker port + Jira adapter and risk tickets (`tracker`, `ticket`, story 5), and DORA regulator memos (`memo`, story 6) |
+| `actions`    | Responses: what to respond to next (the triage queue, `triage`, E9 story 1), the draft-PR port + GitHub App adapter and safe-upgrade proposals (`pr`, `upgrade`, E8 story 4), the issue-tracker port + Jira adapter and risk tickets (`tracker`, `ticket`, story 5), and DORA regulator memos (`memo`, story 6) |
 | `ai`         | **Port** to the Python ai-service: `AiAssessor` / `AiDrafter` + DTOs + `HttpAiClient` |
+
+## Triage queue and item detail (E9 Stories 1–2)
+
+`GET /api/findings?serviceId=&ownerId=&mine=true&ecosystem=npm&tier=HIGH&page=0&size=20` (`actions.triage`) is
+what to respond to next, highest impact first. Each item is one thing in one service:
+
+- a **vulnerable dependency** (`kind: VULNERABILITY`, `upgrade`): the service's upgrade recommendation — the
+  package, the version that clears every advisory with a fix, the vulnerabilities it clears, and its readiness
+  (why the response is the ticket alone, when it is). It is the row the service's own page lists, from the same
+  batched search (`UpgradeRecommendations.recommendFor`), so both rank and score it the same way;
+- a **vendor outage still in progress** (`kind: VENDOR_OUTAGE`, `outage`): not resolved on its status page and
+  updated within the last 14 days (`TriageQueue.OUTAGE_QUIET_AFTER`, since a plain RSS feed never says
+  "resolved"), each scored once through `ScoringService`. An outage that can't be scored is logged and left out
+  rather than failing the queue.
+
+Only material items are listed. Each carries its owners, the response already drafted for it (`response`) and
+whether the caller may draft one (`canDraft`: an analyst, or one of the service's owners, as `TicketRoles.PROPOSE`
+enforces). Every filter is optional: service and owner choose the services, ecosystem keeps vulnerable
+dependencies only, and tier is the item's impact tier. `mine=true` limits the queue to the services whose assigned
+owner is the JWT subject. The `services` and `owners` filter options cover the whole queue, the `ecosystems` the
+services chosen. Ranking (score, then service name,
+kind and package or title) and filtering happen before paging; `items` is a Spring page. The domain roles read it
+(`InventoryRoles.READ`). It is recomputed on every request and persists nothing, so there is no migration. A
+security news item names no package or vendor, so it has no score and no place in the queue.
+
+`GET /api/findings/my-services` is the queue as a service owner looks after it (E9 story 2): each service whose
+assigned owner is the JWT subject, by name, with its items (`toRespond`), how many have no response yet
+(`noResponseYet`), the worst one's score and tier, the responses for it still waiting in Review & approve
+(`awaitingDecision`, counted as `pending=true` counts them), and its repository and last SBOM import — without a
+repository a response is the ticket alone, and without an SBOM only the components linked by hand are checked.
+The items are the queue's own, so the two never disagree. Someone who owns no service gets an empty list.
+
+The frontend's `/findings` renders the queue: each row links its response or offers **Draft response**, and a
+drafted response then waits in `/responses/review` for a decision. `/findings/mine` (**My services**) is a service
+owner's page, in the sidebar only for the `SERVICE_OWNER` role (only a service owner can be assigned a service):
+the overview above, then the queue for those services, with no owner to filter by. `/findings/{changeSignalId}`
+is the item detail: the change-impact view with the original change, every
+impacted service and owner, score factors and match evidence, and each service's drafted response and upgrade
+edits. Persisted findings with a lifecycle status, routing and notifications are later stories (E9 s3–s5).
 
 ## Service repositories and draft PR providers (E8 Story 2)
 

@@ -47,6 +47,7 @@ import {
   baseNav,
   domainNav,
   orgAdminNav,
+  visibleTo,
   type NavGroup,
   type NavItem,
 } from "@/components/app/navigation";
@@ -64,7 +65,7 @@ export function AppSidebar() {
   const organizationNav = user?.roles.includes("ORG_ADMIN") ? [...adminNav, ...orgAdminNav] : adminNav;
   // Domain data (inventory, advisories, and the rest of the estate features) needs a domain read role.
   const platformNav: NavItem[] = canReadInventory(user?.roles ?? [])
-    ? [...baseNav, ...domainNav]
+    ? [...baseNav, ...visibleTo(domainNav, user?.roles ?? [])]
     : baseNav;
 
   const activeOrgName =

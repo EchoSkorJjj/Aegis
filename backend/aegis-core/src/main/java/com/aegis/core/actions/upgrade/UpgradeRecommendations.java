@@ -130,6 +130,11 @@ public class UpgradeRecommendations {
         if (serviceId != null && services.isEmpty()) {
             throw new ApiExceptions.NotFound("Business service not found: " + serviceId);
         }
+        return recommendFor(services);
+    }
+
+    /** The recommendations for services the caller has already loaded, e.g. the triage queue's selection. */
+    public List<Recommendation> recommendFor(Map<UUID, BusinessService> services) {
         Map<String, ProposalRef> current = currentProposals();
         Map<ResponseDirectory.ServiceChange, ResponseDirectory.ResponseRef> byChange = responses.current(services.keySet());
         Map<UUID, ResponseDirectory.ResponseRef> byTicket = new HashMap<>();

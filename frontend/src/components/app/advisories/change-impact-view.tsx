@@ -6,14 +6,16 @@ import { ArrowLeft, ArrowRight, Info } from "lucide-react";
 
 import { MemoAction, useLiveMemo } from "@/components/app/responses/memo-action";
 import { ResponseAction, useResponses } from "@/components/app/responses/response-action";
+import { UpgradeEditsTable } from "@/components/app/responses/upgrade-edits";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ApiError, scoringApi } from "@/lib/api";
+import { ApiError, scoringApi, signalApi } from "@/lib/api";
 import { canReadInventory, canRespondForService, respondsForAnyService } from "@/lib/roles";
 import type {
   AffectedProductEvidence,
   BusinessCriticality,
   ChangeImpactResponse,
+  ChangeSignal,
   EvidenceChain,
   IdentityMatch,
   ImpactTier,
@@ -75,11 +77,17 @@ const FACTOR_LABEL: Record<ScoreFactorKind, string> = {
   CONFIDENCE: "Confidence",
 };
 
-export function ChangeImpactView({ signalId }: { signalId: string }) {
+export function ChangeImpactView({ signalId, finding = false }: { signalId: string; finding?: boolean }) {
+  const { user } = useAuth();
+  return <ImpactView key={`${user?.orgId}:${user?.id}:${signalId}:${finding}`} signalId={signalId} finding={finding} />;
+}
+
+function ImpactView({ signalId, finding }: { signalId: string; finding: boolean }) {
   const { user, isLoading: authLoading } = useAuth();
   const canRead = canReadInventory(user?.roles ?? []);
 
   const [data, setData] = useState<ChangeImpactResponse | null>(null);
+  const [signal, setSignal] = useState<ChangeSignal | null>(null);
   const [status, setStatus] = useState<Status>("loading");
 
   useEffect(() => {
@@ -89,11 +97,11 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
     setStatus("loading");
     // One request: the scored response carries the match it was computed from (evidence and counts),
     // so the match never runs twice and the scores and evidence can't disagree.
-    scoringApi
-      .scoreChange(signalId)
-      .then((result) => {
+    Promise.all([scoringApi.scoreChange(signalId), finding ? signalApi.get(signalId) : Promise.resolve(null)])
+      .then(([result, change]) => {
         if (cancelled) return;
         setData(result);
+        setSignal(change);
         setStatus("ok");
       })
       .catch((err) => {
@@ -106,22 +114,22 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [authLoading, canRead, user?.orgId, signalId]);
+  }, [authLoading, canRead, user?.orgId, signalId, finding]);
 
   // A vulnerability or a vendor outage gets a response per service (its risk ticket, and for a vulnerability
   // the upgrade pull request), and a regulator notification when it is material.
   const respondable =
     status === "ok" && (data?.change.signalType === "VULNERABILITY" || data?.change.signalType === "VENDOR_OUTAGE");
-  const responses = useResponses(signalId, respondable);
+  const { responses, error: responseError } = useResponses(signalId, respondable);
   const memo = useLiveMemo(signalId, respondable);
 
   const backLink = (
     <Link
-      href="/advisories"
+      href={finding ? "/findings" : "/advisories"}
       className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
     >
       <ArrowLeft className="size-4" />
-      Advisories
+      {finding ? "Triage queue" : "Advisories"}
     </Link>
   );
 
@@ -182,6 +190,14 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
         </p>
       </div>
 
+      {signal && <section aria-label="Change" className="space-y-2 rounded-lg border p-4 text-sm">
+        <p className="whitespace-pre-wrap">{signal.summary || "No summary was published."}</p>
+        <p className="text-xs text-muted-foreground">Source: {signal.sourceId}{signal.occurredAt && ` · ${new Date(signal.occurredAt).toLocaleString()}`}</p>
+        {signal.url && /^https?:\/\//i.test(signal.url) && <a href={signal.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Read original change →</a>}
+      </section>}
+
+      {responseError && <StateCard>Could not load drafted responses. Refresh this page to try again.</StateCard>}
+
       {/* Summary bar */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
         {change.signalType === "VENDOR_OUTAGE" ? (
@@ -231,7 +247,7 @@ export function ChangeImpactView({ signalId }: { signalId: string }) {
               <ServiceCard
                 key={scored.service.id}
                 scored={scored}
-                response={respondable ? { signalId, responses, canDraft } : null}
+                response={respondable ? { signalId, responses, canDraft, preview: finding } : null}
               />
             );
           })}
@@ -249,15 +265,17 @@ type ResponseContext = {
   signalId: string;
   responses: Map<string, RiskTicket> | null;
   canDraft: boolean;
+  preview: boolean;
 };
 
 function ServiceCard({ scored, response }: { scored: ScoredService; response: ResponseContext | null }) {
   const confidence = CONFIDENCE[scored.confidence];
+  const existing = response?.responses?.get(scored.service.id);
   return (
     <div className="rounded-lg border">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3">
         <ScoreBadge score={scored.score} tier={scored.tier} />
-        <span className="font-medium">{scored.service.name}</span>
+        <Link href={`/inventory/services/${scored.service.id}`} className="font-medium hover:underline">{scored.service.name}</Link>
         <span
           className={`rounded-full px-2 py-0.5 text-xs font-medium ${CRITICALITY_CLASS[scored.service.criticality]}`}
         >
@@ -278,16 +296,42 @@ function ServiceCard({ scored, response }: { scored: ScoredService; response: Re
           <Evidence key={index} evidence={evidence} />
         ))}
       </div>
+      {response?.preview && existing && <DraftedResponse response={existing} />}
       {response?.responses && (
         <ResponseAction
           changeSignalId={response.signalId}
           serviceId={scored.service.id}
-          existing={response.responses.get(scored.service.id)}
+          existing={existing}
           canDraft={response.canDraft}
         />
       )}
     </div>
   );
+}
+
+function DraftedResponse({ response }: { response: RiskTicket }) {
+  return <section aria-label={`Drafted response for ${response.serviceName}`} className="space-y-3 border-t p-4 text-sm">
+    <h3 className="font-medium">Drafted response: {response.title}</h3>
+    <p className="text-xs text-muted-foreground">Impact when drafted: {response.score.toFixed(1)} · {response.priority.toLowerCase()} priority{response.dueDate && ` · Due ${response.dueDate}`}</p>
+    <dl className="space-y-2">
+      <div><dt className="font-medium">Summary</dt><dd className="whitespace-pre-wrap text-muted-foreground">{response.summary}</dd></div>
+      <div><dt className="font-medium">Risk</dt><dd className="whitespace-pre-wrap text-muted-foreground">{response.risk}</dd></div>
+      <div><dt className="font-medium">Impact</dt><dd className="whitespace-pre-wrap text-muted-foreground">{response.impact}</dd></div>
+    </dl>
+    {response.actions.length > 0 && <div><p className="font-medium">Recommended actions</p>
+      <ul className="list-disc space-y-1 pl-5 text-muted-foreground">{response.actions.map((action, index) => <li key={index}>{action}</li>)}</ul></div>}
+    {response.citations.length > 0 && <div><p className="font-medium">Citations</p>
+      <ul className="list-disc pl-5 text-muted-foreground">{response.citations.map((citation, index) => <li key={index}>{citation}</li>)}</ul></div>}
+    {response.pullRequests.filter((proposal) => proposal.status !== "DISMISSED").map((proposal) =>
+      <details key={proposal.id} className="rounded-md border p-3">
+        <summary className="cursor-pointer font-medium">Upgrade pull request: {proposal.title}</summary>
+        <div className="mt-3 space-y-3">
+          <UpgradeEditsTable edits={proposal.edits} />
+          <pre className="whitespace-pre-wrap break-words font-sans text-xs text-muted-foreground">{proposal.body}</pre>
+          <Link href={`/responses/upgrades/${proposal.id}`} className="text-primary hover:underline">View pull request →</Link>
+        </div>
+      </details>)}
+  </section>;
 }
 
 function ScoreBadge({ score, tier }: { score: number; tier: ImpactTier }) {
