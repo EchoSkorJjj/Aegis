@@ -22,6 +22,9 @@ public interface RiskTicketStore {
     /** Every current (not dismissed) ticket of these services, newest first. */
     List<RiskTicket> findCurrent(Collection<UUID> serviceIds);
 
+    /** Every dismissed ticket of these services, most recently dismissed first. */
+    List<RiskTicket> findDismissed(Collection<UUID> serviceIds);
+
     /**
      * Any filter may be null (or empty, for {@code statuses}): no restriction on that field. {@code pending}
      * true keeps the responses that still need a person — the ticket awaits a decision, is being filed or
@@ -31,8 +34,8 @@ public interface RiskTicketStore {
             Boolean pending, Pageable pageable);
 
     /**
-     * Persist a state change. {@code ApiExceptions.Conflict} if the ticket changed after it was read, so two
-     * concurrent decisions never both win.
+     * Persist a decision, an edit or an override. {@code ApiExceptions.Conflict} if the ticket changed after it was
+     * read, so two concurrent decisions never both win.
      */
     RiskTicket update(RiskTicket ticket);
 }

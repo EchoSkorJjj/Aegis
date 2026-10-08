@@ -130,12 +130,32 @@ final class RiskTicketText {
         blocks.add(Block.heading("Evidence"));
         blocks.add(Block.bullets(ticket.evidence()));
         if (!ticket.citations().isEmpty()) {
-            blocks.add(Block.heading("Sources the draft quotes"));
+            // The sources belong to the AI's draft, which an edit replaced: the issue doesn't pass them off as the
+            // reviewer's.
+            blocks.add(Block.heading(ticket.edit() == null ? "Sources the draft quotes"
+                    : "Sources the AI draft quoted, before a person edited it"));
             blocks.add(Block.bullets(ticket.citations().stream().map(quote -> cut(quote.strip(), MAX_QUOTED)).toList()));
         }
+        if (ticket.override() != null) {
+            RiskTicket.AssessmentOverride override = ticket.override();
+            blocks.add(Block.heading("Priority and due date"));
+            blocks.add(Block.paragraph("Set by the reviewer: " + words(ticket.priority()) + " priority, "
+                    + due(ticket.dueDate()) + ". Aegis assessed " + words(override.assessedPriority()) + " priority, "
+                    + due(override.assessedDueDate()) + ". Why: " + override.reason()));
+        }
+        boolean edited = ticket.edit() != null;
+        String drafted = ticket.aiDrafted()
+                ? " (the summary, risk, impact and actions are an AI draft a person reviewed"
+                        + (edited ? " and edited" : "") + ")"
+                : edited ? " (its summary, risk, impact and actions edited by a person)" : "";
+        // Only an approval is claimed, and only by whom it was: a response without a pull request may be filed by
+        // the person who asked for it (the four-eyes rule is for changing a repository).
+        RiskTicket.Approval approval = ticket.approval();
+        String approved = approval == null ? ""
+                : approval.by().equals(ticket.createdBy()) ? " and approved there by the person who requested it"
+                : " and approved there by a second person";
         blocks.add(Block.paragraph("Service: " + (serviceName == null ? "a deleted service" : serviceName)
-                + ". Drafted by Aegis" + (ticket.aiDrafted() ? " (the summary, risk, impact and actions are an "
-                + "AI draft a person reviewed)" : "") + " and approved there by a second person."));
+                + ". Drafted by Aegis" + drafted + approved + "."));
         return new IssueDraft(ticket.title(), blocks, ticket.priority(), ticket.dueDate(), ticket.labels());
     }
 
@@ -161,6 +181,14 @@ final class RiskTicketText {
             fields.put("due_date", ticket.dueDate() + " 00:00:00");
         }
         return fields;
+    }
+
+    private static String words(Priority priority) {
+        return priority.name().toLowerCase(Locale.ROOT);
+    }
+
+    private static String due(LocalDate dueDate) {
+        return dueDate == null ? "no due date" : "due " + dueDate;
     }
 
     static String plainText(List<Block> blocks) {

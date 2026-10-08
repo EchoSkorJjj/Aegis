@@ -27,7 +27,7 @@ const RECOMMENDATIONS: UpgradeRecommendation[] = [
     serviceId: EDU, serviceName: "EduHelper", component: { id: "log4j", ecosystem: "maven", name: "org.apache.logging.log4j:log4j-core", version: "2.14.1" },
     manifestPaths: ["service/pom.xml"], toVersion: "2.17.1", score: 42.1, tier: "MEDIUM",
     proposal: { id: "proposal-open", status: "OPENED", toVersion: "2.17.1", pullRequestUrl: "https://github.com/acme/edu/pull/9", riskTicketId: "ticket-log4j" },
-    response: { ticketId: "ticket-log4j", changeSignalId: "signal-axios", status: "FILED", issueKey: "SEC-3", issueUrl: "https://acme.atlassian.net/browse/SEC-3" },
+    response: { ticketId: "ticket-log4j", changeSignalId: "signal-axios", status: "FILED", stage: "ACTIONED", issueKey: "SEC-3", issueUrl: "https://acme.atlassian.net/browse/SEC-3" },
   }),
   recommendation({
     serviceId: EDU, serviceName: "EduHelper", component: { id: "lodash", ecosystem: "npm", name: "lodash", version: "4.17.20" },

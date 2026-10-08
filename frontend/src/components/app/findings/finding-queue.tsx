@@ -4,7 +4,7 @@ import { useEffect, useId, useState } from "react";
 import Link from "next/link";
 
 import { DataPagination } from "@/components/app/data-pagination";
-import { formatDateTime } from "@/components/app/responses/response-status";
+import { StageBadge, formatDateTime } from "@/components/app/responses/response-status";
 import {
   FilterSelect,
   ImpactBadge,
@@ -23,7 +23,7 @@ import type { TriageItem, TriageQueueResponse, VendorOutage } from "@/lib/types"
 import { useAuth } from "@/providers/auth-provider";
 
 const PAGE_SIZE = 20;
-const COLUMNS = 4;
+const COLUMNS = 5;
 
 interface Filters {
   serviceId: string;
@@ -213,6 +213,7 @@ export function TriageList({
                 <TableHead>Change</TableHead>
                 <TableHead>Service</TableHead>
                 <TableHead>Impact</TableHead>
+                <TableHead>Stage</TableHead>
                 <TableHead className="text-right">
                   <span className="sr-only">Response</span>
                 </TableHead>
@@ -293,6 +294,13 @@ function TriageRow({ item }: { item: TriageItem }) {
           <span className="mt-1 block text-xs text-muted-foreground">Possible match — check the evidence</span>
         )}
       </TableCell>
+      <TableCell className="align-top">
+        <StageBadge stage={item.stage} />
+        {/* The one thing the stage doesn't say: an approved response whose filing failed waits to be tried again. */}
+        {item.response?.status === "FAILED" && (
+          <span className="mt-1 block text-xs text-red-600 dark:text-red-400">Filing failed</span>
+        )}
+      </TableCell>
       <TableCell className="text-right align-top">
         <ResponseCell
           response={item.response}
@@ -300,6 +308,7 @@ function TriageRow({ item }: { item: TriageItem }) {
           changeSignalId={item.changeSignalId}
           serviceId={item.service.id}
           canDraft={item.canDraft}
+          showStatus={false}
         />
       </TableCell>
     </TableRow>

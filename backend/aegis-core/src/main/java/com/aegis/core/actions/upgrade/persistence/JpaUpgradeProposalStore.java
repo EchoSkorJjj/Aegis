@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import jakarta.persistence.PersistenceContext;
 
 import com.aegis.core.actions.upgrade.UpgradeProposal;
@@ -21,6 +22,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.type.TypeReference;
@@ -107,7 +109,7 @@ class JpaUpgradeProposalStore implements UpgradeProposalStore {
     @Override
     @Transactional
     public UpgradeProposal update(UpgradeProposal proposal) {
-        UpgradeProposalEntity entity = proposals.findByIdAndOrgId(proposal.id(), scope())
+        UpgradeProposalEntity entity = proposals.findForUpdateByIdAndOrgId(proposal.id(), scope())
                 .orElseThrow(() -> new ApiExceptions.NotFound("Upgrade proposal not found: " + proposal.id()));
         if (entity.getVersion() != proposal.version()) {
             throw changedMeanwhile();
@@ -141,6 +143,13 @@ interface UpgradeProposalJpaRepository
         extends JpaRepository<UpgradeProposalEntity, UUID>, JpaSpecificationExecutor<UpgradeProposalEntity> {
 
     Optional<UpgradeProposalEntity> findByIdAndOrgId(UUID id, UUID orgId);
+
+    /**
+     * The row, locked until the transaction ends ({@code select … for update}): a concurrent decision waits, then
+     * sees the version this one wrote, so it is a conflict rather than a second outcome.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    Optional<UpgradeProposalEntity> findForUpdateByIdAndOrgId(UUID id, UUID orgId);
 
     List<UpgradeProposalEntity> findByOrgIdAndServiceIdAndStatusIn(
             UUID orgId, UUID serviceId, List<UpgradeProposalStatus> statuses);

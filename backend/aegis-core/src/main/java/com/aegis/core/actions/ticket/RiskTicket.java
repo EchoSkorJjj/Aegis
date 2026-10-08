@@ -17,6 +17,13 @@ import com.aegis.core.signals.ChangeSignal.SignalType;
  * Aegis's own, worked out from the impact score; the summary, risk, impact and actions are the AI's draft
  * ({@code aiDrafted}), or Aegis's plain fallback when the AI could not draft them.
  *
+ * <p>While it awaits a decision a reviewer may {@linkplain #edited edit} the narrative and
+ * {@linkplain #overridden override} the priority and due date (E9 story 3), or {@linkplain #overrideWithdrawn
+ * withdraw} the override. The ticket's own fields are always what will be filed; {@code edit} keeps the narrative
+ * as drafted, and {@code override} Aegis's own assessment and why it was replaced. Each is null until it happens.
+ * {@code approval} is who approved it and when: {@code decidedBy} is whoever made the last decision, so when a
+ * response whose filing failed is dismissed, the approval stays on record beside the dismissal.
+ *
  * <p>{@code version} is the optimistic lock that makes two people deciding at once safe.
  */
 public record RiskTicket(
@@ -47,6 +54,9 @@ public record RiskTicket(
         String issueKey,
         String issueUrl,
         String failureMessage,
+        DraftEdit edit,
+        AssessmentOverride override,
+        Approval approval,
         long version) {
 
     public RiskTicket {
@@ -56,28 +66,93 @@ public record RiskTicket(
         citations = List.copyOf(citations);
     }
 
+    /** The narrative as drafted, before a reviewer first edited it, and who edited it last, when. */
+    public record DraftEdit(String draftedSummary, String draftedRisk, String draftedImpact, List<String> draftedActions,
+                            UUID by, Instant at) {
+
+        public DraftEdit {
+            draftedActions = List.copyOf(draftedActions);
+        }
+    }
+
+    /**
+     * Aegis's own priority and due date (from the impact tier), which a reviewer replaced, why, and who did, when.
+     * The assessed due date is null when the tier sets none.
+     */
+    public record AssessmentOverride(Priority assessedPriority, LocalDate assessedDueDate, String reason, UUID by,
+                                     Instant at) {
+    }
+
+    /** Who approved the response, and when. */
+    public record Approval(UUID by, Instant at) {
+    }
+
+    /** The narrative rewritten by {@code by}; the draft as it first was is kept. */
+    RiskTicket edited(String summary, String risk, String impact, List<String> actions, UUID by, Instant at) {
+        DraftEdit drafted = edit == null
+                ? new DraftEdit(this.summary, this.risk, this.impact, this.actions, by, at)
+                : new DraftEdit(edit.draftedSummary(), edit.draftedRisk(), edit.draftedImpact(), edit.draftedActions(),
+                        by, at);
+        return revised(priority, dueDate, summary, risk, impact, actions, drafted, override);
+    }
+
+    /** Aegis's priority and due date replaced by {@code by}, with why; Aegis's own assessment is kept. */
+    RiskTicket overridden(Priority priority, LocalDate dueDate, String reason, UUID by, Instant at) {
+        AssessmentOverride assessed = override == null
+                ? new AssessmentOverride(this.priority, this.dueDate, reason, by, at)
+                : new AssessmentOverride(override.assessedPriority(), override.assessedDueDate(), reason, by, at);
+        return revised(priority, dueDate, summary, risk, impact, actions, edit, assessed);
+    }
+
+    /** Back to Aegis's own priority and due date: the override is withdrawn. */
+    RiskTicket overrideWithdrawn() {
+        return revised(override.assessedPriority(), override.assessedDueDate(), summary, risk, impact, actions, edit,
+                null);
+    }
+
     /** Approved by {@code approver}; the issue is about to be filed. */
     RiskTicket filing(UUID approver, Instant at) {
-        return transition(RiskTicketStatus.FILING, approver, at, null, null, null, null);
+        return transition(RiskTicketStatus.FILING, approver, at, null, null, null, null, new Approval(approver, at));
     }
 
     RiskTicket filed(FiledIssue issue) {
-        return transition(RiskTicketStatus.FILED, decidedBy, decidedAt, null, issue.key(), issue.url(), null);
+        return transition(RiskTicketStatus.FILED, decidedBy, decidedAt, null, issue.key(), issue.url(), null,
+                approval);
     }
 
     /** An upstream error can quote the request it rejected, so it is redacted as it enters the record. */
     RiskTicket failed(String reason) {
-        return transition(RiskTicketStatus.FAILED, decidedBy, decidedAt, null, null, null, SensitiveText.redact(reason));
+        return transition(RiskTicketStatus.FAILED, decidedBy, decidedAt, null, null, null, SensitiveText.redact(reason),
+                approval);
     }
 
+    /**
+     * Dismissed by {@code by}. A response whose filing failed had been approved: who approved it stays on record,
+     * also for one approved before the approval was recorded on its own (then {@code decidedBy} still holds it).
+     */
     RiskTicket dismissed(UUID by, Instant at, String reason) {
-        return transition(RiskTicketStatus.DISMISSED, by, at, SensitiveText.redact(reason), null, null, failureMessage);
+        Approval approved = approval == null && status == RiskTicketStatus.FAILED
+                ? new Approval(decidedBy, decidedAt)
+                : approval;
+        return transition(RiskTicketStatus.DISMISSED, by, at, SensitiveText.redact(reason), null, null, failureMessage,
+                approved);
     }
 
-    private RiskTicket transition(RiskTicketStatus status, UUID decidedBy, Instant decidedAt, String dismissReason,
-            String issueKey, String issueUrl, String failureMessage) {
+    /** What a reviewer changes before deciding replaced; the decision and what Aegis worked out carry over. */
+    private RiskTicket revised(Priority priority, LocalDate dueDate, String summary, String risk, String impact,
+            List<String> actions, DraftEdit edit, AssessmentOverride override) {
         return new RiskTicket(id, serviceId, changeSignalId, signalType, changeTitle, title, priority, dueDate, score,
                 tier, labels, summary, risk, impact, actions, evidence, aiDrafted, citations, status, createdBy,
-                createdAt, decidedBy, decidedAt, dismissReason, issueKey, issueUrl, failureMessage, version);
+                createdAt, decidedBy, decidedAt, dismissReason, issueKey, issueUrl, failureMessage, edit, override,
+                approval, version);
+    }
+
+    /** The decision replaced; the content carries over. */
+    private RiskTicket transition(RiskTicketStatus status, UUID decidedBy, Instant decidedAt, String dismissReason,
+            String issueKey, String issueUrl, String failureMessage, Approval approval) {
+        return new RiskTicket(id, serviceId, changeSignalId, signalType, changeTitle, title, priority, dueDate, score,
+                tier, labels, summary, risk, impact, actions, evidence, aiDrafted, citations, status, createdBy,
+                createdAt, decidedBy, decidedAt, dismissReason, issueKey, issueUrl, failureMessage, edit, override,
+                approval, version);
     }
 }

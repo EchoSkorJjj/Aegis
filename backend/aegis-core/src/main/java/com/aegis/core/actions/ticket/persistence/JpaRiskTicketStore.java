@@ -79,6 +79,16 @@ class JpaRiskTicketStore implements RiskTicketStore {
 
     @Override
     @Transactional(readOnly = true)
+    public List<RiskTicket> findDismissed(Collection<UUID> serviceIds) {
+        if (serviceIds.isEmpty()) {
+            return List.of();
+        }
+        return tickets.findByOrgIdAndServiceIdInAndStatusIn(scope(), serviceIds, List.of(RiskTicketStatus.DISMISSED),
+                Sort.by(Sort.Direction.DESC, "decidedAt")).stream().map(RiskTicketEntity::toDomain).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Page<RiskTicket> findPage(UUID serviceId, UUID changeSignalId, Collection<RiskTicketStatus> statuses,
             Boolean pending, Pageable pageable) {
         UUID org = scope();
@@ -106,12 +116,12 @@ class JpaRiskTicketStore implements RiskTicketStore {
     @Override
     @Transactional
     public RiskTicket update(RiskTicket ticket) {
-        RiskTicketEntity entity = tickets.findByIdAndOrgId(ticket.id(), scope())
+        RiskTicketEntity entity = tickets.findForUpdateByIdAndOrgId(ticket.id(), scope())
                 .orElseThrow(() -> new ApiExceptions.NotFound("Risk ticket not found: " + ticket.id()));
         if (entity.getVersion() != ticket.version()) {
             throw changedMeanwhile();
         }
-        entity.applyDecision(ticket);
+        entity.apply(ticket);
         try {
             return tickets.saveAndFlush(entity).toDomain();
         } catch (OptimisticLockingFailureException concurrentDecision) {

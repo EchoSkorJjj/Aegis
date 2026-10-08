@@ -2,13 +2,17 @@ package com.aegis.core.actions.ticket;
 
 import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import com.aegis.core.actions.upgrade.ResponseDirectory;
 import org.springframework.stereotype.Component;
 
-/** The current responses the recommendations link to: each service's newest ticket per change, not dismissed. */
+/**
+ * The responses the recommendations and the triage queue link to: each service's newest ticket per change that
+ * isn't dismissed, and its most recently dismissed one.
+ */
 @Component
 class TicketResponseDirectory implements ResponseDirectory {
 
@@ -20,11 +24,22 @@ class TicketResponseDirectory implements ResponseDirectory {
 
     @Override
     public Map<ServiceChange, ResponseRef> current(Collection<UUID> serviceIds) {
-        Map<ServiceChange, ResponseRef> current = new LinkedHashMap<>();
-        for (RiskTicket ticket : store.findCurrent(serviceIds)) {
-            current.putIfAbsent(new ServiceChange(ticket.serviceId(), ticket.changeSignalId()), new ResponseRef(
-                    ticket.id(), ticket.changeSignalId(), ticket.status().name(), ticket.issueKey(), ticket.issueUrl()));
+        return byChange(store.findCurrent(serviceIds));
+    }
+
+    @Override
+    public Map<ServiceChange, ResponseRef> dismissed(Collection<UUID> serviceIds) {
+        return byChange(store.findDismissed(serviceIds));
+    }
+
+    /** The first ticket per service and change, in the order given. */
+    private static Map<ServiceChange, ResponseRef> byChange(List<RiskTicket> tickets) {
+        Map<ServiceChange, ResponseRef> byChange = new LinkedHashMap<>();
+        for (RiskTicket ticket : tickets) {
+            byChange.putIfAbsent(new ServiceChange(ticket.serviceId(), ticket.changeSignalId()), new ResponseRef(
+                    ticket.id(), ticket.changeSignalId(), ticket.status().name(), ResponseStage.of(ticket).name(),
+                    ticket.issueKey(), ticket.issueUrl()));
         }
-        return current;
+        return byChange;
     }
 }

@@ -1,6 +1,7 @@
 package com.aegis.core.actions.ticket;
 
 import java.net.URI;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -9,9 +10,11 @@ import java.util.stream.Collectors;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
+import com.aegis.core.actions.tracker.IssueTracker.Priority;
 import com.aegis.core.actions.upgrade.UpgradeProposal;
 import com.aegis.core.inventory.InventoryRoles;
 import com.aegis.core.platform.common.ApiExceptions;
@@ -37,9 +40,14 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Responses: the risk ticket for a change's impact on a service and, for a vulnerability, the upgrade pull
  * request that fixes it. Draft one, then approve it (Aegis files the ticket in the organization's issue
- * tracker and opens the pull request as a draft with the ticket's key) or dismiss it with a reason. Every
- * response carries its pull requests; one also comes with its ServiceNow shape, for organizations that track
- * risks there.
+ * tracker and opens the pull request as a draft with the ticket's key) or dismiss it with a reason. Before
+ * deciding, a reviewer may edit its narrative or override its priority and due date, with a reason, and withdraw
+ * that override. Every
+ * response carries its pull requests and its stage (New → In review → Approved or Overridden → Actioned or
+ * Closed); one also comes with its ServiceNow shape, for organizations that track risks there.
+ *
+ * <p>Each decision may carry the {@code version} of the response the reviewer read (edits and overrides must):
+ * if it has changed since, the request is a conflict and nothing changes.
  */
 @RestController
 @RequestMapping("/api/actions/risk-tickets")
@@ -56,8 +64,39 @@ public class RiskTicketController {
     public record ProposeTicketRequest(@NotNull UUID changeSignalId, @NotNull UUID serviceId) {
     }
 
-    public record DismissTicketRequest(@NotBlank @Size(max = 1000) String reason) {
+    /** {@code version}: the response as the reviewer read it; optional, and checked when given. */
+    public record DismissTicketRequest(@NotBlank @Size(max = RiskTicketService.MAX_REASON) String reason,
+            Long version) {
     }
+
+    /** {@code version}: the response as the approver read it; optional, and checked when given. */
+    public record ApproveTicketRequest(Long version) {
+    }
+
+    /** The narrative exactly as it will be filed. Blank actions are dropped; at least one must remain. */
+    public record EditTicketRequest(
+            @NotNull Long version,
+            @NotBlank @Size(max = MAX_SECTION) String summary,
+            @NotBlank @Size(max = MAX_SECTION) String risk,
+            @NotBlank @Size(max = MAX_SECTION) String impact,
+            @NotEmpty @Size(max = MAX_ACTIONS) List<@NotNull @Size(max = MAX_ACTION) String> actions) {
+    }
+
+    /** The priority and due date the ticket is filed with instead of Aegis's, and why; no due date is none. */
+    public record OverrideTicketRequest(
+            @NotNull Long version,
+            @NotNull Priority priority,
+            LocalDate dueDate,
+            @NotBlank @Size(max = RiskTicketService.MAX_REASON) String reason) {
+    }
+
+    /** {@code version}: the response as the reviewer read it. */
+    public record WithdrawOverrideRequest(@NotNull Long version) {
+    }
+
+    static final int MAX_SECTION = 20_000;
+    static final int MAX_ACTIONS = 30;
+    static final int MAX_ACTION = 1_000;
 
     /**
      * The ticket's own fields, flat, its service's current name, its pull requests (newest first; at most one
@@ -66,6 +105,7 @@ public class RiskTicketController {
     public record RiskTicketResponse(
             @JsonUnwrapped RiskTicket ticket,
             String serviceName,
+            ResponseStage stage,
             List<UpgradeProposal> pullRequests,
             @JsonInclude(JsonInclude.Include.NON_NULL) Map<String, Object> serviceNow) {
     }
@@ -96,7 +136,7 @@ public class RiskTicketController {
         Map<UUID, List<UpgradeProposal>> pullRequests =
                 tickets.pullRequests(page.getContent().stream().map(RiskTicket::id).toList());
         return page.map(ticket -> new RiskTicketResponse(ticket, names.get(ticket.serviceId()),
-                pullRequests.getOrDefault(ticket.id(), List.of()), null));
+                ResponseStage.of(ticket), pullRequests.getOrDefault(ticket.id(), List.of()), null));
     }
 
     @GetMapping("/{id}")
@@ -110,8 +150,9 @@ public class RiskTicketController {
     @PreAuthorize(TicketRoles.DECIDE)
     @Operation(summary = "Approve: file the ticket in the organization's tracker, then open its pull request with the "
             + "ticket's key (an analyst or the service's owners; never the drafter when there is a pull request)")
-    public RiskTicketResponse approve(@PathVariable UUID id, Authentication authentication) {
-        return respond(tickets.approve(id, callerId(authentication)));
+    public RiskTicketResponse approve(@PathVariable UUID id,
+            @RequestBody(required = false) ApproveTicketRequest request, Authentication authentication) {
+        return respond(tickets.approve(id, callerId(authentication), request == null ? null : request.version()));
     }
 
     @PostMapping("/{id}/dismiss")
@@ -120,7 +161,36 @@ public class RiskTicketController {
             + "owners, including the drafter)")
     public RiskTicketResponse dismiss(
             @PathVariable UUID id, @Valid @RequestBody DismissTicketRequest request, Authentication authentication) {
-        return respond(tickets.dismiss(id, callerId(authentication), request.reason()));
+        return respond(tickets.dismiss(id, callerId(authentication), request.reason(), request.version()));
+    }
+
+    @PostMapping("/{id}/edit")
+    @PreAuthorize(TicketRoles.DECIDE)
+    @Operation(summary = "Edit the drafted summary, risk, impact and actions before deciding (an analyst or the "
+            + "service's owners; while it awaits a decision). The draft as it first was stays on record")
+    public RiskTicketResponse edit(
+            @PathVariable UUID id, @Valid @RequestBody EditTicketRequest request, Authentication authentication) {
+        return respond(tickets.edit(id, callerId(authentication), request.version(), request.summary(),
+                request.risk(), request.impact(), request.actions()));
+    }
+
+    @PostMapping("/{id}/override")
+    @PreAuthorize(TicketRoles.DECIDE)
+    @Operation(summary = "Override Aegis's priority and due date with a reason before deciding (an analyst or the "
+            + "service's owners; while it awaits a decision). Aegis's own assessment stays on record")
+    public RiskTicketResponse override(
+            @PathVariable UUID id, @Valid @RequestBody OverrideTicketRequest request, Authentication authentication) {
+        return respond(tickets.override(id, callerId(authentication), request.version(), request.priority(),
+                request.dueDate(), request.reason()));
+    }
+
+    @PostMapping("/{id}/override/withdraw")
+    @PreAuthorize(TicketRoles.DECIDE)
+    @Operation(summary = "Withdraw the override: the ticket goes back to Aegis's own priority and due date (an analyst "
+            + "or the service's owners; while it awaits a decision)")
+    public RiskTicketResponse withdrawOverride(@PathVariable UUID id,
+            @Valid @RequestBody WithdrawOverrideRequest request) {
+        return respond(tickets.withdrawOverride(id, request.version()));
     }
 
     @PostMapping("/{id}/pull-requests")
@@ -143,7 +213,7 @@ public class RiskTicketController {
 
     private RiskTicketResponse respond(RiskTicket ticket) {
         String name = tickets.serviceNames(Set.of(ticket.serviceId())).get(ticket.serviceId());
-        return new RiskTicketResponse(ticket, name,
+        return new RiskTicketResponse(ticket, name, ResponseStage.of(ticket),
                 tickets.pullRequests(List.of(ticket.id())).getOrDefault(ticket.id(), List.of()),
                 tickets.serviceNow(ticket));
     }

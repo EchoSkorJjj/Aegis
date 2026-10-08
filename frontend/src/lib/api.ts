@@ -39,6 +39,7 @@ import type {
   SoftwareComponent,
   SoftwareComponentInput,
   ThirdPartyVendor,
+  TicketPriority,
   TotpInit,
   TriageQueueResponse,
   UpdateProfileInput,
@@ -540,9 +541,36 @@ export const ticketApi = {
   propose(input: { changeSignalId: string; serviceId: string }) {
     return bffFetch<RiskTicket>("/api/actions/risk-tickets", { method: "POST", body: JSON.stringify(input) });
   },
-  /** File the ticket in the organization's Jira, then open its pull request, if any, under the ticket's key. */
-  approve(id: string) {
-    return bffFetch<RiskTicket>(`/api/actions/risk-tickets/${id}/approve`, { method: "POST" });
+  /**
+   * File the ticket in the organization's Jira, then open its pull request, if any, under the ticket's key.
+   * `version` is the response as you read it: if it changed since, this is a 409 and nothing happens.
+   */
+  approve(id: string, version?: number) {
+    return bffFetch<RiskTicket>(`/api/actions/risk-tickets/${id}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ version }),
+    });
+  },
+  /** Rewrite the drafted summary, risk, impact and actions before deciding; the first draft stays on record. */
+  edit(id: string, input: { version: number; summary: string; risk: string; impact: string; actions: string[] }) {
+    return bffFetch<RiskTicket>(`/api/actions/risk-tickets/${id}/edit`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  /** Replace Aegis's priority and due date (null: none) before deciding, with a reason; Aegis's stays on record. */
+  override(id: string, input: { version: number; priority: TicketPriority; dueDate: string | null; reason: string }) {
+    return bffFetch<RiskTicket>(`/api/actions/risk-tickets/${id}/override`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  /** Withdraw the override: back to Aegis's own priority and due date. */
+  withdrawOverride(id: string, version: number) {
+    return bffFetch<RiskTicket>(`/api/actions/risk-tickets/${id}/override/withdraw`, {
+      method: "POST",
+      body: JSON.stringify({ version }),
+    });
   },
   /** Draft the upgrade pull request of a response that has none. */
   draftPullRequest(id: string) {
@@ -554,10 +582,10 @@ export const ticketApi = {
       method: "POST",
     });
   },
-  dismiss(id: string, reason: string) {
+  dismiss(id: string, reason: string, version?: number) {
     return bffFetch<RiskTicket>(`/api/actions/risk-tickets/${id}/dismiss`, {
       method: "POST",
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({ reason, version }),
     });
   },
 };

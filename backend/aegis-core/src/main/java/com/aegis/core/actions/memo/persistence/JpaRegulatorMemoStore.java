@@ -87,7 +87,7 @@ class JpaRegulatorMemoStore implements RegulatorMemoStore {
     @Override
     @Transactional
     public RegulatorMemo update(RegulatorMemo memo) {
-        RegulatorMemoEntity entity = memos.findByIdAndOrgId(memo.id(), scope())
+        RegulatorMemoEntity entity = memos.findForUpdateByIdAndOrgId(memo.id(), scope())
                 .orElseThrow(() -> new ApiExceptions.NotFound("Regulator memo not found: " + memo.id()));
         if (entity.getVersion() != memo.version()) {
             throw changedMeanwhile();

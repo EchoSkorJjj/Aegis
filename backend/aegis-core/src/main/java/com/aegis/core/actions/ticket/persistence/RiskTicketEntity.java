@@ -12,6 +12,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.LockModeType;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 
@@ -29,9 +30,12 @@ import org.hibernate.type.SqlTypes;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 
 /**
- * A risk ticket row (V23). The drafted content never changes; only the decision fields do.
+ * A risk ticket row (V23). What Aegis worked out never changes; while the ticket awaits a decision a reviewer may
+ * edit its narrative and override its priority and due date (V33), and the decision fields record the rest, with
+ * who approved it kept apart from whoever decided last (V34).
  * {@code pendingPullRequests} is read from its response's upgrade pull requests (V27): how many still need a
  * person — awaiting a decision, being opened, or failed — so a queue can tell which responses do.
  */
@@ -63,10 +67,10 @@ class RiskTicketEntity {
     private String title;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "priority", nullable = false, updatable = false, length = 16)
+    @Column(name = "priority", nullable = false, length = 16)
     private Priority priority;
 
-    @Column(name = "due_date", updatable = false)
+    @Column(name = "due_date")
     private LocalDate dueDate;
 
     @Column(name = "score", nullable = false, updatable = false)
@@ -80,17 +84,17 @@ class RiskTicketEntity {
     @Column(name = "labels", nullable = false, updatable = false, columnDefinition = "text[]")
     private String[] labels;
 
-    @Column(name = "summary", nullable = false, updatable = false, columnDefinition = "text")
+    @Column(name = "summary", nullable = false, columnDefinition = "text")
     private String summary;
 
-    @Column(name = "risk", nullable = false, updatable = false, columnDefinition = "text")
+    @Column(name = "risk", nullable = false, columnDefinition = "text")
     private String risk;
 
-    @Column(name = "impact", nullable = false, updatable = false, columnDefinition = "text")
+    @Column(name = "impact", nullable = false, columnDefinition = "text")
     private String impact;
 
     @JdbcTypeCode(SqlTypes.ARRAY)
-    @Column(name = "actions", nullable = false, updatable = false, columnDefinition = "text[]")
+    @Column(name = "actions", nullable = false, columnDefinition = "text[]")
     private String[] actions;
 
     @JdbcTypeCode(SqlTypes.ARRAY)
@@ -137,6 +141,47 @@ class RiskTicketEntity {
     @Column(name = "failure_message", length = 1000)
     private String failureMessage;
 
+    @Column(name = "drafted_summary", columnDefinition = "text")
+    private String draftedSummary;
+
+    @Column(name = "drafted_risk", columnDefinition = "text")
+    private String draftedRisk;
+
+    @Column(name = "drafted_impact", columnDefinition = "text")
+    private String draftedImpact;
+
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "drafted_actions", columnDefinition = "text[]")
+    private String[] draftedActions;
+
+    @Column(name = "edited_by")
+    private UUID editedBy;
+
+    @Column(name = "edited_at")
+    private Instant editedAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "assessed_priority", length = 16)
+    private Priority assessedPriority;
+
+    @Column(name = "assessed_due_date")
+    private LocalDate assessedDueDate;
+
+    @Column(name = "override_reason", length = 1000)
+    private String overrideReason;
+
+    @Column(name = "overridden_by")
+    private UUID overriddenBy;
+
+    @Column(name = "overridden_at")
+    private Instant overriddenAt;
+
+    @Column(name = "approved_by")
+    private UUID approvedBy;
+
+    @Column(name = "approved_at")
+    private Instant approvedAt;
+
     @UpdateTimestamp(source = SourceType.DB)
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
@@ -174,7 +219,30 @@ class RiskTicketEntity {
         return entity;
     }
 
-    void applyDecision(RiskTicket ticket) {
+    /** Everything a reviewer may change: the narrative, priority and due date, and the decision. */
+    void apply(RiskTicket ticket) {
+        this.priority = ticket.priority();
+        this.dueDate = ticket.dueDate();
+        this.summary = ticket.summary();
+        this.risk = ticket.risk();
+        this.impact = ticket.impact();
+        this.actions = ticket.actions().toArray(String[]::new);
+        RiskTicket.DraftEdit edit = ticket.edit();
+        this.draftedSummary = edit == null ? null : edit.draftedSummary();
+        this.draftedRisk = edit == null ? null : edit.draftedRisk();
+        this.draftedImpact = edit == null ? null : edit.draftedImpact();
+        this.draftedActions = edit == null ? null : edit.draftedActions().toArray(String[]::new);
+        this.editedBy = edit == null ? null : edit.by();
+        this.editedAt = edit == null ? null : edit.at();
+        RiskTicket.AssessmentOverride override = ticket.override();
+        this.assessedPriority = override == null ? null : override.assessedPriority();
+        this.assessedDueDate = override == null ? null : override.assessedDueDate();
+        this.overrideReason = override == null ? null : override.reason();
+        this.overriddenBy = override == null ? null : override.by();
+        this.overriddenAt = override == null ? null : override.at();
+        RiskTicket.Approval approval = ticket.approval();
+        this.approvedBy = approval == null ? null : approval.by();
+        this.approvedAt = approval == null ? null : approval.at();
         this.status = ticket.status();
         this.decidedBy = ticket.decidedBy();
         this.decidedAt = ticket.decidedAt();
@@ -192,7 +260,13 @@ class RiskTicketEntity {
         return new RiskTicket(id, serviceId, changeSignalId, signalType, changeTitle, title, priority, dueDate, score,
                 tier, List.of(labels), summary, risk, impact, List.of(actions), List.of(evidence), aiDrafted,
                 List.of(citations), status, createdBy, createdAt, decidedBy, decidedAt, dismissReason, issueKey,
-                issueUrl, failureMessage, version);
+                issueUrl, failureMessage,
+                editedAt == null ? null : new RiskTicket.DraftEdit(draftedSummary, draftedRisk, draftedImpact,
+                        List.of(draftedActions), editedBy, editedAt),
+                overriddenAt == null ? null : new RiskTicket.AssessmentOverride(assessedPriority, assessedDueDate,
+                        overrideReason, overriddenBy, overriddenAt),
+                approvedAt == null ? null : new RiskTicket.Approval(approvedBy, approvedAt),
+                version);
     }
 }
 
@@ -200,6 +274,13 @@ interface RiskTicketJpaRepository
         extends JpaRepository<RiskTicketEntity, UUID>, JpaSpecificationExecutor<RiskTicketEntity> {
 
     Optional<RiskTicketEntity> findByIdAndOrgId(UUID id, UUID orgId);
+
+    /**
+     * The row, locked until the transaction ends ({@code select … for update}): a concurrent decision waits, then
+     * sees the version this one wrote, so it is a conflict rather than a second outcome.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    Optional<RiskTicketEntity> findForUpdateByIdAndOrgId(UUID id, UUID orgId);
 
     Optional<RiskTicketEntity> findFirstByOrgIdAndServiceIdAndChangeSignalIdAndStatusIn(
             UUID orgId, UUID serviceId, UUID changeSignalId, List<RiskTicketStatus> statuses);

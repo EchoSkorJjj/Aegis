@@ -607,6 +607,8 @@ export interface UpgradeRecommendation {
     ticketId: string;
     changeSignalId: string;
     status: RiskTicketStatus;
+    /** Where its item stands: never NEW, since a response is drafted. */
+    stage: ResponseStage;
     issueKey: string | null;
     issueUrl: string | null;
   } | null;
@@ -641,6 +643,13 @@ export interface GitHubConnectResult {
 export type RiskTicketStatus = "PROPOSED" | "FILING" | "FILED" | "FAILED" | "DISMISSED";
 export type TicketPriority = "HIGHEST" | "HIGH" | "MEDIUM" | "LOW" | "LOWEST";
 
+/**
+ * Where an item stands (E9 story 3): New (no response yet) → In review (drafted) → Approved, or Overridden when a
+ * reviewer replaced Aegis's priority or due date → Actioned (the ticket is filed) or Closed (dismissed). A failed
+ * filing stays Approved or Overridden: the decision stands and is retried.
+ */
+export type ResponseStage = "NEW" | "IN_REVIEW" | "APPROVED" | "OVERRIDDEN" | "ACTIONED" | "CLOSED";
+
 /** A vendor outage still in progress, as its status page describes it. */
 export interface VendorOutage {
   id: string;
@@ -672,6 +681,11 @@ export interface TriageItem {
   outage: VendorOutage | null;
   /** The response already drafted for it. */
   response: UpgradeRecommendation["response"];
+  /**
+   * Where the item stands: its response's stage; CLOSED when its last response was dismissed and none replaced it
+   * (drafting another reopens it); NEW when nobody has drafted one.
+   */
+  stage: ResponseStage;
   /** Whether you may draft a response: an analyst, or one of the service's owners. */
   canDraft: boolean;
 }
@@ -694,7 +708,7 @@ export interface OwnedService {
   service: MatchedServiceRef;
   /** Its material items in the triage queue. */
   toRespond: number;
-  /** Those with no response drafted yet. */
+  /** Those nobody has looked at yet (NEW): no response drafted, none dismissed. */
   noResponseYet: number;
   /** The worst item's score and tier; null when there is nothing to respond to. */
   topScore: number | null;
@@ -713,6 +727,8 @@ export interface OwnedService {
  * its service's current name, and its upgrade pull requests. The title, priority, due date, labels and evidence
  * are Aegis's own; the summary, risk, impact and actions are the AI's draft (`aiDrafted`) or Aegis's plain
  * fallback. Approving files it in the organization's Jira, then opens its pull request under the ticket's key.
+ * Before deciding, a reviewer may edit the narrative (`edit`) and override the priority and due date with a reason
+ * (`override`); the ticket's own fields are always what will be filed.
  */
 export interface RiskTicket {
   id: string;
@@ -745,7 +761,33 @@ export interface RiskTicket {
   issueKey: string | null;
   issueUrl: string | null;
   failureMessage: string | null;
+  /** Null until a reviewer edits the narrative: the draft as it first was, and who edited it last. */
+  edit: {
+    draftedSummary: string;
+    draftedRisk: string;
+    draftedImpact: string;
+    draftedActions: string[];
+    by: string;
+    at: string;
+  } | null;
+  /** Null until a reviewer overrides it: Aegis's own priority and due date, and why they were replaced. */
+  override: {
+    assessedPriority: TicketPriority;
+    /** yyyy-mm-dd; null when the tier set none. */
+    assessedDueDate: string | null;
+    reason: string;
+    by: string;
+    at: string;
+  } | null;
+  /**
+   * Who approved it, and when; null until someone does. `decidedBy` is whoever decided last, so a response whose
+   * filing failed and was then dismissed keeps its approver here. Responses approved before this was recorded have
+   * none: their approver is `decidedBy` while they are filing, filed or failed.
+   */
+  approval: { by: string; at: string } | null;
+  /** The optimistic lock: send it with a decision, and a response changed since is a conflict. */
   version: number;
+  stage: ResponseStage;
   /** Newest first; at most one isn't dismissed (the current one). Empty for a vendor outage, or nothing to automate. */
   pullRequests: UpgradeProposal[];
   /** One ticket only: the same ticket as ServiceNow incident fields, to paste or post. */
