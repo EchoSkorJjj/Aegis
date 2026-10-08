@@ -14,6 +14,12 @@ public interface ResponseDirectory {
     /** Each service's current response (not dismissed) per change. */
     Map<ServiceChange, ResponseRef> current(Collection<UUID> serviceIds);
 
+    /**
+     * Each service's most recently dismissed response per change. Where a change has no current response too,
+     * its item is closed: someone decided no response was needed, until another is drafted.
+     */
+    Map<ServiceChange, ResponseRef> dismissed(Collection<UUID> serviceIds);
+
     record ServiceChange(UUID serviceId, UUID changeSignalId) {
     }
 

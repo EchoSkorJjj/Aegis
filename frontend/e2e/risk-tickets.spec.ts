@@ -75,7 +75,7 @@ function ticket(overrides: Partial<RiskTicket> = {}): RiskTicket {
     evidence: ["log4j-core 2.14.1 is in the affected range.", "Impact score 91.0 (CRITICAL)"], aiDrafted: true,
     citations: ["C1 NVD description"], status: "PROPOSED", createdBy: "analyst-1", createdAt: "2026-09-26T02:00:00Z",
     decidedBy: null, decidedAt: null, dismissReason: null, issueKey: null, issueUrl: null, failureMessage: null,
-    edit: null, override: null, version: 0, stage: "IN_REVIEW", pullRequests: [pullRequest()],
+    edit: null, override: null, approval: null, version: 0, stage: "IN_REVIEW", pullRequests: [pullRequest()],
     serviceNow: {
       short_description: "CVE-2021-44228 affects Payments API", description: "Summary",
       impact: "1", urgency: "1", cmdb_ci: "Payments API", due_date: "2026-10-03 00:00:00",
@@ -192,7 +192,7 @@ async function fakeBff(
         existing.id === approvePr[2] ? open(existing, store[index].issueKey ?? "SEC-7") : existing) };
       return route.fulfill({ json: store[index] });
     }
-    const match = path.match(/^\/api\/actions\/risk-tickets\/([^/]+)(?:\/(approve|dismiss|edit|override))?$/);
+    const match = path.match(/^\/api\/actions\/risk-tickets\/([^/]+)(?:\/(approve|dismiss|edit|override|override\/withdraw))?$/);
     if (match) {
       const index = find(match[1]);
       if (index < 0) return route.fulfill({ status: 404, json: { message: "Risk ticket not found" } });
@@ -225,8 +225,15 @@ async function fakeBff(
             assessedDueDate: current.override ? current.override.assessedDueDate : current.dueDate,
             reason: body.reason, by: "me", at: "2026-09-26T08:30:00Z" } };
       }
+      if (match[2] === "override/withdraw") {
+        const current = store[index];
+        store[index] = { ...current, priority: current.override?.assessedPriority ?? current.priority,
+          dueDate: current.override ? current.override.assessedDueDate : current.dueDate, override: null,
+          version: current.version + 1 };
+      }
       if (match[2] === "approve") {
         const filed = { ...store[index], ...decided, status: "FILED" as const, stage: "ACTIONED" as const,
+          approval: { by: "me", at: decided.decidedAt },
           issueKey: "SEC-7", issueUrl: "https://acme.atlassian.net/browse/SEC-7", version: store[index].version + 2 };
         filed.pullRequests = filed.pullRequests.map((existing) =>
           existing.status !== "PROPOSED" && existing.status !== "FAILED" ? existing
@@ -570,4 +577,81 @@ test("only someone who decides may edit or override, and only before the decisio
   await expect(content.getByRole("heading", { name: "Ticket" })).toBeVisible();
   await expect(content.getByRole("button", { name: "Edit draft" })).toHaveCount(0);
   await expect(content.getByRole("button", { name: "Override priority" })).toHaveCount(0);
+});
+
+test("while the draft has unsaved edits, approving and dismissing wait for them", async ({ page }) => {
+  await fakeBff(page, "ANALYST", { tickets: [outage()] });
+  await page.goto("/responses/tickets/ticket-2");
+  const content = page.getByRole("region", { name: "Ticket" });
+  const decision = page.getByRole("region", { name: "Decision" });
+
+  await content.getByRole("button", { name: "Edit draft" }).click();
+  await expect(decision.getByText("Save or cancel your edit to the draft before deciding.")).toBeVisible();
+  await expect(decision.getByRole("button", { name: "File ticket", exact: true })).toBeDisabled();
+  await expect(decision.getByRole("button", { name: "Dismiss", exact: true })).toBeDisabled();
+
+  await content.getByRole("button", { name: "Cancel" }).click();
+  await expect(decision.getByRole("button", { name: "File ticket", exact: true })).toBeEnabled();
+});
+
+test("an edit saved after someone else changed the response is refused, not written over theirs", async ({ page }) => {
+  const { writes } = await fakeBff(page, "ANALYST", {
+    tickets: [outage()],
+    changedMeanwhile: { summary: "Rewritten by a colleague." },
+  });
+  await page.goto("/responses/tickets/ticket-2");
+  const content = page.getByRole("region", { name: "Ticket" });
+
+  await content.getByRole("button", { name: "Edit draft" }).click();
+  const form = content.getByRole("form", { name: "Edit the draft" });
+  await form.getByLabel("Summary").fill("My summary.");
+  await form.getByRole("button", { name: "Save draft" }).click();
+
+  await expect(page.getByText("This response changed after you opened it", { exact: false })).toBeVisible();
+  // The editor keeps what was typed, but can't save it over the colleague's change.
+  await expect(form.getByRole("alert")).toContainText("Someone changed this response while you were editing it");
+  await expect(form.getByLabel("Summary")).toHaveValue("My summary.");
+  await expect(form.getByRole("button", { name: "Save draft" })).toBeDisabled();
+  await form.getByRole("button", { name: "Cancel" }).click();
+  await expect(content.getByText("Rewritten by a colleague.")).toBeVisible();
+  expect(writes).toHaveLength(1);
+});
+
+test("an override's reason can change on its own, and withdrawing it restores Aegis's assessment", async ({ page }) => {
+  const { writes } = await fakeBff(page, "ANALYST", {
+    tickets: [ticket({
+      priority: "LOW", dueDate: null, version: 1,
+      override: { assessedPriority: "HIGHEST", assessedDueDate: "2026-10-03", reason: "Mitigated by the WAF rule.",
+        by: "analyst-1", at: "2026-09-26T08:30:00Z" },
+    })],
+  });
+  await page.goto("/responses/tickets/ticket-1");
+  const content = page.getByRole("region", { name: "Ticket" });
+
+  await content.getByRole("button", { name: "Change override" }).click();
+  const reason = page.getByLabel("Why is Aegis's assessment wrong here?");
+  const save = page.getByRole("button", { name: "Override", exact: true });
+  await expect(reason).toHaveValue("Mitigated by the WAF rule.");
+  await expect(save).toBeDisabled();
+  // Aegis's own priority and due date aren't an override: that is withdrawing it.
+  await page.getByLabel("Priority", { exact: true }).selectOption("HIGHEST");
+  await page.getByLabel("Due date (empty: none)").fill("2026-10-03");
+  await expect(page.getByText("withdraw the override instead", { exact: false })).toBeVisible();
+  await expect(save).toBeDisabled();
+  await page.getByLabel("Priority", { exact: true }).selectOption("LOW");
+  await page.getByLabel("Due date (empty: none)").fill("");
+  await reason.fill("The WAF rule blocks the exploit path.");
+  await save.click();
+  await expect(content.getByText("The WAF rule blocks the exploit path.")).toBeVisible();
+
+  await content.getByRole("button", { name: "Withdraw override" }).click();
+  await expect(content.getByText("Priority and due date overridden")).toHaveCount(0);
+  await expect(content.getByText("Highest", { exact: true })).toBeVisible();
+  expect(writes).toEqual([
+    {
+      path: "/api/actions/risk-tickets/ticket-1/override",
+      body: { version: 1, priority: "LOW", dueDate: null, reason: "The WAF rule blocks the exploit path." },
+    },
+    { path: "/api/actions/risk-tickets/ticket-1/override/withdraw", body: { version: 2 } },
+  ]);
 });

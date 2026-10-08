@@ -296,6 +296,10 @@ function TriageRow({ item }: { item: TriageItem }) {
       </TableCell>
       <TableCell className="align-top">
         <StageBadge stage={item.stage} />
+        {/* The one thing the stage doesn't say: an approved response whose filing failed waits to be tried again. */}
+        {item.response?.status === "FAILED" && (
+          <span className="mt-1 block text-xs text-red-600 dark:text-red-400">Filing failed</span>
+        )}
       </TableCell>
       <TableCell className="text-right align-top">
         <ResponseCell
@@ -304,6 +308,7 @@ function TriageRow({ item }: { item: TriageItem }) {
           changeSignalId={item.changeSignalId}
           serviceId={item.service.id}
           canDraft={item.canDraft}
+          showStatus={false}
         />
       </TableCell>
     </TableRow>

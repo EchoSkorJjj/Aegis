@@ -364,17 +364,20 @@ export function ResponseCell({
   changeSignalId,
   serviceId,
   canDraft,
+  showStatus = true,
 }: {
   response: UpgradeRecommendation["response"];
   proposal: UpgradeRecommendation["proposal"];
   changeSignalId: string | null;
   serviceId: string;
   canDraft: boolean;
+  /** The response's status badge; off where the row shows its stage instead (the triage queue). */
+  showStatus?: boolean;
 }) {
   if (response) {
     return (
       <span className="inline-flex flex-col items-end gap-1">
-        <TicketStatusBadge status={response.status} />
+        {showStatus && <TicketStatusBadge status={response.status} />}
         <Link
           href={`/responses/tickets/${response.ticketId}`}
           className="text-xs font-medium text-primary underline-offset-4 hover:underline"

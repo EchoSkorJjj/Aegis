@@ -41,7 +41,8 @@ import org.springframework.web.bind.annotation.RestController;
  * Responses: the risk ticket for a change's impact on a service and, for a vulnerability, the upgrade pull
  * request that fixes it. Draft one, then approve it (Aegis files the ticket in the organization's issue
  * tracker and opens the pull request as a draft with the ticket's key) or dismiss it with a reason. Before
- * deciding, a reviewer may edit its narrative or override its priority and due date, with a reason. Every
+ * deciding, a reviewer may edit its narrative or override its priority and due date, with a reason, and withdraw
+ * that override. Every
  * response carries its pull requests and its stage (New → In review → Approved or Overridden → Actioned or
  * Closed); one also comes with its ServiceNow shape, for organizations that track risks there.
  *
@@ -64,7 +65,8 @@ public class RiskTicketController {
     }
 
     /** {@code version}: the response as the reviewer read it; optional, and checked when given. */
-    public record DismissTicketRequest(@NotBlank @Size(max = 1000) String reason, Long version) {
+    public record DismissTicketRequest(@NotBlank @Size(max = RiskTicketService.MAX_REASON) String reason,
+            Long version) {
     }
 
     /** {@code version}: the response as the approver read it; optional, and checked when given. */
@@ -85,7 +87,11 @@ public class RiskTicketController {
             @NotNull Long version,
             @NotNull Priority priority,
             LocalDate dueDate,
-            @NotBlank @Size(max = 1000) String reason) {
+            @NotBlank @Size(max = RiskTicketService.MAX_REASON) String reason) {
+    }
+
+    /** {@code version}: the response as the reviewer read it. */
+    public record WithdrawOverrideRequest(@NotNull Long version) {
     }
 
     static final int MAX_SECTION = 20_000;
@@ -176,6 +182,15 @@ public class RiskTicketController {
             @PathVariable UUID id, @Valid @RequestBody OverrideTicketRequest request, Authentication authentication) {
         return respond(tickets.override(id, callerId(authentication), request.version(), request.priority(),
                 request.dueDate(), request.reason()));
+    }
+
+    @PostMapping("/{id}/override/withdraw")
+    @PreAuthorize(TicketRoles.DECIDE)
+    @Operation(summary = "Withdraw the override: the ticket goes back to Aegis's own priority and due date (an analyst "
+            + "or the service's owners; while it awaits a decision)")
+    public RiskTicketResponse withdrawOverride(@PathVariable UUID id,
+            @Valid @RequestBody WithdrawOverrideRequest request) {
+        return respond(tickets.withdrawOverride(id, request.version()));
     }
 
     @PostMapping("/{id}/pull-requests")

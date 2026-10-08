@@ -98,7 +98,8 @@ public class TriageQueue {
      * One thing to respond to in one service: a vulnerable dependency, with the upgrade that fixes it
      * ({@code upgrade}), or a vendor outage ({@code outage}). {@code changeSignalId} is the change a response
      * answers, {@code response} the one already drafted, {@code stage} where the item stands ({@link ResponseStage}:
-     * New until a response is drafted), and {@code canDraft} whether the caller may draft one.
+     * New until a response is drafted, Closed when the last one was dismissed and none replaced it), and
+     * {@code canDraft} whether the caller may draft one.
      */
     public record Item(Kind kind, UUID changeSignalId, ServiceRef service, List<OwnerRef> owners, double score,
                        ImpactTier tier, MatchConfidence confidence, Recommendation upgrade, Outage outage,
@@ -111,7 +112,8 @@ public class TriageQueue {
 
     /**
      * A service the caller is an assigned owner of, as its owner looks after it: how many items it has to respond
-     * to, how many of those have no response yet, and the worst one's score and tier (null when there is none);
+     * to, how many of those nobody has looked at yet ({@link ResponseStage#NEW}: no response drafted, none
+     * dismissed), and the worst one's score and tier (null when there is none);
      * the responses for it still waiting in Review & approve; and where Aegis's view of its dependencies comes
      * from. Without a repository, a response is the ticket alone; without an SBOM, Aegis can't see what it uses.
      */
@@ -186,7 +188,7 @@ public class TriageQueue {
             long awaiting = tickets.findPage(service.getId(), null, null, true, PageRequest.of(0, 1))
                     .getTotalElements();
             return new OwnedService(serviceRef(service), its.size(),
-                    (int) its.stream().filter(item -> item.response() == null).count(),
+                    (int) its.stream().filter(item -> item.stage() == ResponseStage.NEW).count(),
                     worst == null ? null : worst.score(), worst == null ? null : worst.tier(), awaiting,
                     service.getRepositoryUrl(), service.getSbomImportedAt(), service.getSbomImportSource());
         }).toList();
@@ -208,27 +210,30 @@ public class TriageQueue {
         if (selected.isEmpty()) {
             return List.of();
         }
+        Map<ServiceChange, ResponseRef> dismissed = responses.dismissed(selected.keySet());
         List<Item> material = new ArrayList<>();
         for (Recommendation upgrade : recommendations.recommendFor(selected)) {
             if (upgrade.material()) {
-                material.add(vulnerability(upgrade, selected.get(upgrade.serviceId()), assignments, caller));
+                material.add(vulnerability(upgrade, selected.get(upgrade.serviceId()), assignments, dismissed,
+                        caller));
             }
         }
-        material.addAll(outages(selected, assignments, caller));
+        material.addAll(outages(selected, assignments, dismissed, caller));
         return material;
     }
 
     private Item vulnerability(Recommendation upgrade, BusinessService service, Map<UUID, List<Owner>> assignments,
-            Caller caller) {
+            Map<ServiceChange, ResponseRef> dismissed, Caller caller) {
         List<Owner> owners = assignments.getOrDefault(service.getId(), List.of());
+        ResponseRef closing = dismissed.get(new ServiceChange(service.getId(), upgrade.changeSignalId()));
         return new Item(Kind.VULNERABILITY, upgrade.changeSignalId(), serviceRef(service), ownerRefs(owners),
                 upgrade.score(), upgrade.tier(), upgrade.confidence(), upgrade, null, upgrade.response(),
-                stage(upgrade.response()), canDraft(caller, owners));
+                stage(upgrade.response(), closing), canDraft(caller, owners));
     }
 
     /** Each outage in progress, in every selected service it reaches materially. */
     private List<Item> outages(Map<UUID, BusinessService> selected, Map<UUID, List<Owner>> assignments,
-            Caller caller) {
+            Map<ServiceChange, ResponseRef> dismissed, Caller caller) {
         List<VendorIncident> active = incidents.findActive(Instant.now().minus(OUTAGE_QUIET_AFTER));
         if (active.isEmpty()) {
             return List.of();
@@ -251,17 +256,25 @@ public class TriageQueue {
                     continue;
                 }
                 List<Owner> owners = assignments.getOrDefault(scored.service().id(), List.of());
-                ResponseRef response = answered.get(new ServiceChange(scored.service().id(), incident.id()));
+                ServiceChange key = new ServiceChange(scored.service().id(), incident.id());
+                ResponseRef response = answered.get(key);
                 items.add(new Item(Kind.VENDOR_OUTAGE, incident.id(), scored.service(), ownerRefs(owners),
-                        scored.score(), scored.tier(), scored.confidence(), null, outage, response, stage(response),
-                        canDraft(caller, owners)));
+                        scored.score(), scored.tier(), scored.confidence(), null, outage, response,
+                        stage(response, dismissed.get(key)), canDraft(caller, owners)));
             }
         }
         return items;
     }
 
-    private static ResponseStage stage(ResponseRef response) {
-        return response == null ? ResponseStage.NEW : ResponseStage.valueOf(response.stage());
+    /**
+     * Where an item stands: its current response's stage; {@link ResponseStage#CLOSED} when it has none because the
+     * last one was dismissed (drafting another reopens it); else {@link ResponseStage#NEW}.
+     */
+    private static ResponseStage stage(ResponseRef response, ResponseRef dismissed) {
+        if (response != null) {
+            return ResponseStage.valueOf(response.stage());
+        }
+        return dismissed == null ? ResponseStage.NEW : ResponseStage.CLOSED;
     }
 
     /** As {@code TicketRoles.PROPOSE}: an analyst for any service, a service owner for the ones assigned to them. */

@@ -76,7 +76,8 @@ class RiskTicketTextTest {
 
     @Test
     void theIssueQuotesTheDraftAsPlainBlocksAndSaysWhoDraftedIt() {
-        IssueDraft issue = RiskTicketText.issue(ticket(true, List.of("A quoted passage.")), "Payments API", null);
+        IssueDraft issue = RiskTicketText.issue(ticket(true, List.of("A quoted passage."))
+                .filing(UUID.randomUUID(), Instant.now()), "Payments API", null);
 
         assertThat(issue.title()).isEqualTo("CVE-2021-44228 affects Payments API");
         assertThat(issue.priority()).isEqualTo(Priority.HIGHEST);
@@ -92,6 +93,30 @@ class RiskTicketTextTest {
         IssueDraft fallback = RiskTicketText.issue(ticket(false, List.of()), "Payments API", null);
         assertThat(fallback.description()).extracting(Block::text).doesNotContain("Sources the draft quotes");
         assertThat(fallback.description().getLast().text()).doesNotContain("AI draft");
+    }
+
+    @Test
+    void theIssueClaimsAnApprovalOnlyOnceThereIsOneAndSaysWhoseItWas() {
+        RiskTicket drafted = ticket(true, List.of());
+        assertThat(RiskTicketText.issue(drafted, "Payments API", null).description().getLast().text())
+                .as("the ServiceNow fields can be copied before anyone decides")
+                .endsWith("a person reviewed).")
+                .doesNotContain("approved there");
+        assertThat(RiskTicketText.issue(drafted.filing(drafted.createdBy(), Instant.now()), "Payments API", null)
+                        .description().getLast().text())
+                .as("a response without a pull request may be filed by whoever asked for it")
+                .endsWith("and approved there by the person who requested it.")
+                .doesNotContain("second person");
+    }
+
+    @Test
+    void anEditedIssueKeepsTheAiDraftsSourcesApartFromTheReviewersText() {
+        RiskTicket edited = ticket(true, List.of("A quoted passage.")).edited("Reviewed summary.", "Reviewed risk.",
+                "Reviewed impact.", List.of("Act."), UUID.randomUUID(), Instant.now());
+
+        assertThat(RiskTicketText.issue(edited, "Payments API", null).description()).extracting(Block::text)
+                .contains("Reviewed summary.", "Sources the AI draft quoted, before a person edited it")
+                .doesNotContain("Sources the draft quotes");
     }
 
     @Test
@@ -143,6 +168,6 @@ class RiskTicketTextTest {
                 "Payments API runs a vulnerable log4j-core.", "Remote code execution.", "Takeover of the service.",
                 List.of("Upgrade log4j-core to 2.17.1."), List.of("log4j-core 2.14.1 is in the affected range."),
                 aiDrafted, citations, RiskTicketStatus.PROPOSED, UUID.randomUUID(), Instant.now(), null, null, null,
-                null, null, null, null, null, 0);
+                null, null, null, null, null, null, 0);
     }
 }

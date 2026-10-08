@@ -16,9 +16,10 @@ test("the triage queue ranks vulnerable dependencies and outages with their fix 
   await expect(outage).toContainText("Morgan Owner");
   await expect(outage).toContainText("90.0");
   await expect(outage).toContainText("Critical");
-  await expect(outage.getByText("Awaiting decision", { exact: true })).toBeVisible();
-  // Where each item stands: drafted and in review, or new until someone drafts a response.
+  // Where each item stands: drafted and in review, or new until someone drafts a response. The stage says it once;
+  // the response's own status badge isn't repeated beside it.
   await expect(outage.getByText("In review", { exact: true })).toBeVisible();
+  await expect(outage.getByText("Awaiting decision", { exact: true })).toHaveCount(0);
   await expect(outage.getByRole("link", { name: "View response →" })).toHaveAttribute("href", `/responses/tickets/${TICKET.id}`);
   await expect(outage.getByRole("button")).toHaveCount(0);
 
@@ -31,6 +32,11 @@ test("the triage queue ranks vulnerable dependencies and outages with their fix 
   await expect(axios.getByRole("link", { name: OTHER.name })).toHaveAttribute("href", `/inventory/services/${OTHER.id}`);
   await expect(axios).toContainText("No owners assigned");
   await expect(axios.getByText("New", { exact: true })).toBeVisible();
+
+  // A response someone dismissed closes its item; drafting another reopens it.
+  const closed = rows.filter({ hasText: "lib-04" });
+  await expect(closed.getByText("Closed", { exact: true })).toBeVisible();
+  await expect(closed.getByRole("button", { name: "Draft response" })).toBeVisible();
 
   // Nothing to automate until the repository is linked: the response is the ticket alone.
   const minimist = rows.filter({ hasText: "minimist" });

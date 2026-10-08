@@ -79,6 +79,16 @@ class JpaRiskTicketStore implements RiskTicketStore {
 
     @Override
     @Transactional(readOnly = true)
+    public List<RiskTicket> findDismissed(Collection<UUID> serviceIds) {
+        if (serviceIds.isEmpty()) {
+            return List.of();
+        }
+        return tickets.findByOrgIdAndServiceIdInAndStatusIn(scope(), serviceIds, List.of(RiskTicketStatus.DISMISSED),
+                Sort.by(Sort.Direction.DESC, "decidedAt")).stream().map(RiskTicketEntity::toDomain).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Page<RiskTicket> findPage(UUID serviceId, UUID changeSignalId, Collection<RiskTicketStatus> statuses,
             Boolean pending, Pageable pageable) {
         UUID org = scope();

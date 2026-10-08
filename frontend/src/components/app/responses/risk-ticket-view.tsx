@@ -37,10 +37,21 @@ import { useAuth } from "@/providers/auth-provider";
 const STALE_FILING_MS = 10 * 60 * 1000;
 
 type LoadState = "loading" | "ok" | "forbidden" | "notfound" | "error";
-type Busy = "approve" | "dismiss" | "edit" | "override" | "pr-approve" | "pr-leave-out" | "pr-draft" | null;
+type Busy =
+  | "approve"
+  | "dismiss"
+  | "edit"
+  | "override"
+  | "withdraw"
+  | "pr-approve"
+  | "pr-leave-out"
+  | "pr-draft"
+  | null;
 
 const PRIORITIES: TicketPriority[] = ["HIGHEST", "HIGH", "MEDIUM", "LOW", "LOWEST"];
 const MAX_REASON = 1000;
+const CHANGED_CLASS =
+  "rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300";
 const FIELD_CLASS =
   "w-full rounded-md border border-input bg-transparent px-2.5 py-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30";
 
@@ -165,25 +176,41 @@ export function RiskTicketView({ ticketId }: { ticketId: string }) {
     );
   }
 
-  async function saveEdit(input: EditInput): Promise<boolean> {
-    const version = loaded?.ticket.version ?? 0;
-    const saved = await decide(
+  /**
+   * `version` is the response as the editor opened it, never the page's latest: if someone changed it since, this is
+   * a conflict and their change is shown, not overwritten.
+   */
+  function saveEdit(input: EditInput, version: number): Promise<boolean> {
+    return decide(
       "edit",
       () => ticketApi.edit(ticketId, { version, ...input }),
-      () => toast.success("Draft updated — the first draft stays on record"),
+      () => {
+        setEditing(false);
+        toast.success("Draft updated — the first draft stays on record");
+      },
       "Could not save the edit.",
     );
-    if (saved) setEditing(false);
-    return saved;
   }
 
-  function override(input: OverrideInput) {
-    const version = loaded?.ticket.version ?? 0;
+  /** As saveEdit: `version` is the response as the override form opened it, which `close` closes once saved. */
+  function override(input: OverrideInput, version: number, close: () => void) {
     return decide(
       "override",
       () => ticketApi.override(ticketId, { version, ...input }),
-      () => toast.success("Priority and due date overridden — Aegis's assessment stays on record"),
+      () => {
+        close();
+        toast.success("Priority and due date overridden — Aegis's assessment stays on record");
+      },
       "Could not override the priority and due date.",
+    );
+  }
+
+  function withdrawOverride() {
+    void decide(
+      "withdraw",
+      () => ticketApi.withdrawOverride(ticketId, loaded?.ticket.version ?? 0),
+      () => toast.success("Override withdrawn — the ticket has Aegis's priority and due date again"),
+      "Could not withdraw the override.",
     );
   }
 
@@ -305,6 +332,7 @@ export function RiskTicketView({ ticketId }: { ticketId: string }) {
         auditor={roles.includes("COMPLIANCE_ADMIN")}
         stale={stale}
         busy={busy}
+        editing={editing}
         personName={personName}
         onApprove={approve}
         onDismiss={dismiss}
@@ -354,12 +382,22 @@ export function RiskTicketView({ ticketId }: { ticketId: string }) {
         </div>
         {ticket.override && (
           <div className="space-y-1 border-b bg-sky-500/5 px-4 py-3 text-sm">
-            <p>
-              <span className="font-medium">Priority and due date overridden</span> by {personName(ticket.override.by)}{" "}
-              on {formatDateTime(ticket.override.at)}. Aegis assessed {sentenceCase(ticket.override.assessedPriority)}{" "}
-              priority,{" "}
-              {ticket.override.assessedDueDate ? `due ${formatDate(ticket.override.assessedDueDate)}` : "no due date"}.
-            </p>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <p className="min-w-0">
+                <span className="font-medium">Priority and due date overridden</span> by{" "}
+                {personName(ticket.override.by)} on {formatDateTime(ticket.override.at)}. Aegis assessed{" "}
+                {sentenceCase(ticket.override.assessedPriority)} priority,{" "}
+                {ticket.override.assessedDueDate
+                  ? `due ${formatDate(ticket.override.assessedDueDate)}`
+                  : "no due date"}
+                .
+              </p>
+              {ticket.status === "PROPOSED" && canDecide === true && (
+                <Button variant="ghost" size="sm" disabled={busy !== null || editing} onClick={withdrawOverride}>
+                  {busy === "withdraw" ? "Withdrawing…" : "Withdraw override"}
+                </Button>
+              )}
+            </div>
             <blockquote className="border-l-2 pl-3 whitespace-pre-wrap text-muted-foreground">
               {ticket.override.reason}
             </blockquote>
@@ -421,7 +459,10 @@ export function RiskTicketView({ ticketId }: { ticketId: string }) {
             </ul>
           </TicketSection>
           {ticket.citations.length > 0 && (
-            <TicketSection title="Sources the AI cited">
+            // Once a person rewrote the draft, these are the sources of the AI's version, not of the text above.
+            <TicketSection
+              title={ticket.edit ? "Sources the AI draft cited, before it was edited" : "Sources the AI cited"}
+            >
               <ul className="space-y-1 font-mono text-xs text-muted-foreground">
                 {ticket.citations.map((citation, index) => (
                   <li key={index} className="break-words">
@@ -453,6 +494,7 @@ function Decision({
   auditor,
   stale,
   busy,
+  editing,
   personName,
   onApprove,
   onDismiss,
@@ -468,6 +510,8 @@ function Decision({
   auditor: boolean;
   stale: boolean;
   busy: Busy;
+  /** The draft has unsaved edits: deciding now would file what it says without them. */
+  editing: boolean;
   personName: (id: string | null) => string;
   onApprove: () => void;
   onDismiss: (reason: string) => Promise<boolean>;
@@ -537,6 +581,9 @@ function Decision({
             Leave its pull request out and you can file the ticket yourself.
           </p>
         )}
+        {editing && (
+          <p className="text-muted-foreground">Save or cancel your edit to the draft before deciding.</p>
+        )}
         {((canApprove && !tracker) || canDismiss) && (
           <div className="flex flex-wrap items-center gap-2 pt-1">
             {canApprove && !tracker && jira !== undefined && (
@@ -544,7 +591,7 @@ function Decision({
                 label={ticket.status !== "PROPOSED" ? "Try again" : opens ? "Approve" : "File ticket"}
                 busyLabel="Filing in Jira…"
                 busy={busy === "approve"}
-                disabled={busy !== null}
+                disabled={busy !== null || editing}
                 question={opens ? "File the ticket and open the pull request?" : "File this ticket in Jira?"}
                 confirmLabel={opens ? "Approve response" : "File ticket"}
                 onConfirm={onApprove}
@@ -560,7 +607,7 @@ function Decision({
             {canDismiss && (
               <DismissButton
                 busy={busy === "dismiss"}
-                disabled={busy !== null}
+                disabled={busy !== null || editing}
                 question="Why is no response needed?"
                 placeholder="e.g. Already tracked in PAY-231; the vulnerable feature is switched off."
                 what="response"
@@ -864,7 +911,11 @@ function Narrative({
   );
 }
 
-/** Rewrite the drafted narrative exactly as it will be filed; the draft as first written stays on record. */
+/**
+ * Rewrite the drafted narrative exactly as it will be filed; the draft as first written stays on record. It saves
+ * against the version it opened on, so if someone changes the response meanwhile, saving is refused and the reviewer
+ * is told, rather than replacing what the other person wrote unseen.
+ */
 function EditDraftForm({
   ticket,
   busy,
@@ -873,10 +924,11 @@ function EditDraftForm({
 }: {
   ticket: RiskTicket;
   busy: Busy;
-  onSave: (input: EditInput) => Promise<boolean>;
+  onSave: (input: EditInput, version: number) => Promise<boolean>;
   onCancel: () => void;
 }) {
   const id = useId();
+  const [openedVersion] = useState(ticket.version);
   const [summary, setSummary] = useState(ticket.summary);
   const [risk, setRisk] = useState(ticket.risk);
   const [impact, setImpact] = useState(ticket.impact);
@@ -886,11 +938,15 @@ function EditDraftForm({
     .map((line) => line.trim())
     .filter(Boolean);
   const complete = summary.trim() !== "" && risk.trim() !== "" && impact.trim() !== "" && lines.length > 0;
+  const changed = ticket.version !== openedVersion;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!complete) return;
-    await onSave({ summary: summary.trim(), risk: risk.trim(), impact: impact.trim(), actions: lines });
+    if (!complete || changed) return;
+    await onSave(
+      { summary: summary.trim(), risk: risk.trim(), impact: impact.trim(), actions: lines },
+      openedVersion,
+    );
   }
 
   const fields: { key: string; label: string; value: string; set: (value: string) => void; rows: number }[] = [
@@ -902,6 +958,11 @@ function EditDraftForm({
 
   return (
     <form onSubmit={submit} aria-label="Edit the draft" className="space-y-3">
+      {changed && (
+        <p role="alert" className={CHANGED_CLASS}>
+          Someone changed this response while you were editing it. Cancel to see it as it is now, then edit it again.
+        </p>
+      )}
       {fields.map((field) => (
         <div key={field.key} className="space-y-1">
           <label htmlFor={`${id}-${field.key}`} className="block text-xs font-medium text-muted-foreground">
@@ -925,7 +986,7 @@ function EditDraftForm({
         <Button type="button" variant="ghost" disabled={busy === "edit"} onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" disabled={busy !== null || !complete}>
+        <Button type="submit" disabled={busy !== null || !complete || changed}>
           {busy === "edit" ? "Saving…" : "Save draft"}
         </Button>
       </div>
@@ -933,7 +994,11 @@ function EditDraftForm({
   );
 }
 
-/** Replace Aegis's priority and due date, with a reason; Aegis's own assessment stays on record. */
+/**
+ * Replace Aegis's priority and due date, with a reason; Aegis's own assessment stays on record. With an override in
+ * place it changes that override (its reason alone, too); going back to Aegis's own values is withdrawing it. Like
+ * the editor, it overrides the version it opened on.
+ */
 function OverrideButton({
   ticket,
   busy,
@@ -941,40 +1006,61 @@ function OverrideButton({
 }: {
   ticket: RiskTicket;
   busy: Busy;
-  onOverride: (input: OverrideInput) => Promise<boolean>;
+  onOverride: (input: OverrideInput, version: number, close: () => void) => Promise<boolean>;
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
+  const [openedVersion, setOpenedVersion] = useState(ticket.version);
+  // The reviewer's own today, so the date picker never offers a day already over where they are.
+  const [today, setToday] = useState("");
   const [priority, setPriority] = useState<TicketPriority>(ticket.priority);
   const [dueDate, setDueDate] = useState(ticket.dueDate ?? "");
   const [reason, setReason] = useState("");
-  const unchanged = priority === ticket.priority && (dueDate || null) === ticket.dueDate;
+  const current = ticket.override;
+  const aegisOwn =
+    priority === (current?.assessedPriority ?? ticket.priority) &&
+    (dueDate || null) === (current ? current.assessedDueDate : ticket.dueDate);
+  const unchanged =
+    priority === ticket.priority &&
+    (dueDate || null) === ticket.dueDate &&
+    (!current || reason.trim() === current.reason);
+  const changed = open && ticket.version !== openedVersion;
 
   function toggle(next: boolean) {
     if (next) {
+      setOpenedVersion(ticket.version);
+      setToday(localDate(new Date()));
       setPriority(ticket.priority);
       setDueDate(ticket.dueDate ?? "");
-      setReason("");
+      setReason(ticket.override?.reason ?? "");
     }
     setOpen(next);
   }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!reason.trim() || unchanged) return;
-    if (await onOverride({ priority, dueDate: dueDate || null, reason: reason.trim() })) {
-      setOpen(false);
-    }
+    if (!reason.trim() || unchanged || aegisOwn || changed) return;
+    await onOverride({ priority, dueDate: dueDate || null, reason: reason.trim() }, openedVersion, () =>
+      setOpen(false),
+    );
   }
 
   return (
     <Popover open={open} onOpenChange={toggle}>
       <PopoverTrigger render={<Button variant="outline" size="sm" disabled={busy !== null} />}>
-        {busy === "override" ? "Overriding…" : "Override priority"}
+        {busy === "override" ? "Overriding…" : current ? "Change override" : "Override priority"}
       </PopoverTrigger>
       <PopoverContent align="end" className="w-96">
         <form onSubmit={submit} className="space-y-3 text-sm">
-          <p className="font-medium">Override Aegis&apos;s priority and due date</p>
+          <p className="font-medium">
+            {current ? "Change the override" : "Override Aegis's priority and due date"}
+          </p>
+          {changed && (
+            <p role="alert" className={CHANGED_CLASS}>
+              Someone changed this response while this was open. Close it and open it again to override it as it is
+              now.
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <label htmlFor={`${id}-priority`} className="block text-xs font-medium text-muted-foreground">
@@ -1001,6 +1087,7 @@ function OverrideButton({
               <input
                 id={`${id}-due`}
                 type="date"
+                min={today || undefined}
                 value={dueDate}
                 disabled={busy !== null}
                 onChange={(event) => setDueDate(event.target.value)}
@@ -1025,13 +1112,15 @@ function OverrideButton({
             />
           </div>
           <p className="text-xs text-muted-foreground">
-            The ticket is filed with yours; Aegis&apos;s assessment and your reason stay on record.
+            {current && aegisOwn
+              ? "That is Aegis's own priority and due date: withdraw the override instead."
+              : "The ticket is filed with yours; Aegis's assessment and your reason stay on record."}
           </p>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={busy !== null || !reason.trim() || unchanged}>
+            <Button type="submit" disabled={busy !== null || !reason.trim() || unchanged || aegisOwn || changed}>
               Override
             </Button>
           </div>
@@ -1039,6 +1128,12 @@ function OverrideButton({
       </PopoverContent>
     </Popover>
   );
+}
+
+/** A day as yyyy-mm-dd in the reader's own time zone, as a date input reads it. */
+function localDate(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 function TicketSection({ title, children }: { title: string; children: React.ReactNode }) {

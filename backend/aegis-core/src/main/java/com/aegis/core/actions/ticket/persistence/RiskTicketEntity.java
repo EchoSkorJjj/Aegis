@@ -34,7 +34,8 @@ import org.springframework.data.jpa.repository.Lock;
 
 /**
  * A risk ticket row (V23). What Aegis worked out never changes; while the ticket awaits a decision a reviewer may
- * edit its narrative and override its priority and due date (V33), and the decision fields record the rest.
+ * edit its narrative and override its priority and due date (V33), and the decision fields record the rest, with
+ * who approved it kept apart from whoever decided last (V34).
  * {@code pendingPullRequests} is read from its response's upgrade pull requests (V27): how many still need a
  * person — awaiting a decision, being opened, or failed — so a queue can tell which responses do.
  */
@@ -175,6 +176,12 @@ class RiskTicketEntity {
     @Column(name = "overridden_at")
     private Instant overriddenAt;
 
+    @Column(name = "approved_by")
+    private UUID approvedBy;
+
+    @Column(name = "approved_at")
+    private Instant approvedAt;
+
     @UpdateTimestamp(source = SourceType.DB)
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
@@ -233,6 +240,9 @@ class RiskTicketEntity {
         this.overrideReason = override == null ? null : override.reason();
         this.overriddenBy = override == null ? null : override.by();
         this.overriddenAt = override == null ? null : override.at();
+        RiskTicket.Approval approval = ticket.approval();
+        this.approvedBy = approval == null ? null : approval.by();
+        this.approvedAt = approval == null ? null : approval.at();
         this.status = ticket.status();
         this.decidedBy = ticket.decidedBy();
         this.decidedAt = ticket.decidedAt();
@@ -255,6 +265,7 @@ class RiskTicketEntity {
                         List.of(draftedActions), editedBy, editedAt),
                 overriddenAt == null ? null : new RiskTicket.AssessmentOverride(assessedPriority, assessedDueDate,
                         overrideReason, overriddenBy, overriddenAt),
+                approvedAt == null ? null : new RiskTicket.Approval(approvedBy, approvedAt),
                 version);
     }
 }

@@ -28,6 +28,7 @@ import com.aegis.core.support.AbstractInventoryIntegrationTest;
 import com.aegis.core.support.FakeAiDrafter;
 import com.aegis.core.support.FakeIssueTracker;
 import com.aegis.core.support.FakeRepositoryHost;
+import com.aegis.core.support.Race;
 import com.aegis.core.support.TestOwners;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.AfterEach;
@@ -35,6 +36,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
@@ -486,6 +488,34 @@ class UpgradeProposalIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("OPENED"))
                 .andExpect(jsonPath("$.title").value("Upgrade it"));
+    }
+
+    @Test
+    void twoPeopleDecidingAPullRequestAtOnceGetOneOutcomeAndAConflict() throws Exception {
+        for (int round = 0; round < 3; round++) {
+            Fixture f = fixture();
+            UpgradeProposal standalone = store.create(new UpgradeProposal(UUID.randomUUID(), f.service().getId(),
+                    f.advisory().id(), f.cve(), null,
+                    List.of(new Edit(f.component().getId(), "maven", f.component().getName(), "1.0.0", "1.3.0",
+                            "pom.xml")),
+                    "https://gitlab.com/" + f.repository(), null, "aegis/upgrade-race-" + f.tag(),
+                    MatchConfidence.CONFIRMED, "Upgrade it", "body", UpgradeProposalStatus.PROPOSED, analyst, null,
+                    null, null, null, null, null, null, 0));
+
+            List<MockHttpServletResponse> responses = Race.race(
+                    () -> mvc.perform(post(PROPOSALS + "/{id}/approve", standalone.id())
+                            .with(Race.inDemoOrg("ANALYST", approver))).andReturn().getResponse(),
+                    () -> mvc.perform(post(PROPOSALS + "/{id}/dismiss", standalone.id())
+                            .with(Race.inDemoOrg("ANALYST", analyst)).contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"reason\":\"We upgrade by hand\"}")).andReturn().getResponse());
+
+            assertThat(responses).extracting(MockHttpServletResponse::getStatus).containsExactlyInAnyOrder(200, 409);
+            String outcome = JsonPath.read(responses.stream().filter(response -> response.getStatus() == 200)
+                    .findFirst().orElseThrow().getContentAsString(), "$.status");
+            mvc.perform(get(PROPOSALS + "/{id}", standalone.id()).with(as("ANALYST", approver)))
+                    .andExpect(jsonPath("$.status").value(outcome));
+            assertThat(host.opened(f.repository())).hasSize(outcome.equals("OPENED") ? 1 : 0);
+        }
     }
 
     @Test

@@ -36,7 +36,7 @@ export const TICKET: RiskTicket = {
   impact: "Customers cannot pay.", actions: ["Activate the fallback provider."], evidence: [], aiDrafted: true,
   citations: ["C1 Vendor status"], status: "PROPOSED", createdBy: "analyst-1", createdAt: "2026-10-06T00:00:00Z",
   decidedBy: null, decidedAt: null, dismissReason: null, issueKey: null, issueUrl: null, failureMessage: null,
-  edit: null, override: null, version: 0, stage: "IN_REVIEW", pullRequests: [],
+  edit: null, override: null, approval: null, version: 0, stage: "IN_REVIEW", pullRequests: [],
 };
 export const PR: UpgradeProposal = {
   id: "pr-1", serviceId: SERVICE.id, serviceName: SERVICE.name, changeSignalId: CHANGE.id,
@@ -53,7 +53,11 @@ function tierOf(score: number): ImpactTier {
 }
 
 /** The index-th item of the queue: a vulnerable dependency of Payments API (even) or Batch worker (odd). */
-function vulnerability(index: number, overrides: Partial<Omit<UpgradeRecommendation, "canDraft">> = {}): TriageItem {
+function vulnerability(
+  index: number,
+  overrides: Partial<Omit<UpgradeRecommendation, "canDraft">> = {},
+  stage?: TriageItem["stage"],
+): TriageItem {
   const service = index % 2 === 0 ? SERVICE : OTHER;
   const score = 90 - index;
   const upgrade: Omit<UpgradeRecommendation, "canDraft"> = {
@@ -69,7 +73,7 @@ function vulnerability(index: number, overrides: Partial<Omit<UpgradeRecommendat
   return {
     kind: "VULNERABILITY", changeSignalId: upgrade.changeSignalId, service, owners: service === SERVICE ? [OWNER] : [],
     score: upgrade.score, tier: upgrade.tier, confidence: upgrade.confidence, upgrade, outage: null,
-    response: upgrade.response, stage: upgrade.response?.stage ?? "NEW", canDraft: false,
+    response: upgrade.response, stage: stage ?? upgrade.response?.stage ?? "NEW", canDraft: false,
   };
 }
 
@@ -95,7 +99,8 @@ const ITEMS: TriageItem[] = [
     component: { id: "minimist-120", ecosystem: "npm", name: "minimist", version: "1.2.0" }, toVersion: "1.2.6",
     readiness: "NO_REPOSITORY", reason: "Link the service's repository so Aegis can draft the pull request",
   }),
-  ...Array.from({ length: 20 }, (_, index) => vulnerability(index + 3)),
+  // lib-04's response was dismissed: its item is closed, and a new response can still be drafted.
+  ...Array.from({ length: 20 }, (_, index) => vulnerability(index + 3, {}, index + 3 === 4 ? "CLOSED" : undefined)),
 ];
 
 /** "My services": Payments API, with the items above; Ledger, with nothing yet and no SBOM or repository. */

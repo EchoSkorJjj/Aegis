@@ -171,6 +171,36 @@ class TriageApiIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void aDismissedResponseClosesItsItemUntilAnotherIsDrafted() throws Exception {
+        String request = "{\"changeSignalId\":\"%s\",\"serviceId\":\"%s\"}"
+                .formatted(critical.id(), internalService.getId());
+        String ticketId = JsonPath.read(mvc.perform(post("/api/actions/risk-tickets")
+                        .with(as("ANALYST", UUID.randomUUID())).contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString(), "$.id");
+        mvc.perform(post("/api/actions/risk-tickets/{id}/dismiss", ticketId).with(as("ANALYST", UUID.randomUUID()))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Accepted until the migration\"}"))
+                .andExpect(status().isOk());
+
+        // Closed, not new: someone decided no response was needed. Drafting another stays open to them.
+        mvc.perform(get(PATH).with(as("ANALYST", UUID.randomUUID())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.content[2].stage").value("CLOSED"))
+                .andExpect(jsonPath("$.items.content[2].response").doesNotExist())
+                .andExpect(jsonPath("$.items.content[2].canDraft").value(true))
+                .andExpect(jsonPath("$.items.content[1].stage").value("NEW"));
+        mvc.perform(get(PATH + "/my-services").with(as("SERVICE_OWNER", owner.getUserId())))
+                .andExpect(jsonPath("$[0].toRespond").value(2))
+                .andExpect(jsonPath("$[0].noResponseYet").value(1));
+
+        mvc.perform(post("/api/actions/risk-tickets").with(as("ANALYST", UUID.randomUUID()))
+                        .contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isCreated());
+        mvc.perform(get(PATH).with(as("ANALYST", UUID.randomUUID())))
+                .andExpect(jsonPath("$.items.content[2].stage").value("IN_REVIEW"));
+    }
+
+    @Test
     void mineUsesTheAuthenticatedUserAndFacetsDoNotCrossOrganizations() throws Exception {
         mvc.perform(get(PATH).param("mine", "true").with(as("SERVICE_OWNER", owner.getUserId())))
                 .andExpect(status().isOk())

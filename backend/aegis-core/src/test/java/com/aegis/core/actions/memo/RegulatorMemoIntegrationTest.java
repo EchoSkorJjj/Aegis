@@ -24,6 +24,7 @@ import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.platform.tenant.CurrentOrg;
 import com.aegis.core.support.AbstractInventoryIntegrationTest;
 import com.aegis.core.support.FakeAiDrafter;
+import com.aegis.core.support.Race;
 import com.aegis.core.support.TestOwners;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.AfterEach;
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
@@ -261,6 +263,28 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
                         .with(as("COMPLIANCE_ADMIN", UUID.randomUUID())))
                 .andExpect(jsonPath("$.content.length()").value(1))
                 .andExpect(jsonPath("$.content[0].id").value(id));
+    }
+
+    @Test
+    void twoAnalystsDecidingAtOnceGetOneOutcomeAndAConflict() throws Exception {
+        for (int round = 0; round < 3; round++) {
+            Vulnerability v = vulnerability();
+            String id = id(mvc.perform(post(PATH).with(as("ANALYST", analyst)).contentType(MediaType.APPLICATION_JSON)
+                    .content(request(v.advisory().id()))).andExpect(status().isCreated()));
+
+            List<MockHttpServletResponse> responses = Race.race(
+                    () -> mvc.perform(post(PATH + "/{id}/approve", id).with(Race.inDemoOrg("ANALYST", secondAnalyst)))
+                            .andReturn().getResponse(),
+                    () -> mvc.perform(post(PATH + "/{id}/dismiss", id).with(Race.inDemoOrg("ANALYST", analyst))
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Below the thresholds\"}"))
+                            .andReturn().getResponse());
+
+            assertThat(responses).extracting(MockHttpServletResponse::getStatus).containsExactlyInAnyOrder(200, 409);
+            String outcome = JsonPath.read(responses.stream().filter(response -> response.getStatus() == 200)
+                    .findFirst().orElseThrow().getContentAsString(), "$.status");
+            mvc.perform(get(PATH + "/{id}", id).with(as("ANALYST", analyst)))
+                    .andExpect(jsonPath("$.status").value(outcome));
+        }
     }
 
     @Test

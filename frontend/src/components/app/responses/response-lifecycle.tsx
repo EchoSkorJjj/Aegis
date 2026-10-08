@@ -57,12 +57,21 @@ function StepMarker({ state, index }: { state: StepState; index: number }) {
 
 function lifecycle(ticket: RiskTicket, personName: (id: string | null) => string): Step[] {
   const override = ticket.override;
+  // Who approved it, as recorded; one approved before approvals were recorded on their own names its approver in
+  // decidedBy while it is filing, filed or failed.
+  const approval =
+    ticket.approval ??
+    (ticket.status === "FILING" || ticket.status === "FILED" || ticket.status === "FAILED"
+      ? { by: ticket.decidedBy, at: ticket.decidedAt }
+      : null);
   // Worded "who did what", so it never repeats the page's own "Drafted by …" or "Approved by …" sentences.
   const overridden = override
     ? `${capitalize(personName(override.by))} overrode the priority and due date on ${formatDateTime(override.at)}.`
     : null;
   const drafted = `${capitalize(personName(ticket.createdBy))} drafted it on ${formatDateTime(ticket.createdAt)}.`;
-  const approved = `${capitalize(personName(ticket.decidedBy))} approved it on ${formatDateTime(ticket.decidedAt)}.`;
+  const approved = approval
+    ? `${capitalize(personName(approval.by))} approved it on ${formatDateTime(approval.at)}.`
+    : "Approved.";
   const dismissed = `${capitalize(personName(ticket.decidedBy))} dismissed it on ${formatDateTime(ticket.decidedAt)}.`;
   const decisionLabel = override ? "Overridden" : "Approved";
   const steps: Step[] = [
@@ -98,10 +107,14 @@ function lifecycle(ticket: RiskTicket, personName: (id: string | null) => string
       };
       break;
     case "CLOSED": {
-      // Dismissed after a failed filing had been approved; otherwise straight from review.
-      const approvedFirst = ticket.failureMessage != null;
+      // Dismissed after it was approved and its filing failed; otherwise straight from review.
+      const approvedFirst = approval != null || ticket.failureMessage != null;
       steps[2] = approvedFirst
-        ? { label: decisionLabel, state: "done", detail: overridden ?? "Approved, but the filing failed." }
+        ? {
+            label: decisionLabel,
+            state: "done",
+            detail: [overridden, approved, "The filing failed."].filter(Boolean).join(" "),
+          }
         : { label: "Approved or overridden", state: "skipped", detail: "Not approved." };
       steps[3] = { label: "Closed", state: "done", detail: dismissed };
       break;

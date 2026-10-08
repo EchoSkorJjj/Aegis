@@ -565,6 +565,13 @@ export const ticketApi = {
       body: JSON.stringify(input),
     });
   },
+  /** Withdraw the override: back to Aegis's own priority and due date. */
+  withdrawOverride(id: string, version: number) {
+    return bffFetch<RiskTicket>(`/api/actions/risk-tickets/${id}/override/withdraw`, {
+      method: "POST",
+      body: JSON.stringify({ version }),
+    });
+  },
   /** Draft the upgrade pull request of a response that has none. */
   draftPullRequest(id: string) {
     return bffFetch<RiskTicket>(`/api/actions/risk-tickets/${id}/pull-requests`, { method: "POST" });

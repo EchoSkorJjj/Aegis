@@ -681,7 +681,10 @@ export interface TriageItem {
   outage: VendorOutage | null;
   /** The response already drafted for it. */
   response: UpgradeRecommendation["response"];
-  /** Where the item stands: NEW until a response is drafted, then its response's stage. */
+  /**
+   * Where the item stands: its response's stage; CLOSED when its last response was dismissed and none replaced it
+   * (drafting another reopens it); NEW when nobody has drafted one.
+   */
   stage: ResponseStage;
   /** Whether you may draft a response: an analyst, or one of the service's owners. */
   canDraft: boolean;
@@ -705,7 +708,7 @@ export interface OwnedService {
   service: MatchedServiceRef;
   /** Its material items in the triage queue. */
   toRespond: number;
-  /** Those with no response drafted yet. */
+  /** Those nobody has looked at yet (NEW): no response drafted, none dismissed. */
   noResponseYet: number;
   /** The worst item's score and tier; null when there is nothing to respond to. */
   topScore: number | null;
@@ -776,6 +779,12 @@ export interface RiskTicket {
     by: string;
     at: string;
   } | null;
+  /**
+   * Who approved it, and when; null until someone does. `decidedBy` is whoever decided last, so a response whose
+   * filing failed and was then dismissed keeps its approver here. Responses approved before this was recorded have
+   * none: their approver is `decidedBy` while they are filing, filed or failed.
+   */
+  approval: { by: string; at: string } | null;
   /** The optimistic lock: send it with a decision, and a response changed since is a conflict. */
   version: number;
   stage: ResponseStage;

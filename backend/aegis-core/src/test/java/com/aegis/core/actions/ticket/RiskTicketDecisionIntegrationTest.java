@@ -4,15 +4,8 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
 import com.aegis.core.actions.tracker.IssueTracker.Block;
 import com.aegis.core.actions.tracker.IssueTracker.IssueDraft;
@@ -30,6 +23,7 @@ import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.support.AbstractInventoryIntegrationTest;
 import com.aegis.core.support.FakeAiDrafter;
 import com.aegis.core.support.FakeIssueTracker;
+import com.aegis.core.support.Race;
 import com.aegis.core.support.TestOwners;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.AfterEach;
@@ -41,7 +35,11 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.endsWith;
+import static org.hamcrest.Matchers.hasLength;
+import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -115,7 +113,8 @@ class RiskTicketDecisionIntegrationTest extends AbstractInventoryIntegrationTest
         mvc.perform(post(PATH + "/{id}/approve", id).with(as("ANALYST", reviewer)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("FILED"))
-                .andExpect(jsonPath("$.stage").value("ACTIONED"));
+                .andExpect(jsonPath("$.stage").value("ACTIONED"))
+                .andExpect(jsonPath("$.approval.by").value(reviewer.toString()));
         IssueDraft issue = filed(f);
         assertThat(issue.description()).extracting(Block::text)
                 .contains("Final summary.")
@@ -143,7 +142,8 @@ class RiskTicketDecisionIntegrationTest extends AbstractInventoryIntegrationTest
                         .content("{\"version\":0,\"priority\":\"LOW\"}"))
                 .andExpect(status().isBadRequest());
         mvc.perform(post(PATH + "/{id}/override", id).with(as("ANALYST", reviewer)).contentType(MediaType.APPLICATION_JSON)
-                        .content(override(0, Priority.LOW, LocalDate.now(ZoneOffset.UTC).minusDays(1), "Too late")))
+                        .content(override(0, Priority.LOW, LocalDate.now(ZoneOffset.ofHours(-12)).minusDays(1),
+                                "Too late")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("The due date can't be in the past"));
         mvc.perform(post(PATH + "/{id}/override", id).with(as("ANALYST", reviewer)).contentType(MediaType.APPLICATION_JSON)
@@ -181,6 +181,91 @@ class RiskTicketDecisionIntegrationTest extends AbstractInventoryIntegrationTest
                 .contains("Set by the reviewer: lowest priority, no due date")
                 .contains("Aegis assessed " + assessed.name().toLowerCase())
                 .contains("Why: Accepted risk until Q1"));
+    }
+
+    @Test
+    void anOverrideCanChangeItsReasonOrBeWithdrawnBackToAegisOwnAssessment() throws Exception {
+        Fixture f = fixture();
+        String id = draft(f);
+        String drafted = mvc.perform(get(PATH + "/{id}", id).with(as("ANALYST", reviewer)))
+                .andReturn().getResponse().getContentAsString();
+        Priority assessed = Priority.valueOf(JsonPath.read(drafted, "$.priority"));
+        LocalDate assessedDue = LocalDate.parse(JsonPath.read(drafted, "$.dueDate"));
+
+        mvc.perform(post(PATH + "/{id}/override/withdraw", id).with(as("ANALYST", reviewer))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"version\":0}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post(PATH + "/{id}/override", id).with(as("ANALYST", reviewer)).contentType(MediaType.APPLICATION_JSON)
+                        .content(override(0, Priority.LOW, null, "Mitigated by the WAF rule")))
+                .andExpect(status().isOk());
+
+        // The reason alone may change; the same override again, or Aegis's own values, is refused.
+        mvc.perform(post(PATH + "/{id}/override", id).with(as("ANALYST", reviewer)).contentType(MediaType.APPLICATION_JSON)
+                        .content(override(1, Priority.LOW, null, "Mitigated by the WAF rule")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Nothing was changed"));
+        mvc.perform(post(PATH + "/{id}/override", id).with(as("ANALYST", reviewer)).contentType(MediaType.APPLICATION_JSON)
+                        .content(override(1, Priority.LOW, null, "The WAF rule blocks the exploit path")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.override.reason").value("The WAF rule blocks the exploit path"))
+                .andExpect(jsonPath("$.override.assessedPriority").value(assessed.name()));
+        mvc.perform(post(PATH + "/{id}/override", id).with(as("ANALYST", reviewer)).contentType(MediaType.APPLICATION_JSON)
+                        .content(override(2, assessed, assessedDue, "Aegis was right")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(containsString("withdraw the override instead")));
+
+        // Withdrawn: Aegis's own priority and due date again, and the ticket is filed as Aegis assessed it.
+        mvc.perform(post(PATH + "/{id}/override/withdraw", id).with(as("ANALYST", reviewer))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"version\":2}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.priority").value(assessed.name()))
+                .andExpect(jsonPath("$.dueDate").value(assessedDue.toString()))
+                .andExpect(jsonPath("$.override").doesNotExist())
+                .andExpect(jsonPath("$.stage").value("IN_REVIEW"));
+        mvc.perform(post(PATH + "/{id}/approve", id).with(as("ANALYST", reviewer)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.stage").value("ACTIONED"));
+        IssueDraft issue = filed(f);
+        assertThat(issue.priority()).isEqualTo(assessed);
+        assertThat(issue.dueDate()).isEqualTo(assessedDue);
+        assertThat(issue.description()).extracting(Block::text).doesNotContain("Priority and due date");
+    }
+
+    @Test
+    void aReasonStaysWithinItsColumnOnceSensitiveDetailsAreRemoved() throws Exception {
+        // Six-character addresses within the limit, each of which redaction turns into ten characters.
+        String reason = "a@b.co ".repeat(142).strip();
+        assertThat(reason).hasSizeLessThanOrEqualTo(RiskTicketService.MAX_REASON);
+        String cut = "[REDACTED]";
+
+        mvc.perform(post(PATH + "/{id}/override", draft(fixture())).with(as("ANALYST", reviewer))
+                        .contentType(MediaType.APPLICATION_JSON).content(override(0, Priority.LOW, null, reason)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.override.reason",
+                        allOf(hasLength(RiskTicketService.MAX_REASON), startsWith(cut), endsWith("…"))));
+        mvc.perform(post(PATH + "/{id}/dismiss", draft(fixture())).with(as("ANALYST", reviewer))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"" + reason + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.dismissReason",
+                        allOf(hasLength(RiskTicketService.MAX_REASON), startsWith(cut), endsWith("…"))));
+    }
+
+    @Test
+    void dismissingAResponseWhoseFilingFailedKeepsWhoApprovedIt() throws Exception {
+        String id = draft(fixture());
+        tracker.connected(false);
+        mvc.perform(post(PATH + "/{id}/approve", id).with(as("ANALYST", reviewer)))
+                .andExpect(status().isConflict());
+
+        UUID dismisser = UUID.randomUUID();
+        mvc.perform(post(PATH + "/{id}/dismiss", id).with(as("ANALYST", dismisser))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Filed by hand as PAY-232\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("DISMISSED"))
+                .andExpect(jsonPath("$.stage").value("CLOSED"))
+                .andExpect(jsonPath("$.decidedBy").value(dismisser.toString()))
+                .andExpect(jsonPath("$.approval.by").value(reviewer.toString()))
+                .andExpect(jsonPath("$.failureMessage").isNotEmpty());
     }
 
     @Test
@@ -303,7 +388,7 @@ class RiskTicketDecisionIntegrationTest extends AbstractInventoryIntegrationTest
             Fixture f = fixture();
             String id = draft(f);
             UUID other = UUID.randomUUID();
-            List<MockHttpServletResponse> responses = race(
+            List<MockHttpServletResponse> responses = Race.race(
                     () -> mvc.perform(post(PATH + "/{id}/approve", id).with(as("ANALYST", reviewer))
                             .contentType(MediaType.APPLICATION_JSON).content("{\"version\":0}"))
                             .andReturn().getResponse(),
@@ -350,30 +435,6 @@ class RiskTicketDecisionIntegrationTest extends AbstractInventoryIntegrationTest
     }
 
     // ---- helpers -----------------------------------------------------------------------------------
-
-    /** Both calls start together; the responses in the order given. */
-    @SafeVarargs
-    private static List<MockHttpServletResponse> race(Callable<MockHttpServletResponse>... calls) throws Exception {
-        ExecutorService pool = Executors.newFixedThreadPool(calls.length);
-        try {
-            CountDownLatch start = new CountDownLatch(1);
-            List<Future<MockHttpServletResponse>> futures = new ArrayList<>();
-            for (Callable<MockHttpServletResponse> call : calls) {
-                futures.add(pool.submit(() -> {
-                    start.await();
-                    return call.call();
-                }));
-            }
-            start.countDown();
-            List<MockHttpServletResponse> responses = new ArrayList<>();
-            for (Future<MockHttpServletResponse> future : futures) {
-                responses.add(future.get(30, TimeUnit.SECONDS));
-            }
-            return responses;
-        } finally {
-            pool.shutdownNow();
-        }
-    }
 
     private String draft(Fixture f) throws Exception {
         String created = mvc.perform(post(PATH).with(as("ANALYST", drafter)).contentType(MediaType.APPLICATION_JSON)
