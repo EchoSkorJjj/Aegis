@@ -42,6 +42,7 @@ and the modules are cycle-free.
 | `matching`   | Advisory package + version range → components → impacted services/owners + evidence chains |
 | `scoring`    | Deterministic impact score per service and owner, with a "why" breakdown |
 | `actions`    | Responses: what to respond to next (the triage queue, `triage`, E9 story 1), the draft-PR port + GitHub App adapter and safe-upgrade proposals (`pr`, `upgrade`, E8 story 4), the issue-tracker port + Jira adapter and risk tickets (`tracker`, `ticket`, story 5), and DORA regulator memos (`memo`, story 6) |
+| `notifications` | Owner notifications (E9 story 5): a scheduled job tells each service owner once — in the app and by email through identity-service — about every triage item in their services that needs a decision |
 | `ai`         | **Port** to the Python ai-service: `AiAssessor` / `AiDrafter` + DTOs + `HttpAiClient` |
 
 ## Triage queue and item detail (E9 Stories 1–2)
@@ -86,7 +87,43 @@ owner's page, in the sidebar only for the `SERVICE_OWNER` role (only a service o
 the overview above, then the queue for those services, with no owner to filter by. `/findings/{changeSignalId}`
 is the item detail: the change-impact view with the original change, every
 impacted service and owner, score factors and match evidence, and each service's drafted response and upgrade
-edits. Persisted findings with a lifecycle status and notifications are later stories (E9 s3, s5).
+edits. Persisted findings with a lifecycle status are a later story; owners are notified of new items (below).
+
+## Owner notifications (E9 Story 5)
+
+When an item in the triage queue needs a decision — **New** (no response yet) or **In review** (drafted,
+undecided) — each assigned owner of its service is told **once**: a notification under the bell in the app, and
+an email. A scheduled job (`OwnerNotificationJob`, every `AEGIS_NOTIFICATIONS_INTERVAL`, on the instance holding
+the scheduler lease) asks identity-service for every organization, then in each one reads the triage queue
+(`TriageQueue.all`, the same items My services shows) and records one row per owner and item (V35,
+`owner_notifications`, unique on organization, owner, service and change). Approved, actioned or closed items tell
+nobody; a newly assigned owner is told about what is already waiting.
+
+- **Never emailed twice about the same item.** Only a row's first sighting creates it; its email is claimed
+  (`SENDING`) before it goes out, so a crash halfway never resends. A failed email returns to `PENDING` and is
+  tried on the next run, up to three times (`FAILED`). Everything due for one owner goes in one email (50 items at
+  most per email).
+- **identity-service sends it**, through its existing `EmailSender` (Mailhog locally,
+  [http://localhost:8025](http://localhost:8025); Amazon SES deployed), from its internal API
+  (`POST /internal/notifications/owner-email`; `GET /internal/organizations` lists the organizations). That API
+  takes the service token (`IDENTITY_SERVICE_TOKEN` here, `IDENTITY_INTERNAL_SERVICE_TOKEN` there), not a user's,
+  because no user is asking; the gateway never routes it. It emails only an enabled, verified, active member of
+  the organization — anyone else is `UNREACHABLE` and sees the item in the app only — and it writes the email
+  itself from the items, each linking to a path in the app (`/findings/{changeSignalId}`), never a URL of
+  aegis-core's.
+- **Off by default** (`AEGIS_NOTIFICATIONS_ENABLED`); docker compose turns it on with a dev token and a one-minute
+  interval. The first run in an organization tells every owner about everything already waiting, in one email
+  each.
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | `/api/notifications?unread=&page=&size=` | any domain role | Your own notifications in your active organization, newest first |
+| GET | `/api/notifications/unread-count` | any domain role | `{unread}` |
+| POST | `/api/notifications/{id}/read` | any domain role | Mark one of yours read → 204 (404 if it isn't yours) |
+| POST | `/api/notifications/read-all` | any domain role | `{marked}` |
+
+The frontend's bell (`components/app/notification-bell.tsx`, in the top bar for the domain roles) shows the unread
+count, checked every minute, and the latest ten; opening one marks it read and goes to the item.
 
 ## Service repositories and draft PR providers (E8 Story 2)
 
@@ -356,6 +393,9 @@ domain. See `ARCHITECTURE.md` for the topology.
 | `DB_URL` / `DB_USER` / `DB_PASSWORD` | `…/identity`, `identity`, `identity` | Shared datasource |
 | `IDENTITY_JWKS_URI` | `http://localhost:8081/oauth2/jwks` | identity-service's public keys |
 | `IDENTITY_BASE_URL` | `http://localhost:8081` | identity-service's member directory — verifies a service's assigned owner, called with the caller's own token |
+| `IDENTITY_SERVICE_TOKEN` | *(empty)* | Token for identity-service's internal API (`X-Service-Token`), used only by the owner notifications; identity-service holds the same one as `IDENTITY_INTERNAL_SERVICE_TOKEN` |
+| `AEGIS_NOTIFICATIONS_ENABLED` | `false` | Owner notifications (E9 story 5); needs `IDENTITY_SERVICE_TOKEN` |
+| `AEGIS_NOTIFICATIONS_INTERVAL` | `PT5M` | How often the notification job looks for items that need a decision |
 | `AI_SERVICE_URI` | `http://localhost:8083` | The internal ai-service base URL |
 | `AI_SERVICE_TOKEN` | `dev-internal-token-change-me` | Shared service token sent to the ai-service |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | SPA origins allowed in dev |

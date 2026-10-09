@@ -88,6 +88,17 @@ aegis:
   # (token relay), so identity-service applies the caller's org scope; never with a service credential.
   identity:
     base-url: ${IDENTITY_BASE_URL:http://localhost:8081}
+    # The token presented to identity-service's internal API (X-Service-Token), used only where no user is
+    # asking: the owner notifications below. identity-service must hold the same one
+    # (IDENTITY_INTERNAL_SERVICE_TOKEN). Keep it out of the repository.
+    service-token: ${IDENTITY_SERVICE_TOKEN:}
+  # Owner notifications (E9 story 5): each service owner is told once, in the app and by email through
+  # identity-service, about every item in their services that needs a decision. Off by default; needs the
+  # service token above. The job runs on the instance holding the scheduler lease.
+  notifications:
+    enabled: ${AEGIS_NOTIFICATIONS_ENABLED:false}
+    interval: ${AEGIS_NOTIFICATIONS_INTERVAL:PT5M}
+    initial-delay: ${AEGIS_NOTIFICATIONS_INITIAL_DELAY:PT1M}
   # Opt-in: load the fictional demo estate (classpath:demo/) at startup. Idempotent; dev/demo only.
   demo:
     seed-enabled: ${AEGIS_DEMO_SEED_ENABLED:false}

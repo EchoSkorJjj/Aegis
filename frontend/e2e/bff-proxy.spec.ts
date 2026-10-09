@@ -10,6 +10,7 @@ const ESCAPES = [
   "/api/matching/..%5C..%5Cusers",
   "/api/change-signals/..%2F..%2Fusers",
   "/api/findings/..%2Finventory%2Fservices",
+  "/api/notifications/..%2Finventory%2Fservices",
 ];
 
 for (const path of ESCAPES) {

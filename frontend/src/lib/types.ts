@@ -690,6 +690,29 @@ export interface TriageItem {
   canDraft: boolean;
 }
 
+/**
+ * GET /api/notifications — you, as an owner, were told about an item in one of your services that needs a
+ * decision (E9 story 5): once in the app, and once by email. The title, service, score and tier are as they were
+ * when the item was first seen; the item itself is at `/findings/{changeSignalId}`.
+ */
+export interface OwnerNotification {
+  id: string;
+  userId: string;
+  serviceId: string;
+  changeSignalId: string;
+  itemKind: "VULNERABILITY" | "VENDOR_OUTAGE";
+  title: string;
+  serviceName: string;
+  score: number;
+  tier: ImpactTier;
+  createdAt: string;
+  /** Null until you read it. */
+  readAt: string | null;
+  /** Whether it was emailed: SENT, PENDING (soon), or UNREACHABLE / FAILED (in the app only). */
+  emailStatus: "PENDING" | "SENDING" | "SENT" | "UNREACHABLE" | "FAILED";
+  emailedAt: string | null;
+}
+
 export interface TriageQueueResponse {
   items: Page<TriageItem>;
   /** The queue's scope: every service, or only yours (`mine`). */

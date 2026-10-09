@@ -77,6 +77,16 @@ codes (`/auth/mfa/*`), email verification, password reset, admin user provisioni
 (`POST /users`), the user CRUD & roles API, and the admin audit trail (`/audit`). Other services
 verify tokens against the public keys at `GET /oauth2/jwks`.
 
+**Internal API** (`/internal/**`, for aegis-core's owner notifications; never routed by the gateway). It has its
+own filter chain and takes no user token: only the shared service token in `X-Service-Token`
+(`IDENTITY_INTERNAL_SERVICE_TOKEN`; empty, the default, refuses every call).
+
+- `GET /internal/organizations` — every organization's id.
+- `POST /internal/notifications/owner-email` — `{orgId, userId, items: [{title, serviceName, path}]}`: emails the
+  member the items that need their decision, through `EmailSender`. 204 when sent; 404 unless they are an
+  active member of that organization; 409 when their account is disabled or its address unverified. Each
+  item's `path` must be a path in the app (`/findings/…`), and identity-service writes the email itself.
+
 ## The auth seam (how it's "dynamic")
 
 Two config values control it — everything else is identical in both modes:

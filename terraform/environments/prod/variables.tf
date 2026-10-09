@@ -121,6 +121,12 @@ variable "github_app_client_id" {
   default     = ""
 }
 
+variable "owner_notifications_enabled" {
+  description = "Turns the owner notifications on (in the app, and by email through identity-service). Needs the identity-internal-token parameter in SSM."
+  type        = bool
+  default     = false
+}
+
 variable "jira_enabled" {
   description = "Turns Jira on (filing risk tickets). Needs its client ID here and its client secret and the secrets key in SSM."
   type        = bool

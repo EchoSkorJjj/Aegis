@@ -19,6 +19,8 @@ github_app_client_id  = "Iv23li43G5FkBTVfBnOK"
 jira_enabled          = true
 jira_client_id        = "QZfQJbTVEdac6tolEkLVT7vck255pAjC"
 nvd_api_key_enabled   = true
+# Create the identity-internal-token parameter first (README, step 2).
+# owner_notifications_enabled = true
 llm_provider          = "groq"
 bootstrap_admin_email = "jihoonsong29+admin@gmail.com"
 privacy_operator      = "Song Jihoon"

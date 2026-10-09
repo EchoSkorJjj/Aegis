@@ -112,6 +112,7 @@ class PackageStructureArchTest {
                     "com.aegis.core.scoring..",
                     "com.aegis.core.ingestion..",
                     "com.aegis.core.actions..",
+                    "com.aegis.core.notifications..",
                     "com.aegis.core.ai..")
             .because("platform underpins the features (errors, security, tenancy); it must not depend on them");
 

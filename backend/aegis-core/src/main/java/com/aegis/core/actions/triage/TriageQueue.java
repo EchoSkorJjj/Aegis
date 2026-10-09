@@ -168,6 +168,21 @@ public class TriageQueue {
     }
 
     /**
+     * Every material item in the organization, worst first, for work no user is asking for: the owner
+     * notifications (E9 story 5) tell each item's owners about it. The same items {@link #list} shows, unpaged and
+     * unfiltered; {@code canDraft} is false throughout, since there is no caller.
+     */
+    public List<Item> all() {
+        Estate estate = estate();
+        Map<UUID, BusinessService> every = new LinkedHashMap<>();
+        estate.services().forEach(service -> every.put(service.getId(), service));
+        return material(every, estate.assignments(), NO_CALLER).stream().sorted(RANKING).toList();
+    }
+
+    /** No one: a scheduled job's view of the queue. */
+    private static final Caller NO_CALLER = new Caller(new UUID(0, 0), false, false);
+
+    /**
      * E9 story 2: the services the caller is an assigned owner of, by name, each with what it needs from them. The
      * same items as {@link #list} with {@code mine}, counted per service, so the two never disagree.
      */

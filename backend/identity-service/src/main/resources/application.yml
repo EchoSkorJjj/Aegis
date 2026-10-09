@@ -96,6 +96,10 @@ identity:
     base-url: ${IDENTITY_FRONTEND_BASE_URL:http://localhost:3000}
   mail:
     from: ${IDENTITY_MAIL_FROM:no-reply@identity.local}
+  # The internal API (/internal/**) aegis-core calls without a user, for its owner notifications: the token it
+  # presents in X-Service-Token. Empty (the default) refuses every call. Never routed by the gateway.
+  internal:
+    service-token: ${IDENTITY_INTERNAL_SERVICE_TOKEN:}
   # Optional initial admin, seeded on startup ONLY when admin-email is set (opt-in; no default admin).
   # Idempotent: creates the user if missing, grants PLATFORM_ADMIN if not already held.
   bootstrap:

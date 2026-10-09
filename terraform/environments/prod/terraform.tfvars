@@ -19,6 +19,7 @@ registration_enabled = true
 # jira_enabled         = true
 # jira_client_id       = "<the Atlassian app's client ID>"
 # nvd_api_key_enabled  = true
+# owner_notifications_enabled = true
 # llm_provider         = "groq"
 # bootstrap_admin_email = "<a platform admin, optional>"
 # privacy_operator     = "<who runs this deployment>"
