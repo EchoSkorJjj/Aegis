@@ -6,7 +6,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 
 /**
- * Replaces the HTTP identity directory with {@link FakeIdentityDirectory} for the integration suite.
+ * Replaces the HTTP identity directory with {@link FakeIdentityDirectory}, and identity-service's internal API with
+ * {@link FakeIdentityInternalApi}, for the integration suite.
  * Imported once by {@link AbstractIntegrationTest}, so every integration test keeps sharing a single
  * cached application context rather than forking one per test class.
  */
@@ -17,6 +18,12 @@ public class IdentityTestConfig {
     @Primary
     public FakeIdentityDirectory fakeIdentityDirectory() {
         return new FakeIdentityDirectory();
+    }
+
+    @Bean
+    @Primary
+    public FakeIdentityInternalApi fakeIdentityInternalApi() {
+        return new FakeIdentityInternalApi();
     }
 
     @Bean

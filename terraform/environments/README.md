@@ -131,6 +131,14 @@ aws ssm put-parameter --type SecureString --name $P/core/jira-client-secret --va
 aws ssm put-parameter --type SecureString --name $P/core/secrets-key --value "$(openssl rand -base64 32)"
 ```
 
+**Owner notifications** (`owner_notifications_enabled = true`): the token aegis-core presents to identity-service's
+internal API to list the organizations and email service owners. Both services read this one parameter.
+
+```bash
+P=/aegis/dev
+aws ssm put-parameter --type SecureString --name $P/identity-internal-token --value "$(openssl rand -hex 32)"
+```
+
 **Groq** (`llm_provider = "groq"`): your Groq API key.
 
 ```bash

@@ -17,6 +17,13 @@ spring:
   flyway:
     enabled: true
     baseline-on-migrate: true
+  # Bounds on each SMTP step (milliseconds), used once spring.mail.host is set: a mail server that stops answering
+  # fails the send instead of holding a request thread for good. The deployments add auth and STARTTLS here.
+  mail:
+    properties:
+      "[mail.smtp.connectiontimeout]": 5000
+      "[mail.smtp.timeout]": 10000
+      "[mail.smtp.writetimeout]": 10000
 
 # ---- Identity service configuration -------------------------------------
 # The "auth seam": switch how tokens are produced/validated without code changes.
@@ -96,6 +103,10 @@ identity:
     base-url: ${IDENTITY_FRONTEND_BASE_URL:http://localhost:3000}
   mail:
     from: ${IDENTITY_MAIL_FROM:no-reply@identity.local}
+  # The internal API (/internal/**) aegis-core calls without a user, for its owner notifications: the token it
+  # presents in X-Service-Token. Empty (the default) refuses every call. Never routed by the gateway.
+  internal:
+    service-token: ${IDENTITY_INTERNAL_SERVICE_TOKEN:}
   # Optional initial admin, seeded on startup ONLY when admin-email is set (opt-in; no default admin).
   # Idempotent: creates the user if missing, grants PLATFORM_ADMIN if not already held.
   bootstrap:

@@ -3,9 +3,10 @@
 import { usePathname } from "next/navigation";
 
 import { pageTitle } from "@/components/app/navigation";
+import { NotificationBell } from "@/components/app/notification-bell";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 
-/** The top bar: the sidebar toggle and where you are, named as the sidebar names it. */
+/** The top bar: the sidebar toggle, where you are (named as the sidebar names it), and your notifications. */
 export function AppHeader() {
   const pathname = usePathname();
   return (
@@ -13,6 +14,9 @@ export function AppHeader() {
       <SidebarTrigger className="-ml-1" />
       <div className="mr-1 h-4 w-px bg-border" aria-hidden />
       <p className="text-sm font-medium">{pageTitle(pathname)}</p>
+      <div className="ml-auto">
+        <NotificationBell />
+      </div>
     </header>
   );
 }

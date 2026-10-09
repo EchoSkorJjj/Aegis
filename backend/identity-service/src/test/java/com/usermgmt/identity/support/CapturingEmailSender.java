@@ -1,9 +1,12 @@
 package com.usermgmt.identity.support;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import com.usermgmt.identity.auth.email.EmailSender;
+import com.usermgmt.identity.auth.email.OwnerNotification;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
@@ -19,6 +22,7 @@ public class CapturingEmailSender implements EmailSender {
     private final Map<String, String> resetTokens = new ConcurrentHashMap<>();
     private final Map<String, String> loginOtps = new ConcurrentHashMap<>();
     private final Map<String, String> inviteTokens = new ConcurrentHashMap<>();
+    private final Map<String, List<OwnerNotification>> ownerNotifications = new ConcurrentHashMap<>();
 
     @Override
     public void sendEmailVerification(String toEmail, String token) {
@@ -38,6 +42,16 @@ public class CapturingEmailSender implements EmailSender {
     @Override
     public void sendInvite(String toEmail, String token) {
         inviteTokens.put(toEmail, token);
+    }
+
+    @Override
+    public void sendOwnerNotification(String toEmail, OwnerNotification notification) {
+        ownerNotifications.computeIfAbsent(toEmail, email -> new CopyOnWriteArrayList<>()).add(notification);
+    }
+
+    /** Every owner notification sent to this address, oldest first. */
+    public List<OwnerNotification> ownerNotificationsFor(String email) {
+        return ownerNotifications.getOrDefault(email, List.of());
     }
 
     public String inviteTokenFor(String email) {

@@ -102,6 +102,7 @@ locals {
         AEGIS_GITHUB_APP_CLIENT_ID            = var.github_app_client_id
         AEGIS_GITHUB_CALLBACK_URL             = "${local.app_url}/admin/integrations/github/callback"
         AEGIS_JIRA_ENABLED                    = tostring(var.jira_enabled)
+        AEGIS_NOTIFICATIONS_ENABLED           = tostring(var.owner_notifications_enabled)
         AEGIS_JIRA_CLIENT_ID                  = var.jira_client_id
         AEGIS_JIRA_CALLBACK_URL               = "${local.app_url}/admin/integrations/jira/callback"
         TRACING_SAMPLE_RATE                   = "0"
@@ -133,6 +134,7 @@ locals {
       SPRING_MAIL_USERNAME              = { parameter = "identity/smtp-username", needed = true }
       SPRING_MAIL_PASSWORD              = { parameter = "identity/smtp-password", needed = true }
       IDENTITY_BOOTSTRAP_ADMIN_PASSWORD = { parameter = "identity/bootstrap-admin-password", needed = var.bootstrap_admin_email != "" }
+      IDENTITY_INTERNAL_SERVICE_TOKEN   = { parameter = "identity-internal-token", needed = var.owner_notifications_enabled }
     }
 
     "aegis-core" = {
@@ -143,6 +145,7 @@ locals {
       AEGIS_JIRA_CLIENT_SECRET       = { parameter = "core/jira-client-secret", needed = var.jira_enabled }
       AEGIS_SECRETS_KEY              = { parameter = "core/secrets-key", needed = var.jira_enabled }
       AEGIS_NVD_API_KEY              = { parameter = "core/nvd-api-key", needed = var.nvd_api_key_enabled }
+      IDENTITY_SERVICE_TOKEN         = { parameter = "identity-internal-token", needed = var.owner_notifications_enabled }
     }
 
     "ai-service" = {

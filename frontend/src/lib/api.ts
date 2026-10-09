@@ -23,6 +23,7 @@ import type {
   DirectoryMember,
   Owner,
   OwnedService,
+  OwnerNotification,
   PackageUsage,
   Page,
   Passkey,
@@ -458,6 +459,28 @@ export const findingApi = {
   /** The services you are an assigned owner of, each with what it needs (E9 story 2). */
   myServices() {
     return bffFetch<OwnedService[]>("/api/findings/my-services");
+  },
+};
+
+/**
+ * Your owner notifications (E9 story 5): items in the services you own that need your decision. Only your own,
+ * in your active org.
+ */
+export const notificationApi = {
+  list(params: { unread?: boolean; page?: number; size?: number } = {}) {
+    const { unread, ...rest } = params;
+    return bffFetch<Page<OwnerNotification>>(
+      `/api/notifications${qs({ ...rest, unread: unread === undefined ? undefined : String(unread) })}`,
+    );
+  },
+  unreadCount() {
+    return bffFetch<{ unread: number }>("/api/notifications/unread-count");
+  },
+  markRead(id: string) {
+    return bffFetch<void>(`/api/notifications/${id}/read`, { method: "POST" });
+  },
+  markAllRead() {
+    return bffFetch<{ marked: number }>("/api/notifications/read-all", { method: "POST" });
   },
 };
 

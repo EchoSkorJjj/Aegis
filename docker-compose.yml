@@ -38,6 +38,9 @@ services:
       SPRING_MAIL_PORT: "1025"
       IDENTITY_FRONTEND_BASE_URL: http://localhost:3000
       IDENTITY_MAIL_FROM: no-reply@identity.local
+      # The internal API aegis-core's owner notifications call (/internal/**, never routed by the gateway), with
+      # this token in X-Service-Token. A dev placeholder; aegis-core holds the same one (IDENTITY_SERVICE_TOKEN).
+      IDENTITY_INTERNAL_SERVICE_TOKEN: dev-identity-internal-token-change-me
       # Dev-only: seeds an initial admin on startup. Use a real secret in production.
       IDENTITY_BOOTSTRAP_ADMIN_EMAIL: admin@example.com
       IDENTITY_BOOTSTRAP_ADMIN_PASSWORD: admin-dev-password
@@ -84,6 +87,12 @@ services:
       # The internal ai-service (assess + draft). Called with a service token, not a user JWT.
       AI_SERVICE_URI: http://ai-service:8083
       AI_SERVICE_TOKEN: dev-internal-token-change-me
+      # Owner notifications (E9 story 5): every minute here, each service owner is told once about each item that
+      # needs their decision — under the bell in the app, and by email through identity-service (Mailhog,
+      # http://localhost:8025).
+      IDENTITY_SERVICE_TOKEN: dev-identity-internal-token-change-me
+      AEGIS_NOTIFICATIONS_ENABLED: "true"
+      AEGIS_NOTIFICATIONS_INTERVAL: PT1M
       # Export distributed traces to Zipkin — view them at http://localhost:9411
       ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
       CORS_ALLOWED_ORIGINS: http://localhost:3000
