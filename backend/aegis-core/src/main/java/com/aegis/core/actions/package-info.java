@@ -1,7 +1,7 @@
 /**
  * Actions — executes the responses a person has approved at the trust boundary: open a pull request,
- * file a risk ticket, send a notification memo. Every execution is gated by human approval and
- * written to the append-only audit trail once those workflows are implemented.
+ * file a risk ticket, send a notification memo. Every execution is gated by human approval, and every step a
+ * response takes is written to the append-only decision trail ({@code com.aegis.core.audit}).
  *
  * <p>{@code actions.pr} is the draft-PR port, its validated proposal types and provider registry, with a
  * GitHub App adapter disabled by default ({@code actions.pr.github}). {@code actions.upgrade} is the first

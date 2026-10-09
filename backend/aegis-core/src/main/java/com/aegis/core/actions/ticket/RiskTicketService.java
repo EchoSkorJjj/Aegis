@@ -24,6 +24,10 @@ import com.aegis.core.actions.upgrade.UpgradeProposalService;
 import com.aegis.core.actions.upgrade.UpgradeProposalStatus;
 import com.aegis.core.ai.AiDrafter;
 import com.aegis.core.ai.AiDtos;
+import com.aegis.core.audit.DecisionRecord;
+import com.aegis.core.audit.DecisionRecord.Action;
+import com.aegis.core.audit.DecisionRecord.Subject;
+import com.aegis.core.audit.DecisionTrail;
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.matching.MatchingDtos.EvidenceChain;
@@ -62,6 +66,9 @@ import org.springframework.stereotype.Service;
  * date, with a reason (E9 story 3), and withdraw that override; both stay on record. Every decision may name the
  * version the reviewer saw, so someone deciding on a response that has changed since — edited, overridden or
  * decided by someone else — gets a conflict rather than a decision about something they never read.
+ *
+ * <p>Every step — drafted, edited, overridden or withdrawn, approved, filed or failed, dismissed — is recorded in the
+ * {@link DecisionTrail} with the ticket as it then stood, in the same transaction as the step (E10 story 1).
  */
 @Service
 public class RiskTicketService {
@@ -88,10 +95,11 @@ public class RiskTicketService {
     private final ObjectProvider<IssueTracker> trackers;
     private final RiskTicketStore store;
     private final UpgradeProposalService upgrades;
+    private final DecisionTrail trail;
 
     public RiskTicketService(InventoryService inventory, InventoryStore inventoryStore, ScoringService scoring,
             ChangeSignalStore signals, AiDrafter drafter, ObjectProvider<IssueTracker> trackers, RiskTicketStore store,
-            UpgradeProposalService upgrades) {
+            UpgradeProposalService upgrades, DecisionTrail trail) {
         this.inventory = inventory;
         this.inventoryStore = inventoryStore;
         this.scoring = scoring;
@@ -100,6 +108,7 @@ public class RiskTicketService {
         this.trackers = trackers;
         this.store = store;
         this.upgrades = upgrades;
+        this.trail = trail;
     }
 
     public RiskTicket propose(UUID changeSignalId, UUID serviceId, UUID drafterId) {
@@ -132,13 +141,15 @@ public class RiskTicketService {
         UUID id = UUID.randomUUID();
         Sections sections = sections(id, type, title, changeTitle, signal, scored, evidence);
         LocalDate drafted = LocalDate.now(ZoneOffset.UTC);
-        RiskTicket ticket = store.create(new RiskTicket(id, serviceId, changeSignalId, type, changeTitle, title,
+        RiskTicket draft = new RiskTicket(id, serviceId, changeSignalId, type, changeTitle, title,
                 RiskTicketText.priority(scored.tier()), RiskTicketText.dueDate(scored.tier(), drafted), scored.score(),
                 scored.tier(), RiskTicketText.labels(type, changeTitle, scored.tier()), sections.summary(),
                 sections.risk(), sections.impact(), sections.actions(), evidence, sections.aiDrafted(),
                 sections.citations(),
                 RiskTicketStatus.PROPOSED, drafterId, null, null, null, null, null, null, null, null, null, null,
-                0));
+                0);
+        RiskTicket ticket = trail.recorded(() -> store.create(draft),
+                saved -> record(saved, Action.DRAFTED, drafterId, null));
         if (plan != null && plan.automatable()) {
             try {
                 upgrades.draft(plan, ticket.id(), drafterId);
@@ -180,7 +191,8 @@ public class RiskTicketService {
             throw new ApiExceptions.Conflict("A risk ticket that is "
                     + ticket.status().name().toLowerCase(Locale.ROOT) + " cannot be approved");
         }
-        RiskTicket filing = store.update(ticket.filing(approver, now));
+        RiskTicket filing = trail.recorded(() -> store.update(ticket.filing(approver, now)),
+                saved -> record(saved, Action.APPROVED, approver, null));
         RiskTicket filed;
         try {
             IssueTracker tracker = trackers.getIfAvailable();
@@ -189,10 +201,13 @@ public class RiskTicketService {
                         + "nowhere to file the ticket");
             }
             String serviceName = serviceNames(List.of(filing.serviceId())).get(filing.serviceId());
-            filed = store.update(filing.filed(tracker.file(RiskTicketText.issue(filing, serviceName, pullRequest))));
+            IssueTracker.FiledIssue issue = tracker.file(RiskTicketText.issue(filing, serviceName, pullRequest));
+            filed = trail.recorded(() -> store.update(filing.filed(issue)),
+                    saved -> record(saved, Action.FILED, approver, null));
         } catch (RuntimeException failure) {
             try {
-                store.update(filing.failed(failureMessage(failure)));
+                trail.recorded(() -> store.update(filing.failed(failureMessage(failure))),
+                        saved -> record(saved, Action.FILING_FAILED, approver, saved.failureMessage()));
             } catch (RuntimeException recording) {
                 failure.addSuppressed(recording);
             }
@@ -296,7 +311,8 @@ public class RiskTicketService {
             throw new ApiExceptions.Conflict("A risk ticket that is "
                     + ticket.status().name().toLowerCase(Locale.ROOT) + " cannot be dismissed");
         }
-        RiskTicket dismissed = store.update(ticket.dismissed(by, Instant.now(), reason(reason)));
+        RiskTicket dismissed = trail.recorded(() -> store.update(ticket.dismissed(by, Instant.now(), reason(reason))),
+                saved -> record(saved, Action.DISMISSED, by, saved.dismissReason()));
         currentPullRequest(ticketId)
                 .filter(pullRequest -> pullRequest.status() == UpgradeProposalStatus.PROPOSED
                         || pullRequest.status() == UpgradeProposalStatus.FAILED)
@@ -325,7 +341,8 @@ public class RiskTicketService {
                 && newActions.equals(ticket.actions())) {
             throw new ApiExceptions.BadRequest("Nothing was changed");
         }
-        return store.update(ticket.edited(newSummary, newRisk, newImpact, newActions, by, Instant.now()));
+        return trail.recorded(() -> store.update(ticket.edited(newSummary, newRisk, newImpact, newActions, by,
+                Instant.now())), saved -> record(saved, Action.EDITED, by, null));
     }
 
     /**
@@ -358,21 +375,23 @@ public class RiskTicketService {
                 && why.equals(current.reason())) {
             throw new ApiExceptions.BadRequest("Nothing was changed");
         }
-        return store.update(ticket.overridden(priority, dueDate, why, by, Instant.now()));
+        return trail.recorded(() -> store.update(ticket.overridden(priority, dueDate, why, by, Instant.now())),
+                saved -> record(saved, Action.OVERRIDDEN, by, why));
     }
 
     /**
      * Withdraw the override before deciding: the ticket goes back to Aegis's own priority and due date. Only while
      * the response awaits a decision.
      */
-    public RiskTicket withdrawOverride(UUID ticketId, long seenVersion) {
+    public RiskTicket withdrawOverride(UUID ticketId, UUID by, long seenVersion) {
         RiskTicket ticket = get(ticketId);
         expectVersion(ticket, seenVersion);
         awaitingDecision(ticket, "changed");
         if (ticket.override() == null) {
             throw new ApiExceptions.BadRequest("Aegis's priority and due date haven't been overridden");
         }
-        return store.update(ticket.overrideWithdrawn());
+        return trail.recorded(() -> store.update(ticket.overrideWithdrawn()),
+                saved -> record(saved, Action.OVERRIDE_WITHDRAWN, by, null));
     }
 
     public RiskTicket get(UUID ticketId) {
@@ -407,6 +426,13 @@ public class RiskTicketService {
         inventoryStore.findBusinessServicesByIds(serviceIds)
                 .forEach((id, service) -> names.put(id, SensitiveText.redact(service.getName())));
         return names;
+    }
+
+    /** A step on this ticket for the decision trail, with the ticket as it now stands and its service's name. */
+    private DecisionRecord.Entry record(RiskTicket ticket, Action action, UUID actor, String reason) {
+        return new DecisionRecord.Entry(Subject.RISK_TICKET, ticket.id(), ticket.id(), ticket.serviceId(),
+                serviceNames(List.of(ticket.serviceId())).get(ticket.serviceId()), ticket.changeSignalId(),
+                ticket.changeTitle(), action, actor, reason, ticket.score(), ticket.tier(), ticket);
     }
 
     private Sections sections(UUID ticketId, SignalType type, String title, String changeTitle, ChangeSignal signal,

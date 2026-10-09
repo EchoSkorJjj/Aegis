@@ -30,6 +30,10 @@ import com.aegis.core.actions.upgrade.UpgradePullRequestText.Facts;
 import com.aegis.core.actions.upgrade.UpgradePullRequestText.Rationale;
 import com.aegis.core.ai.AiDrafter;
 import com.aegis.core.ai.AiDtos;
+import com.aegis.core.audit.DecisionRecord;
+import com.aegis.core.audit.DecisionRecord.Action;
+import com.aegis.core.audit.DecisionRecord.Subject;
+import com.aegis.core.audit.DecisionTrail;
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.domain.BusinessService;
@@ -69,6 +73,9 @@ import org.springframework.stereotype.Service;
  * <p>The repository is always the service's own link, never a caller's input. At approval the manifest
  * is re-read and the edit re-applied, and the write is pinned to the revision just read, so a manifest
  * that changed in between is refused rather than overwritten.
+ *
+ * <p>Every step — drafted, approved, opened or failed, dismissed — is recorded in the {@link DecisionTrail} with the
+ * proposal as it then stood, in the same transaction as the step (E10 story 1).
  */
 @Service
 public class UpgradeProposalService {
@@ -89,6 +96,7 @@ public class UpgradeProposalService {
     private final UpgradeProposalStore store;
     private final SbomGenerationProperties repositoryHosts;
     private final PullRequestHosts pullRequestHosts;
+    private final DecisionTrail trail;
 
     public UpgradeProposalService(
             InventoryService inventory,
@@ -100,7 +108,8 @@ public class UpgradeProposalService {
             PrProviders providers,
             UpgradeProposalStore store,
             SbomGenerationProperties repositoryHosts,
-            PullRequestHosts pullRequestHosts) {
+            PullRequestHosts pullRequestHosts,
+            DecisionTrail trail) {
         this.inventory = inventory;
         this.inventoryStore = inventoryStore;
         this.scoring = scoring;
@@ -111,6 +120,7 @@ public class UpgradeProposalService {
         this.store = store;
         this.repositoryHosts = repositoryHosts;
         this.pullRequestHosts = pullRequestHosts;
+        this.trail = trail;
     }
 
     /**
@@ -256,11 +266,12 @@ public class UpgradeProposalService {
                 plan.edits(), planned.confidence().name(), planned.evidence(), planned.followUps());
         String body = UpgradePullRequestText.body(facts, rationale(id, facts));
         Edit first = plan.edits().getFirst();
-        return Optional.of(store.create(new UpgradeProposal(
+        return Optional.of(trail.recorded(() -> store.create(new UpgradeProposal(
                 id, plan.serviceId(), plan.changeSignalId(), plan.vulnerabilityId(), riskTicketId, plan.edits(),
                 planned.repositoryUrl(), planned.baseBranch(), headBranch(first.packageName(), first.toVersion(), id),
                 planned.confidence(), UpgradePullRequestText.title(plan.edits(), plan.vulnerabilityId()), body,
-                UpgradeProposalStatus.PROPOSED, drafter, null, null, null, null, null, null, null, 0)));
+                UpgradeProposalStatus.PROPOSED, drafter, null, null, null, null, null, null, null, 0)),
+                saved -> record(saved, Action.DRAFTED, drafter, null)));
     }
 
     /**
@@ -312,12 +323,16 @@ public class UpgradeProposalService {
                     + "dismiss it and draft a new one");
         }
         String title = issueKey == null ? proposal.title() : UpgradePullRequestText.titled(issueKey, proposal.title());
-        UpgradeProposal opening = store.update(proposal.opening(approver, now, title));
+        UpgradeProposal opening = trail.recorded(() -> store.update(proposal.opening(approver, now, title)),
+                saved -> record(saved, Action.APPROVED, approver, null));
         try {
-            return store.update(opening.opened(openDraftPullRequest(opening, issueKey)));
+            PullRequestRef pullRequest = openDraftPullRequest(opening, issueKey);
+            return trail.recorded(() -> store.update(opening.opened(pullRequest)),
+                    saved -> record(saved, Action.OPENED, approver, null));
         } catch (RuntimeException failure) {
             try {
-                store.update(opening.failed(failureMessage(failure)));
+                trail.recorded(() -> store.update(opening.failed(failureMessage(failure))),
+                        saved -> record(saved, Action.OPENING_FAILED, approver, saved.failureMessage()));
             } catch (RuntimeException recording) {
                 failure.addSuppressed(recording);
             }
@@ -331,7 +346,8 @@ public class UpgradeProposalService {
             throw new ApiExceptions.Conflict("An upgrade proposal that is "
                     + proposal.status().name().toLowerCase(Locale.ROOT) + " cannot be dismissed");
         }
-        return store.update(proposal.dismissed(by, Instant.now(), reason.trim()));
+        return trail.recorded(() -> store.update(proposal.dismissed(by, Instant.now(), reason.trim())),
+                saved -> record(saved, Action.DISMISSED, by, saved.dismissReason()));
     }
 
     public UpgradeProposal get(UUID proposalId) {
@@ -358,6 +374,17 @@ public class UpgradeProposalService {
         inventoryStore.findBusinessServicesByIds(serviceIds)
                 .forEach((id, service) -> names.put(id, SensitiveText.redact(service.getName())));
         return names;
+    }
+
+    /**
+     * A step on this proposal for the decision trail, with the proposal as it now stands. It belongs to its response
+     * (the risk ticket), or stands as its own when it was drafted before responses.
+     */
+    private DecisionRecord.Entry record(UpgradeProposal proposal, Action action, UUID actor, String reason) {
+        return new DecisionRecord.Entry(Subject.UPGRADE_PULL_REQUEST, proposal.id(),
+                proposal.riskTicketId() == null ? proposal.id() : proposal.riskTicketId(), proposal.serviceId(),
+                serviceNames(List.of(proposal.serviceId())).get(proposal.serviceId()), proposal.changeSignalId(),
+                proposal.vulnerabilityId(), action, actor, reason, null, null, proposal);
     }
 
     /**

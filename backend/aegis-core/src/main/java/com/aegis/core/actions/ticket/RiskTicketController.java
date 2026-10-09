@@ -189,8 +189,8 @@ public class RiskTicketController {
     @Operation(summary = "Withdraw the override: the ticket goes back to Aegis's own priority and due date (an analyst "
             + "or the service's owners; while it awaits a decision)")
     public RiskTicketResponse withdrawOverride(@PathVariable UUID id,
-            @Valid @RequestBody WithdrawOverrideRequest request) {
-        return respond(tickets.withdrawOverride(id, request.version()));
+            @Valid @RequestBody WithdrawOverrideRequest request, Authentication authentication) {
+        return respond(tickets.withdrawOverride(id, callerId(authentication), request.version()));
     }
 
     @PostMapping("/{id}/pull-requests")
