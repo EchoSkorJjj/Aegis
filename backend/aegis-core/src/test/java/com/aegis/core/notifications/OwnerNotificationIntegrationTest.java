@@ -1,11 +1,13 @@
 package com.aegis.core.notifications;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import java.util.stream.IntStream;
 
 import com.aegis.core.advisories.Advisory;
 import com.aegis.core.advisories.AdvisoryStore;
@@ -23,6 +25,7 @@ import com.aegis.core.notifications.OwnerNotification.EmailStatus;
 import com.aegis.core.platform.identity.IdentityInternalApi.OwnerEmailItem;
 import com.aegis.core.platform.scheduling.SchedulerLease;
 import com.aegis.core.platform.tenant.CurrentOrg;
+import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 import com.aegis.core.support.AbstractIntegrationTest;
 import com.aegis.core.support.FakeIdentityInternalApi;
 import com.aegis.core.support.TestOwners;
@@ -32,6 +35,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
@@ -114,7 +118,8 @@ class OwnerNotificationIntegrationTest extends AbstractIntegrationTest {
             assertThat(email.items()).containsExactlyInAnyOrder(
                     new OwnerEmailItem("CVE-2097-" + tag + " in notify-lib-" + tag + " 1.0.0",
                             "Internal " + tag, "/findings/" + advisory.id()),
-                    new OwnerEmailItem("API outage at Cloud " + tag, "Internal " + tag, "/findings/" + outage.id()));
+                    new OwnerEmailItem("Cloud " + tag + " status page: \"API outage\"", "Internal " + tag,
+                            "/findings/" + outage.id()));
         });
 
         // Looking again finds the same items: nobody is told twice.
@@ -178,15 +183,21 @@ class OwnerNotificationIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void aFailedEmailIsTriedAgainOnTheNextRunAndStillSentOnce() {
+    void aFailedEmailIsTriedAgainOnceItsWaitHasPassedAndStillSentOnce() {
         identity.failNext(owner.getUserId(), 1);
 
         inOrg(notifier::notifyOwners);
         assertThat(notificationsOf(owner.getUserId())).extracting(OwnerNotification::emailStatus)
-                .containsOnly(EmailStatus.PENDING);
+                .containsOnly(EmailStatus.SENDING);
         assertThat(identity.sentTo(owner.getUserId())).isEmpty();
 
+        // Not before its wait (five minutes) has passed.
         inOrg(notifier::notifyOwners);
+        assertThat(identity.sentTo(owner.getUserId())).isEmpty();
+
+        dueNow(owner.getUserId());
+        inOrg(notifier::notifyOwners);
+        dueNow(owner.getUserId());
         inOrg(notifier::notifyOwners);
         assertThat(identity.sentTo(owner.getUserId())).singleElement()
                 .satisfies(email -> assertThat(email.items()).hasSize(2));
@@ -195,12 +206,77 @@ class OwnerNotificationIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void anEmailThatKeepsFailingIsGivenUpAfterThreeTries() {
+    void anEmailThatWentOutThoughTheCallFailedIsNeverSentAgain() {
+        // identity-service sends it, but aegis-core sees a timeout: it asks again under the same delivery id.
+        identity.sendThenFail(owner.getUserId(), 1);
+
+        inOrg(notifier::notifyOwners);
+        assertThat(identity.sentTo(owner.getUserId())).hasSize(1);
+        assertThat(notificationsOf(owner.getUserId())).extracting(OwnerNotification::emailStatus)
+                .containsOnly(EmailStatus.SENDING);
+
+        dueNow(owner.getUserId());
+        inOrg(notifier::notifyOwners);
+        assertThat(identity.sentTo(owner.getUserId())).hasSize(1);
+        assertThat(notificationsOf(owner.getUserId())).extracting(OwnerNotification::emailStatus)
+                .containsOnly(EmailStatus.SENT);
+    }
+
+    @Test
+    void anEmailLeftUnconfirmedIsClaimedByOneRunOnlyAndAskedForAgainUnderItsOwnId() {
+        // A run claimed this notification's email, then stopped before anything was recorded.
+        UUID crashed = UUID.randomUUID();
+        OwnerNotification stranded = new OwnerNotification(UUID.randomUUID(), owner.getUserId(),
+                internalService.getId(), "TEST:" + tag, advisory.id(), OwnerNotification.ItemKind.VULNERABILITY,
+                "Stranded " + tag, "Internal " + tag, 1.0, ImpactTier.LOW, null, null, EmailStatus.PENDING, null);
+        inOrg(() -> store.addIfAbsent(stranded));
+        Instant unconfirmedUntil = Instant.now().plus(OwnerNotifier.IN_FLIGHT);
+        assertThat(inOrg(() -> store.claimForEmail(crashed, List.of(stranded.id()), unconfirmedUntil))
+                .notifications()).hasSize(1);
+        // Claimed already: no other run takes it.
+        assertThat(inOrg(() -> store.claimForEmail(UUID.randomUUID(), List.of(stranded.id()), unconfirmedUntil))
+                .notifications()).isEmpty();
+
+        inOrg(notifier::notifyOwners);
+        assertThat(identity.sentTo(owner.getUserId())).singleElement()
+                .satisfies(email -> assertThat(email.items()).hasSize(2));
+
+        dueNow(owner.getUserId());
+        inOrg(notifier::notifyOwners);
+        dueNow(owner.getUserId());
+        inOrg(notifier::notifyOwners);
+        assertThat(identity.sentTo(owner.getUserId())).hasSize(2).last().satisfies(email -> {
+            assertThat(email.deliveryId()).isEqualTo(crashed);
+            assertThat(email.items()).extracting(OwnerEmailItem::title).containsExactly("Stranded " + tag);
+        });
+    }
+
+    @Test
+    void anEmailThatKeepsFailingIsGivenUpAfterItsLastTry() {
         identity.failNext(owner.getUserId(), OwnerNotifier.MAX_EMAIL_ATTEMPTS + 5);
         for (int run = 0; run < OwnerNotifier.MAX_EMAIL_ATTEMPTS + 2; run++) {
             inOrg(notifier::notifyOwners);
+            dueNow(owner.getUserId());
         }
         assertThat(notificationsOf(owner.getUserId())).extracting(OwnerNotification::emailStatus)
+                .containsOnly(EmailStatus.FAILED);
+        assertThat(identity.sentTo(owner.getUserId())).isEmpty();
+    }
+
+    @Test
+    void anEmailIsTriedForAboutThirteenHoursWithGrowingWaits() {
+        assertThat(IntStream.rangeClosed(1, OwnerNotifier.MAX_EMAIL_ATTEMPTS - 1)
+                .mapToObj(OwnerNotifier::retryDelay).toList())
+                .containsExactly(Duration.ofMinutes(5), Duration.ofMinutes(20), Duration.ofMinutes(80),
+                        Duration.ofMinutes(320), Duration.ofHours(6));
+    }
+
+    @Test
+    void anEmailIdentityServiceRefusesIsGivenUpAtOnce() {
+        identity.reject(owner.getUserId());
+        inOrg(notifier::notifyOwners);
+
+        assertThat(notificationsOf(owner.getUserId())).hasSize(2).extracting(OwnerNotification::emailStatus)
                 .containsOnly(EmailStatus.FAILED);
         assertThat(identity.sentTo(owner.getUserId())).isEmpty();
     }
@@ -214,6 +290,62 @@ class OwnerNotificationIntegrationTest extends AbstractIntegrationTest {
         assertThat(notificationsOf(owner.getUserId())).hasSize(2).extracting(OwnerNotification::emailStatus)
                 .containsOnly(EmailStatus.UNREACHABLE);
         assertThat(identity.sentTo(owner.getUserId())).isEmpty();
+    }
+
+    @Test
+    void aVulnerabilityIsTheSameItemWhicheverFeedsAdvisoryRepresentsIt() {
+        inOrg(notifier::notifyOwners);
+
+        // OSV revises the same CVE later than NVD did, so its advisory now represents it (V21).
+        Instant later = Instant.parse("2022-01-01T00:00:00Z");
+        Advisory revised = advisories.upsert(new Advisory(null, "osv", "GHSA-" + tag, "CVE-2097-" + tag,
+                "Notify CVE-2097-" + tag, later, later,
+                new Advisory.Cvss("3.1", null, new BigDecimal("10.0"), "CRITICAL"),
+                List.of(AffectedProduct.ofPackage("npm", "notify-lib-" + tag, null, "0", null, null, "2.0.0"))));
+
+        OwnerNotifier.Run again = inOrg(notifier::notifyOwners);
+
+        assertThat(again).isEqualTo(new OwnerNotifier.Run(0, 0));
+        assertThat(identity.sentTo(owner.getUserId())).hasSize(1);
+        // Its page follows the item.
+        assertThat(notificationsOf(owner.getUserId())).extracting(OwnerNotification::changeSignalId)
+                .containsExactlyInAnyOrder(revised.id(), outage.id());
+    }
+
+    @Test
+    void whoeverDraftedAResponseInReviewIsNotToldItNeedsTheirDecision() throws Exception {
+        Owner other = inOrg(() -> owners.assign(internalService.getId(), "Other " + tag));
+        mvc.perform(post("/api/actions/risk-tickets").with(as("SERVICE_OWNER", owner.getUserId()))
+                        .contentType(MediaType.APPLICATION_JSON).content(draft(advisory.id())))
+                .andExpect(status().isCreated());
+
+        inOrg(notifier::notifyOwners);
+
+        assertThat(notificationsOf(owner.getUserId())).extracting(OwnerNotification::changeSignalId)
+                .containsExactly(outage.id());
+        assertThat(notificationsOf(other.getUserId())).extracting(OwnerNotification::changeSignalId)
+                .containsExactlyInAnyOrder(advisory.id(), outage.id());
+    }
+
+    @Test
+    void aServiceNameTheRedactionLengthensStillFitsAndTheItemIsNotified() {
+        String head = "Long " + tag + " ";
+        String name = head + "x".repeat(255 - head.length() - " a@b.io".length()) + " a@b.io";
+        Owner longOwner = inOrg(() -> {
+            BusinessService service = inventory.createBusinessService(name, BusinessCriticality.HIGH,
+                    ServiceExposure.ISOLATED);
+            SoftwareComponent vulnerable = inventory.createSoftwareComponent("npm", "notify-lib-" + tag, "1.0.1");
+            inventory.addServiceComponent(service.getId(), vulnerable.getId());
+            return owners.assign(service.getId(), "Long owner " + tag);
+        });
+
+        inOrg(notifier::notifyOwners);
+
+        assertThat(notificationsOf(longOwner.getUserId())).singleElement().satisfies(notification -> {
+            // Redacted (longer than the name), then cut to the column.
+            assertThat(notification.serviceName()).hasSize(255).doesNotContain("a@b.io").endsWith("…");
+            assertThat(notification.emailStatus()).isEqualTo(EmailStatus.SENT);
+        });
     }
 
     @Test
@@ -264,6 +396,13 @@ class OwnerNotificationIntegrationTest extends AbstractIntegrationTest {
     }
 
     // ---- helpers -----------------------------------------------------------------------------------
+
+    /** Whatever email this user has claimed and unconfirmed is due now, as if its wait had passed. */
+    private static void dueNow(UUID userId) {
+        new JdbcTemplate(superuserDataSource()).update("update core.owner_notifications"
+                + " set email_due_at = now() - interval '1 second' where user_id = ? and email_status = 'SENDING'",
+                userId);
+    }
 
     private List<OwnerNotification> notificationsOf(UUID userId) {
         return inOrg(() -> store.findForUser(userId, false, PageRequest.of(0, 50)).getContent());

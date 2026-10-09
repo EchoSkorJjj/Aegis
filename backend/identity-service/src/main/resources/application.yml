@@ -17,6 +17,13 @@ spring:
   flyway:
     enabled: true
     baseline-on-migrate: true
+  # Bounds on each SMTP step (milliseconds), used once spring.mail.host is set: a mail server that stops answering
+  # fails the send instead of holding a request thread for good. The deployments add auth and STARTTLS here.
+  mail:
+    properties:
+      "[mail.smtp.connectiontimeout]": 5000
+      "[mail.smtp.timeout]": 10000
+      "[mail.smtp.writetimeout]": 10000
 
 # ---- Identity service configuration -------------------------------------
 # The "auth seam": switch how tokens are produced/validated without code changes.

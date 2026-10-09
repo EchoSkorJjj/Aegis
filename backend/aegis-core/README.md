@@ -93,24 +93,31 @@ edits. Persisted findings with a lifecycle status are a later story; owners are 
 
 When an item in the triage queue needs a decision — **New** (no response yet) or **In review** (drafted,
 undecided) — each assigned owner of its service is told **once**: a notification under the bell in the app, and
-an email. A scheduled job (`OwnerNotificationJob`, every `AEGIS_NOTIFICATIONS_INTERVAL`, on the instance holding
-the scheduler lease) asks identity-service for every organization, then in each one reads the triage queue
-(`TriageQueue.all`, the same items My services shows) and records one row per owner and item (V35,
-`owner_notifications`, unique on organization, owner, service and change). Approved, actioned or closed items tell
-nobody; a newly assigned owner is told about what is already waiting.
+an email. Whoever drafted a response in review isn't told it needs their decision (it needs someone else's, or,
+with no pull request, they file it themselves). A scheduled job (`OwnerNotificationJob`, every
+`AEGIS_NOTIFICATIONS_INTERVAL`, on the instance holding the scheduler lease) asks identity-service for every
+organization, then in each one reads the triage queue for the services that have an owner (`TriageQueue.assigned`,
+the same items My services shows) and records one row per owner and item (V35, `owner_notifications`, unique on
+organization, owner, service and item). An item is a vulnerable package by its canonical vulnerability id (a CVE),
+whichever feed's advisory represents it today, or an outage by its incident; the notification's page follows the
+item's change signal. Approved, actioned or closed items tell nobody; a newly assigned owner is told about what is
+already waiting.
 
-- **Never emailed twice about the same item.** Only a row's first sighting creates it; its email is claimed
-  (`SENDING`) before it goes out, so a crash halfway never resends. A failed email returns to `PENDING` and is
-  tried on the next run, up to three times (`FAILED`). Everything due for one owner goes in one email (50 items at
-  most per email).
+- **Never emailed twice about the same item.** Everything due for one owner goes in one email (50 items at most),
+  claimed under a delivery id before it is sent. identity-service sends each delivery id once, so whenever aegis-core
+  can't tell whether an email went out — a failure or timeout, a crash before it recorded the answer — it asks again
+  under the same id: after a failure with growing waits (5 minutes, then four times longer, up to 6 hours), after a
+  crash once 15 minutes have passed. It gives up (`FAILED`) after six tries, about thirteen hours, or at once when
+  identity-service refuses the request itself.
 - **identity-service sends it**, through its existing `EmailSender` (Mailhog locally,
   [http://localhost:8025](http://localhost:8025); Amazon SES deployed), from its internal API
   (`POST /internal/notifications/owner-email`; `GET /internal/organizations` lists the organizations). That API
   takes the service token (`IDENTITY_SERVICE_TOKEN` here, `IDENTITY_INTERNAL_SERVICE_TOKEN` there), not a user's,
   because no user is asking; the gateway never routes it. It emails only an enabled, verified, active member of
   the organization — anyone else is `UNREACHABLE` and sees the item in the app only — and it writes the email
-  itself from the items, each linking to a path in the app (`/findings/{changeSignalId}`), never a URL of
-  aegis-core's.
+  itself from the items, each linking to a path in the app (`/findings/{changeSignalId}`). The only links in the
+  email are the app's: an outage's title is its vendor's status page wording, quoted and attributed, and
+  identity-service removes any URL from item text (and defangs a host with a path, `github[.]com/…`).
 - **Off by default** (`AEGIS_NOTIFICATIONS_ENABLED`); docker compose turns it on with a dev token and a one-minute
   interval. The first run in an organization tells every owner about everything already waiting, in one email
   each.
@@ -122,8 +129,9 @@ nobody; a newly assigned owner is told about what is already waiting.
 | POST | `/api/notifications/{id}/read` | any domain role | Mark one of yours read → 204 (404 if it isn't yours) |
 | POST | `/api/notifications/read-all` | any domain role | `{marked}` |
 
-The frontend's bell (`components/app/notification-bell.tsx`, in the top bar for the domain roles) shows the unread
-count, checked every minute, and the latest ten; opening one marks it read and goes to the item.
+The frontend's bell (`components/app/notification-bell.tsx`, in the top bar for service owners, the only ones ever
+notified) shows the unread count, checked every minute, and the latest ten; opening one marks it read and goes to the
+item.
 
 ## Service repositories and draft PR providers (E8 Story 2)
 

@@ -35,7 +35,9 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>The email goes only to an enabled user with a verified address who is an active member of the named
  * organization — whoever aegis-core names. Its wording is identity-service's ({@link EmailSender}); aegis-core
- * sends only the items, each pointing at a path in the app, never a link of its own.
+ * sends only the items, each pointing at a path in the app, and the only links in the email are the app's own. Each
+ * email is sent once per delivery id, so aegis-core may always ask again when it can't tell whether a request went
+ * through.
  */
 @RestController
 @RequestMapping("/internal")
@@ -47,19 +49,23 @@ public class InternalController {
     private final OrganizationRepository organizations;
     private final OrganizationMemberRepository members;
     private final UserRepository users;
+    private final OwnerEmailDeliveryRepository deliveries;
     private final EmailSender emailSender;
 
-    public InternalController(OrganizationRepository organizations, OrganizationMemberRepository members,
-            UserRepository users, EmailSender emailSender) {
+    InternalController(OrganizationRepository organizations, OrganizationMemberRepository members,
+            UserRepository users, OwnerEmailDeliveryRepository deliveries, EmailSender emailSender) {
         this.organizations = organizations;
         this.members = members;
         this.users = users;
+        this.deliveries = deliveries;
         this.emailSender = emailSender;
     }
 
+    /** {@code deliveryId} names the email: the same id again is never sent twice. */
     public record OwnerEmailRequest(
             @NotNull UUID orgId,
             @NotNull UUID userId,
+            @NotNull UUID deliveryId,
             @NotEmpty @Size(max = 50) List<@Valid @NotNull Item> items) {
     }
 
@@ -75,11 +81,19 @@ public class InternalController {
         return organizations.findAll().stream().map(Organization::getId).toList();
     }
 
+    /**
+     * The delivery is recorded first, in the transaction that sends the email: a repeat finds it and is answered as
+     * sent, and a refusal or a failed send rolls it back, so asking again can still send the email.
+     */
     @PostMapping("/notifications/owner-email")
-    @Transactional(readOnly = true)
-    @Operation(summary = "Email a service owner the items that need their decision: 204 when sent, 404 when they "
-            + "are not an active member of the organization, 409 when their account can't be emailed")
+    @Transactional
+    @Operation(summary = "Email a service owner the items that need their decision, once per delivery id: 204 when "
+            + "sent (now or before), 404 when they are not an active member of the organization, 409 when their "
+            + "account can't be emailed")
     public ResponseEntity<Void> emailOwner(@Valid @RequestBody OwnerEmailRequest request) {
+        if (deliveries.record(request.deliveryId()) == 0) {
+            return ResponseEntity.noContent().build();
+        }
         members.findByOrgIdAndUserId(request.orgId(), request.userId())
                 .filter(member -> member.getStatus() == MembershipStatus.ACTIVE)
                 .orElseThrow(() -> new ApiExceptions.NotFound("Not an active member of this organization"));

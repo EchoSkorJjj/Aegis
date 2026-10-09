@@ -62,8 +62,9 @@ class HttpIdentityInternalApi implements IdentityInternalApi {
     }
 
     @Override
-    public EmailOutcome emailOwner(UUID orgId, UUID userId, List<OwnerEmailItem> items) {
-        String request = objectMapper.writeValueAsString(Map.of("orgId", orgId, "userId", userId, "items", items));
+    public EmailOutcome emailOwner(UUID orgId, UUID userId, UUID deliveryId, List<OwnerEmailItem> items) {
+        String request = objectMapper.writeValueAsString(
+                Map.of("orgId", orgId, "userId", userId, "deliveryId", deliveryId, "items", items));
         try {
             http.post().uri("/internal/notifications/owner-email")
                     .contentType(MediaType.APPLICATION_JSON)
@@ -73,6 +74,8 @@ class HttpIdentityInternalApi implements IdentityInternalApi {
             return EmailOutcome.SENT;
         } catch (HttpClientErrorException.NotFound | HttpClientErrorException.Conflict unreachable) {
             return EmailOutcome.UNREACHABLE;
+        } catch (HttpClientErrorException.BadRequest refused) {
+            return EmailOutcome.REJECTED;
         } catch (RestClientException unreachableOrFailed) {
             throw new ApiExceptions.UpstreamUnavailable("identity-service did not send the email");
         }

@@ -54,7 +54,7 @@ test("an owner sees how many items need their decision, and opening one marks it
   const { calls } = await fakeBff(page, "SERVICE_OWNER", [
     notification(),
     notification({ id: "notification-2", changeSignalId: "signal-2", itemKind: "VENDOR_OUTAGE",
-      title: "API outage at Acme Pay", score: 60, tier: "MEDIUM" }),
+      title: 'Acme Pay status page: "API outage"', score: 60, tier: "MEDIUM" }),
   ]);
   await page.goto("/dashboard");
 
@@ -66,7 +66,7 @@ test("an owner sees how many items need their decision, and opening one marks it
   await expect(panel.getByText("Vendor outage in Payments API", { exact: false })).toBeVisible();
   await expect(panel.getByLabel("Unread")).toHaveCount(2);
 
-  await panel.getByRole("button", { name: /API outage at Acme Pay/ }).click();
+  await panel.getByRole("button", { name: /Acme Pay status page: "API outage"/ }).click();
   await expect(page).toHaveURL(/\/findings\/signal-2$/);
   expect(calls).toContain("POST /api/notifications/notification-2/read");
   // The item's page is the item detail spec's; back where we were, one is left unread.
@@ -93,10 +93,12 @@ test("with nothing yet, the bell says what will appear there", async ({ page }) 
     .toBeVisible();
 });
 
-test("someone without a domain role has no bell and never asks for notifications", async ({ page }) => {
-  const { calls } = await fakeBff(page, "USER", [notification()]);
-  await page.goto("/dashboard");
-  await expect(page.getByRole("button", { name: "Toggle Sidebar" }).first()).toBeVisible();
-  await expect(page.getByRole("button", { name: /Notifications/ })).toHaveCount(0);
-  expect(calls).toEqual([]);
-});
+for (const role of ["USER", "ANALYST", "COMPLIANCE_ADMIN"] as const) {
+  test(`${role}, never assigned a service, has no bell and never asks for notifications`, async ({ page }) => {
+    const { calls } = await fakeBff(page, role, [notification()]);
+    await page.goto("/dashboard");
+    await expect(page.getByRole("button", { name: "Toggle Sidebar" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /Notifications/ })).toHaveCount(0);
+    expect(calls).toEqual([]);
+  });
+}

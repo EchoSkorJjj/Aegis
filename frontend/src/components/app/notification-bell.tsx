@@ -9,7 +9,6 @@ import { formatDateTime } from "@/components/app/responses/response-status";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ApiError, notificationApi } from "@/lib/api";
-import { canReadInventory } from "@/lib/roles";
 import type { OwnerNotification } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -20,11 +19,11 @@ const SHOWN = 10;
 /**
  * The bell in the top bar (E9 story 5): items in the services you own that need your decision, newest first,
  * with how many you haven't read. Opening one marks it read and takes you to the item. Each item is also emailed
- * to you once. Only for the domain roles, the ones aegis-core answers for.
+ * to you once. Only for service owners: nobody else is ever assigned a service, so nobody else is notified.
  */
 export function NotificationBell() {
   const { user, isLoading } = useAuth();
-  const enabled = !isLoading && canReadInventory(user?.roles ?? []);
+  const enabled = !isLoading && (user?.roles ?? []).includes("SERVICE_OWNER");
   const router = useRouter();
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);

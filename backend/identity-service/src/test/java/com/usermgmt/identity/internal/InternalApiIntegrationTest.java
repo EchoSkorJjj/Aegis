@@ -82,6 +82,46 @@ class InternalApiIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void sendsEachDeliveryOnceHoweverOftenItIsAskedFor() throws Exception {
+        User owner = member(MembershipStatus.ACTIVE, true, true);
+        UUID delivery = UUID.randomUUID();
+
+        // aegis-core asks again under the same id when it couldn't tell whether the first request went through.
+        for (int asked = 0; asked < 2; asked++) {
+            mvc.perform(post(EMAIL_PATH).header(InternalSecurityConfig.HEADER, TOKEN)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(request(org.getId(), owner.getId(), delivery, "/findings/1b2c-3d")))
+                    .andExpect(status().isNoContent());
+        }
+        assertThat(emails.ownerNotificationsFor(owner.getEmail())).hasSize(1);
+
+        mvc.perform(post(EMAIL_PATH).header(InternalSecurityConfig.HEADER, TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request(org.getId(), owner.getId(), "/findings/1b2c-3d")))
+                .andExpect(status().isNoContent());
+        assertThat(emails.ownerNotificationsFor(owner.getEmail())).hasSize(2);
+    }
+
+    @Test
+    void aDeliveryNotSentCanStillBeSentLater() throws Exception {
+        User joining = member(MembershipStatus.INVITED, true, true);
+        UUID delivery = UUID.randomUUID();
+        mvc.perform(post(EMAIL_PATH).header(InternalSecurityConfig.HEADER, TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request(org.getId(), joining.getId(), delivery, "/findings/x")))
+                .andExpect(status().isNotFound());
+
+        OrganizationMember membership = members.findByOrgIdAndUserId(org.getId(), joining.getId()).orElseThrow();
+        membership.setStatus(MembershipStatus.ACTIVE);
+        members.save(membership);
+        mvc.perform(post(EMAIL_PATH).header(InternalSecurityConfig.HEADER, TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request(org.getId(), joining.getId(), delivery, "/findings/x")))
+                .andExpect(status().isNoContent());
+        assertThat(emails.ownerNotificationsFor(joining.getEmail())).hasSize(1);
+    }
+
+    @Test
     void emailsNobodyOutsideTheOrganizationOrUnreachable() throws Exception {
         User stranger = member(null, true, true);
         User suspended = member(MembershipStatus.SUSPENDED, true, true);
@@ -118,7 +158,13 @@ class InternalApiIntegrationTest extends AbstractIntegrationTest {
         }
         mvc.perform(post(EMAIL_PATH).header(InternalSecurityConfig.HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"orgId\":\"%s\",\"userId\":\"%s\",\"items\":[]}".formatted(org.getId(), owner.getId())))
+                        .content("{\"orgId\":\"%s\",\"userId\":\"%s\",\"deliveryId\":\"%s\",\"items\":[]}"
+                                .formatted(org.getId(), owner.getId(), UUID.randomUUID())))
+                .andExpect(status().isBadRequest());
+        // Every email is named, so a repeat can be recognised.
+        mvc.perform(post(EMAIL_PATH).header(InternalSecurityConfig.HEADER, TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request(org.getId(), owner.getId(), null, "/findings/1")))
                 .andExpect(status().isBadRequest());
         assertThat(emails.ownerNotificationsFor(owner.getEmail())).isEmpty();
     }
@@ -138,9 +184,13 @@ class InternalApiIntegrationTest extends AbstractIntegrationTest {
     }
 
     private static String request(UUID orgId, UUID userId, String path) {
+        return request(orgId, userId, UUID.randomUUID(), path);
+    }
+
+    private static String request(UUID orgId, UUID userId, UUID deliveryId, String path) {
         return """
-                {"orgId":"%s","userId":"%s","items":[
+                {"orgId":"%s","userId":"%s","deliveryId":%s,"items":[
                   {"title":"CVE-2099-1 in log4j-core 2.14.1","serviceName":"Payments API","path":"%s"}]}
-                """.formatted(orgId, userId, path);
+                """.formatted(orgId, userId, deliveryId == null ? "null" : "\"" + deliveryId + "\"", path);
     }
 }

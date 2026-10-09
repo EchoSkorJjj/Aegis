@@ -82,10 +82,17 @@ own filter chain and takes no user token: only the shared service token in `X-Se
 (`IDENTITY_INTERNAL_SERVICE_TOKEN`; empty, the default, refuses every call).
 
 - `GET /internal/organizations` — every organization's id.
-- `POST /internal/notifications/owner-email` — `{orgId, userId, items: [{title, serviceName, path}]}`: emails the
-  member the items that need their decision, through `EmailSender`. 204 when sent; 404 unless they are an
-  active member of that organization; 409 when their account is disabled or its address unverified. Each
-  item's `path` must be a path in the app (`/findings/…`), and identity-service writes the email itself.
+- `POST /internal/notifications/owner-email` — `{orgId, userId, deliveryId, items: [{title, serviceName, path}]}`:
+  emails the member the items that need their decision, through `EmailSender`, once per `deliveryId` (V16,
+  `owner_email_deliveries`, recorded in the transaction that sends it): aegis-core asks again under the same id
+  whenever it can't tell whether a request went through, and a repeat is answered 204 without sending. 204 when
+  sent; 404 unless they are an active member of that organization; 409 when their account is disabled or its
+  address unverified. Each item's `path` must be a path in the app (`/findings/…`), and identity-service writes the
+  email itself: item text is one line, with any URL removed and a host with a path defanged (`github[.]com/…`), so
+  the only links are the app's own.
+
+SMTP sends are bounded (`spring.mail.properties`: 5 s to connect, 10 s per read or write), so a mail server that
+stops answering fails the send instead of holding a request thread.
 
 ## The auth seam (how it's "dynamic")
 

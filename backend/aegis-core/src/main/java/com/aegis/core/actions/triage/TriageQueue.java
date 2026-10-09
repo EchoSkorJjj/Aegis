@@ -168,15 +168,20 @@ public class TriageQueue {
     }
 
     /**
-     * Every material item in the organization, worst first, for work no user is asking for: the owner
-     * notifications (E9 story 5) tell each item's owners about it. The same items {@link #list} shows, unpaged and
-     * unfiltered; {@code canDraft} is false throughout, since there is no caller.
+     * Every material item in a service with an assigned owner, worst first, for work no user is asking for: the
+     * owner notifications (E9 story 5) tell those owners about it. The same items {@link #list} shows for those
+     * services, unpaged and unfiltered; {@code canDraft} is false throughout, since there is no caller. A service
+     * nobody owns is left out before anything is worked out, so an estate without owners costs two lookups.
      */
-    public List<Item> all() {
+    public List<Item> assigned() {
         Estate estate = estate();
-        Map<UUID, BusinessService> every = new LinkedHashMap<>();
-        estate.services().forEach(service -> every.put(service.getId(), service));
-        return material(every, estate.assignments(), NO_CALLER).stream().sorted(RANKING).toList();
+        Map<UUID, BusinessService> owned = new LinkedHashMap<>();
+        for (BusinessService service : estate.services()) {
+            if (estate.ownersOf(service.getId()).stream().anyMatch(owner -> owner.getUserId() != null)) {
+                owned.put(service.getId(), service);
+            }
+        }
+        return material(owned, estate.assignments(), NO_CALLER).stream().sorted(RANKING).toList();
     }
 
     /** No one: a scheduled job's view of the queue. */

@@ -4,16 +4,19 @@ import java.time.Instant;
 import java.util.UUID;
 
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 /**
- * One owner told about one item: a material vulnerability or vendor outage ({@code changeSignalId}) in one of
- * the services they own. The title, service name, score and tier are as they were when the item was first seen;
- * the item itself is live ({@code /findings/<changeSignalId>}). {@code readAt} is null until they read it.
+ * One owner told about one item: a material vulnerability or vendor outage in one of the services they own.
+ * {@code itemKey} is what makes it the same item from run to run (see {@link OwnerNotifier#itemKey}), and
+ * {@code changeSignalId} its page ({@code /findings/<changeSignalId>}), kept current. The title, service name,
+ * score and tier are as they were when the item was first seen. {@code readAt} is null until they read it.
  */
 public record OwnerNotification(
         UUID id,
         UUID userId,
         UUID serviceId,
+        @JsonIgnore String itemKey,
         UUID changeSignalId,
         ItemKind itemKind,
         String title,
@@ -28,8 +31,10 @@ public record OwnerNotification(
     public enum ItemKind { VULNERABILITY, VENDOR_OUTAGE }
 
     /**
-     * Where its email stands. Only {@code PENDING} is ever sent, and it is claimed ({@code SENDING}) first, so an
-     * owner is never emailed twice about the same item — even if the job stops halfway.
+     * Where its email stands. A notification is claimed into an email ({@code SENDING}, under a delivery id) before
+     * it is sent; until identity-service confirms it, the same email is asked for again under the same id, which
+     * identity-service sends only once. So an owner is never emailed twice about the same item — even if a call
+     * times out or the job stops halfway.
      */
     public enum EmailStatus {
         PENDING,
@@ -37,7 +42,7 @@ public record OwnerNotification(
         SENT,
         /** identity-service won't email that member: they left the organization, or can't be emailed. */
         UNREACHABLE,
-        /** Gave up after {@code OwnerNotifier.MAX_EMAIL_ATTEMPTS} errors. */
+        /** Gave up: identity-service refused the email, or it failed {@code OwnerNotifier.MAX_EMAIL_ATTEMPTS} times. */
         FAILED
     }
 
