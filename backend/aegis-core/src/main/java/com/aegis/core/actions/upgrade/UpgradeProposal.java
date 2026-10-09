@@ -7,6 +7,7 @@ import java.util.UUID;
 import com.aegis.core.actions.pr.PullRequestRef;
 import com.aegis.core.matching.MatchingDtos.MatchConfidence;
 import com.aegis.core.platform.common.SensitiveText;
+import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 
 /**
  * A reviewed plan to fix one vulnerability in one service with one pull request (E8 story 4): every edit it
@@ -17,8 +18,9 @@ import com.aegis.core.platform.common.SensitiveText;
  * <p>{@code riskTicketId} is the response it belongs to (E8 story 5): the risk ticket for the same
  * vulnerability and service, decided together. It is null only for a proposal drafted on its own before
  * responses existed. The repository and base branch are the service's link when the proposal was drafted;
- * approval refuses if the link has changed since. {@code version} is the optimistic lock that makes two
- * people deciding at once safe.
+ * approval refuses if the link has changed since. {@code score} and {@code tier} are the service's when the proposal
+ * was drafted, as its ticket keeps them (null for a proposal drafted before V36). {@code version} is the optimistic
+ * lock that makes two people deciding at once safe.
  */
 public record UpgradeProposal(
         UUID id,
@@ -31,6 +33,8 @@ public record UpgradeProposal(
         String baseBranch,
         String headBranch,
         MatchConfidence matchConfidence,
+        Double score,
+        ImpactTier tier,
         String title,
         String body,
         UpgradeProposalStatus status,
@@ -78,7 +82,7 @@ public record UpgradeProposal(
             UpgradeProposalStatus status, UUID decidedBy, Instant decidedAt, String dismissReason,
             String pullRequestUrl, String pullRequestNumber, String failureMessage, String title) {
         return new UpgradeProposal(id, serviceId, changeSignalId, vulnerabilityId, riskTicketId, edits, repositoryUrl,
-                baseBranch, headBranch, matchConfidence, title, body, status, createdBy, createdAt, decidedBy, decidedAt,
-                dismissReason, pullRequestUrl, pullRequestNumber, failureMessage, version);
+                baseBranch, headBranch, matchConfidence, score, tier, title, body, status, createdBy, createdAt,
+                decidedBy, decidedAt, dismissReason, pullRequestUrl, pullRequestNumber, failureMessage, version);
     }
 }

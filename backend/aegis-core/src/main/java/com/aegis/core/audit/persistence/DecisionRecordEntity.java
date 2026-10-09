@@ -1,6 +1,8 @@
 package com.aegis.core.audit.persistence;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import jakarta.persistence.Column;
@@ -15,6 +17,8 @@ import com.aegis.core.audit.DecisionRecord.Action;
 import com.aegis.core.audit.DecisionRecord.Subject;
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 import org.hibernate.annotations.Generated;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
@@ -26,6 +30,9 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 @Entity
 @Table(name = "decision_records")
 class DecisionRecordEntity {
+
+    static final int MAX_SERVICE_NAME = 255;
+    static final int MAX_CHANGE_TITLE = 300;
 
     @Id
     @Column(name = "id", nullable = false, updatable = false)
@@ -55,13 +62,17 @@ class DecisionRecordEntity {
     @Column(name = "service_id", updatable = false)
     private UUID serviceId;
 
-    @Column(name = "service_name", updatable = false)
+    @Column(name = "service_name", updatable = false, length = MAX_SERVICE_NAME)
     private String serviceName;
+
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "service_ids", nullable = false, updatable = false)
+    private UUID[] serviceIds;
 
     @Column(name = "change_signal_id", nullable = false, updatable = false)
     private UUID changeSignalId;
 
-    @Column(name = "change_title", nullable = false, updatable = false, length = 300)
+    @Column(name = "change_title", nullable = false, updatable = false, length = MAX_CHANGE_TITLE)
     private String changeTitle;
 
     @Enumerated(EnumType.STRING)
@@ -87,6 +98,10 @@ class DecisionRecordEntity {
     protected DecisionRecordEntity() {
     }
 
+    /**
+     * The copied service name and change title are cut to their columns: a name redacted on its way in can come out
+     * longer than it went in, and a record that can't be written fails the step it records.
+     */
     static DecisionRecordEntity create(UUID orgId, DecisionRecord.Entry entry, String state) {
         DecisionRecordEntity entity = new DecisionRecordEntity();
         entity.id = UUID.randomUUID();
@@ -95,9 +110,10 @@ class DecisionRecordEntity {
         entity.subjectId = entry.subjectId();
         entity.responseId = entry.responseId();
         entity.serviceId = entry.serviceId();
-        entity.serviceName = entry.serviceName();
+        entity.serviceName = cut(entry.serviceName(), MAX_SERVICE_NAME);
+        entity.serviceIds = entry.serviceIds().toArray(UUID[]::new);
         entity.changeSignalId = entry.changeSignalId();
-        entity.changeTitle = entry.changeTitle();
+        entity.changeTitle = cut(entry.changeTitle(), MAX_CHANGE_TITLE);
         entity.action = entry.action();
         entity.actorId = entry.actorId();
         entity.reason = entry.reason();
@@ -109,10 +125,17 @@ class DecisionRecordEntity {
 
     DecisionRecord toDomain() {
         return new DecisionRecord(id, sequence, occurredAt, subject, subjectId, responseId, serviceId, serviceName,
-                changeSignalId, changeTitle, action, actorId, reason, score, tier, state);
+                serviceIds == null ? List.of() : List.of(serviceIds), changeSignalId, changeTitle, action, actorId,
+                reason, score, tier, state);
+    }
+
+    private static String cut(String text, int max) {
+        return text == null || text.length() <= max ? text : text.substring(0, max - 1) + "…";
     }
 }
 
 interface DecisionRecordJpaRepository
         extends JpaRepository<DecisionRecordEntity, UUID>, JpaSpecificationExecutor<DecisionRecordEntity> {
+
+    Optional<DecisionRecordEntity> findByIdAndOrgId(UUID id, UUID orgId);
 }

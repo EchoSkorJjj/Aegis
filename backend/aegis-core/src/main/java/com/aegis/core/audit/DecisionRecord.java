@@ -1,9 +1,11 @@
 package com.aegis.core.audit;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonRawValue;
 
 /**
@@ -12,9 +14,11 @@ import com.fasterxml.jackson.annotation.JsonRawValue;
  * refuses. {@code sequence} orders them, also within one instant.
  *
  * <p>{@code responseId} groups a response's records: a risk ticket and its upgrade pull requests share the ticket's
- * id, a pull request drafted on its own and a memo use their own. The item a record belongs to is its change in its
- * service; a memo covers every service a change affects, so it names none. The service's name, the change's title,
- * the score and the tier are copies, as they were then.
+ * id, a pull request drafted on its own and a memo use their own. {@code serviceIds} are the services the step
+ * covers: a ticket's or pull request's one service (also {@code serviceId}, with its name), or every service a
+ * regulator memo covers, so a memo is in each of their trails though it names no single service. The service's name,
+ * the change's title, the score and the tier are copies, as they were then; a memo's are its most affected
+ * service's. {@code state} is left out of listings ({@link #withoutState}) and read one record at a time.
  */
 public record DecisionRecord(
         UUID id,
@@ -25,6 +29,7 @@ public record DecisionRecord(
         UUID responseId,
         UUID serviceId,
         String serviceName,
+        List<UUID> serviceIds,
         UUID changeSignalId,
         String changeTitle,
         Action action,
@@ -32,7 +37,11 @@ public record DecisionRecord(
         String reason,
         Double score,
         ImpactTier tier,
-        @JsonRawValue String state) {
+        @JsonRawValue @JsonInclude(JsonInclude.Include.NON_NULL) String state) {
+
+    public DecisionRecord {
+        serviceIds = serviceIds == null ? List.of() : List.copyOf(serviceIds);
+    }
 
     /** What was decided on. */
     public enum Subject {
@@ -55,12 +64,22 @@ public record DecisionRecord(
         DISMISSED
     }
 
+    /** The record without its snapshot, as a listing shows it. */
+    public DecisionRecord withoutState() {
+        return new DecisionRecord(id, sequence, occurredAt, subject, subjectId, responseId, serviceId, serviceName,
+                serviceIds, changeSignalId, changeTitle, action, actorId, reason, score, tier, null);
+    }
+
     /**
      * A step to record. {@code state} is the response itself (a ticket, a pull request, a memo), copied as JSON when
-     * the step is recorded.
+     * the step is recorded. {@code serviceIds} are the services it covers; for a ticket or a pull request, its own.
      */
     public record Entry(Subject subject, UUID subjectId, UUID responseId, UUID serviceId, String serviceName,
-                        UUID changeSignalId, String changeTitle, Action action, UUID actorId, String reason,
-                        Double score, ImpactTier tier, Object state) {
+                        List<UUID> serviceIds, UUID changeSignalId, String changeTitle, Action action, UUID actorId,
+                        String reason, Double score, ImpactTier tier, Object state) {
+
+        public Entry {
+            serviceIds = serviceIds == null ? List.of() : List.copyOf(serviceIds);
+        }
     }
 }

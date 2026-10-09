@@ -148,8 +148,9 @@ public class RiskTicketService {
                 sections.citations(),
                 RiskTicketStatus.PROPOSED, drafterId, null, null, null, null, null, null, null, null, null, null,
                 0);
+        String serviceName = SensitiveText.redact(scored.service().name());
         RiskTicket ticket = trail.recorded(() -> store.create(draft),
-                saved -> record(saved, Action.DRAFTED, drafterId, null));
+                saved -> record(saved, serviceName, Action.DRAFTED, drafterId, null));
         if (plan != null && plan.automatable()) {
             try {
                 upgrades.draft(plan, ticket.id(), drafterId);
@@ -167,7 +168,9 @@ public class RiskTicketService {
      * the ticket's key in the title. Someone other than the drafter approves a response with a pull request; the
      * drafter may file one without. The ticket is claimed first (so a concurrent approval gets a conflict, not a
      * second issue); a failure to file is recorded on the ticket, which can then be approved again or dismissed,
-     * and is rethrown. A pull request that then fails to open is recorded on it, to be approved again on its own.
+     * and is rethrown. Once the issue is filed the ticket is never recorded as failing to file it: if Aegis can't
+     * record the filing, the ticket stays filing and the approver is told the issue's key. A pull request that then
+     * fails to open is recorded on it, to be approved again on its own.
      */
     public RiskTicket approve(UUID ticketId, UUID approver) {
         return approve(ticketId, approver, null);
@@ -191,27 +194,38 @@ public class RiskTicketService {
             throw new ApiExceptions.Conflict("A risk ticket that is "
                     + ticket.status().name().toLowerCase(Locale.ROOT) + " cannot be approved");
         }
+        String serviceName = serviceName(ticket.serviceId());
         RiskTicket filing = trail.recorded(() -> store.update(ticket.filing(approver, now)),
-                saved -> record(saved, Action.APPROVED, approver, null));
-        RiskTicket filed;
+                saved -> record(saved, serviceName, Action.APPROVED, approver, null));
+        IssueTracker.FiledIssue issue;
         try {
             IssueTracker tracker = trackers.getIfAvailable();
             if (tracker == null) {
                 throw new ApiExceptions.Conflict("No issue tracker is enabled on this Aegis deployment, so there is "
                         + "nowhere to file the ticket");
             }
-            String serviceName = serviceNames(List.of(filing.serviceId())).get(filing.serviceId());
-            IssueTracker.FiledIssue issue = tracker.file(RiskTicketText.issue(filing, serviceName, pullRequest));
-            filed = trail.recorded(() -> store.update(filing.filed(issue)),
-                    saved -> record(saved, Action.FILED, approver, null));
+            issue = tracker.file(RiskTicketText.issue(filing, serviceName, pullRequest));
         } catch (RuntimeException failure) {
             try {
                 trail.recorded(() -> store.update(filing.failed(failureMessage(failure))),
-                        saved -> record(saved, Action.FILING_FAILED, approver, saved.failureMessage()));
+                        saved -> record(saved, serviceName, Action.FILING_FAILED, approver, saved.failureMessage()));
             } catch (RuntimeException recording) {
                 failure.addSuppressed(recording);
             }
             throw failure;
+        }
+        RiskTicket filed;
+        try {
+            filed = trail.recorded(() -> store.update(filing.filed(issue)),
+                    saved -> record(saved, serviceName, Action.FILED, approver, null));
+        } catch (RuntimeException recording) {
+            log.error("response {}: filed as {} but not recorded ({}); it stays filing", ticketId, issue.key(),
+                    recording.getClass().getSimpleName());
+            ApiExceptions.Conflict unrecorded = new ApiExceptions.Conflict("Filed as " + issue.key() + ", but Aegis "
+                    + "couldn't record it: the response stays filing. Check " + issue.key() + " before approving it "
+                    + "again");
+            unrecorded.initCause(recording);
+            throw unrecorded;
         }
         if (opens) {
             try {
@@ -428,11 +442,22 @@ public class RiskTicketService {
         return names;
     }
 
-    /** A step on this ticket for the decision trail, with the ticket as it now stands and its service's name. */
+    /** The current (redacted) name of one service in the caller's organization; null if it is gone. */
+    private String serviceName(UUID serviceId) {
+        return serviceNames(List.of(serviceId)).get(serviceId);
+    }
+
+    /** A step on this ticket for the decision trail, with the ticket as it now stands. */
     private DecisionRecord.Entry record(RiskTicket ticket, Action action, UUID actor, String reason) {
-        return new DecisionRecord.Entry(Subject.RISK_TICKET, ticket.id(), ticket.id(), ticket.serviceId(),
-                serviceNames(List.of(ticket.serviceId())).get(ticket.serviceId()), ticket.changeSignalId(),
-                ticket.changeTitle(), action, actor, reason, ticket.score(), ticket.tier(), ticket);
+        return record(ticket, serviceName(ticket.serviceId()), action, actor, reason);
+    }
+
+    /** As {@link #record(RiskTicket, Action, UUID, String)}, with its service's name already read. */
+    private static DecisionRecord.Entry record(RiskTicket ticket, String serviceName, Action action, UUID actor,
+            String reason) {
+        return new DecisionRecord.Entry(Subject.RISK_TICKET, ticket.id(), ticket.id(), ticket.serviceId(), serviceName,
+                List.of(ticket.serviceId()), ticket.changeSignalId(), ticket.changeTitle(), action, actor, reason,
+                ticket.score(), ticket.tier(), ticket);
     }
 
     private Sections sections(UUID ticketId, SignalType type, String title, String changeTitle, ChangeSignal signal,

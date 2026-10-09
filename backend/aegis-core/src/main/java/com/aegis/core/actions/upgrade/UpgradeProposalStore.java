@@ -10,7 +10,8 @@ import org.springframework.data.domain.Pageable;
 
 /**
  * Persistence port for upgrade proposals. Org-scoped like the inventory the proposals point into:
- * every read is limited to the caller's active organization and every insert is stamped with it.
+ * every read is limited to the caller's active organization and every insert is stamped with it. Every write is a
+ * step of the decision trail: inside {@code DecisionTrail.recorded}, or refused.
  */
 public interface UpgradeProposalStore {
 

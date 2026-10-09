@@ -2,6 +2,7 @@ package com.aegis.core.audit.persistence;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import jakarta.persistence.EntityManager;
@@ -10,6 +11,7 @@ import jakarta.persistence.PersistenceContext;
 import com.aegis.core.audit.DecisionRecord;
 import com.aegis.core.audit.DecisionRecordStore;
 import com.aegis.core.platform.tenant.CurrentOrg;
+import org.hibernate.query.criteria.HibernateCriteriaBuilder;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -38,11 +40,21 @@ class JpaDecisionRecordStore implements DecisionRecordStore {
         this.mapper = mapper;
     }
 
+    /** Persisted, not saved: a new record with its own id is inserted outright, without looking it up first. */
     @Override
     @Transactional
     public DecisionRecord append(DecisionRecord.Entry entry) {
-        return records.saveAndFlush(
-                DecisionRecordEntity.create(scope(), entry, mapper.writeValueAsString(entry.state()))).toDomain();
+        DecisionRecordEntity record = DecisionRecordEntity.create(scope(), entry,
+                mapper.writeValueAsString(entry.state()));
+        entityManager.persist(record);
+        entityManager.flush();
+        return record.toDomain();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<DecisionRecord> find(UUID id) {
+        return records.findByIdAndOrgId(id, scope()).map(DecisionRecordEntity::toDomain);
     }
 
     @Override
@@ -52,7 +64,9 @@ class JpaDecisionRecordStore implements DecisionRecordStore {
         List<Specification<DecisionRecordEntity>> specs = new ArrayList<>();
         specs.add((root, query, cb) -> cb.equal(root.get("orgId"), org));
         if (serviceId != null) {
-            specs.add((root, query, cb) -> cb.equal(root.get("serviceId"), serviceId));
+            // Every record covering the service: its tickets and pull requests, and the memos that cover it.
+            specs.add((root, query, cb) ->
+                    ((HibernateCriteriaBuilder) cb).arrayContains(root.<UUID[]>get("serviceIds"), serviceId));
         }
         if (changeSignalId != null) {
             specs.add((root, query, cb) -> cb.equal(root.get("changeSignalId"), changeSignalId));

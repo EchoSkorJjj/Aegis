@@ -38,10 +38,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * The decision audit trail is immutable (E10 story 1): the database refuses to change or remove a record — whoever
- * asks, the application's own role in its own organization or the superuser — and later changes to the estate, the
- * feed or the response itself (an SBOM that no longer has the component, a service re-graded, an advisory re-scored,
- * the service deleted) never alter what a past record says. Every test builds its own uniquely named service,
- * component and advisory, and touches only its own records.
+ * asks, the application's own role in its own organization or the superuser, while the trigger is enabled (disabling
+ * it is the table owner's, V36) — and later changes to the estate, the feed or the response itself (an SBOM that no
+ * longer has the component, a service re-graded, an advisory re-scored, the service deleted) never alter what a past
+ * record says, snapshot included. Every test builds its own uniquely named service, component and advisory, and
+ * touches only its own records.
  */
 class DecisionRecordImmutabilityIntegrationTest extends AbstractInventoryIntegrationTest {
 
@@ -103,8 +104,10 @@ class DecisionRecordImmutabilityIntegrationTest extends AbstractInventoryIntegra
         Fixture f = fixture();
         String response = approvedResponse(f);
         String before = trail(response);
-        assertThat(JsonPath.<Double>read(before, "$.content[0].score")).isGreaterThan(0.0);
-        assertThat(JsonPath.<String>read(before, "$.content[0].tier")).isEqualTo("HIGH");
+        String listing = mvc.perform(get(TRAIL).param("responseId", response).with(as("COMPLIANCE_ADMIN", reviewer)))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<Double>read(listing, "$.content[0].score")).isGreaterThan(0.0);
+        assertThat(JsonPath.<String>read(listing, "$.content[0].tier")).isEqualTo("HIGH");
 
         // The SBOM no longer has the component, the service is re-graded, the feed re-scores the advisory.
         inventory.removeServiceComponent(f.service().getId(), f.component().getId());
@@ -135,10 +138,18 @@ class DecisionRecordImmutabilityIntegrationTest extends AbstractInventoryIntegra
         return id;
     }
 
+    /** The response's trail as read: the listing, then each record with its snapshot. */
     private String trail(String response) throws Exception {
-        return mvc.perform(get(TRAIL).param("responseId", response).with(as("COMPLIANCE_ADMIN", reviewer)))
+        String listing = mvc.perform(get(TRAIL).param("responseId", response).with(as("COMPLIANCE_ADMIN", reviewer)))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
+        StringBuilder trail = new StringBuilder(listing);
+        for (String record : JsonPath.<List<String>>read(listing, "$.content[*].id")) {
+            trail.append('\n').append(mvc.perform(get(TRAIL + "/{id}", record).with(as("COMPLIANCE_ADMIN", reviewer)))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString());
+        }
+        return trail.toString();
     }
 
     private void assertTrailIntact(String response) throws Exception {

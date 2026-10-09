@@ -156,8 +156,8 @@ class RiskTicketTextTest {
                         new Edit(UUID.randomUUID(), "maven", "org.apache.logging.log4j:log4j-core", "2.14.1", "2.17.1",
                                 "worker/pom.xml")),
                 "https://github.com/acme/payments", null, "aegis/upgrade-log4j-core-2.17.1-1a2b3c4d",
-                MatchConfidence.CONFIRMED, "Upgrade log4j-core", "body", status, UUID.randomUUID(), Instant.now(), null,
-                null, null, null, null, null, 0);
+                MatchConfidence.CONFIRMED, 72.0, ImpactTier.HIGH, "Upgrade log4j-core", "body", status,
+                UUID.randomUUID(), Instant.now(), null, null, null, null, null, null, 0);
     }
 
     private static RiskTicket ticket(boolean aiDrafted, List<String> citations) {

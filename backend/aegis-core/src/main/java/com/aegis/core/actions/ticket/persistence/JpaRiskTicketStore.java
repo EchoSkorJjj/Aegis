@@ -12,6 +12,7 @@ import jakarta.persistence.PersistenceContext;
 import com.aegis.core.actions.ticket.RiskTicket;
 import com.aegis.core.actions.ticket.RiskTicketStatus;
 import com.aegis.core.actions.ticket.RiskTicketStore;
+import com.aegis.core.audit.DecisionTrail;
 import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.platform.tenant.CurrentOrg;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -49,6 +50,7 @@ class JpaRiskTicketStore implements RiskTicketStore {
     @Override
     @Transactional
     public RiskTicket create(RiskTicket ticket) {
+        DecisionTrail.requireRecording("A risk ticket");
         RiskTicketEntity saved = tickets.saveAndFlush(RiskTicketEntity.create(scope(), ticket));
         entityManager.refresh(saved); // created_at is the database's
         return saved.toDomain();
@@ -116,6 +118,7 @@ class JpaRiskTicketStore implements RiskTicketStore {
     @Override
     @Transactional
     public RiskTicket update(RiskTicket ticket) {
+        DecisionTrail.requireRecording("A risk ticket");
         RiskTicketEntity entity = tickets.findForUpdateByIdAndOrgId(ticket.id(), scope())
                 .orElseThrow(() -> new ApiExceptions.NotFound("Risk ticket not found: " + ticket.id()));
         if (entity.getVersion() != ticket.version()) {

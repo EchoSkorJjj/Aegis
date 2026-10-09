@@ -47,6 +47,7 @@ import com.aegis.core.matching.UpgradeTargets.UpgradeTarget;
 import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.platform.common.SensitiveText;
 import com.aegis.core.scoring.ScoringDtos.ChangeImpactResponse;
+import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.scoring.ScoringService;
 import com.aegis.core.signals.ChangeSignal;
@@ -266,12 +267,15 @@ public class UpgradeProposalService {
                 plan.edits(), planned.confidence().name(), planned.evidence(), planned.followUps());
         String body = UpgradePullRequestText.body(facts, rationale(id, facts));
         Edit first = plan.edits().getFirst();
+        String serviceName = SensitiveText.redact(planned.serviceName());
         return Optional.of(trail.recorded(() -> store.create(new UpgradeProposal(
                 id, plan.serviceId(), plan.changeSignalId(), plan.vulnerabilityId(), riskTicketId, plan.edits(),
                 planned.repositoryUrl(), planned.baseBranch(), headBranch(first.packageName(), first.toVersion(), id),
-                planned.confidence(), UpgradePullRequestText.title(plan.edits(), plan.vulnerabilityId()), body,
+                planned.confidence(), planned.score(),
+                planned.tier() == null ? null : ImpactTier.valueOf(planned.tier()),
+                UpgradePullRequestText.title(plan.edits(), plan.vulnerabilityId()), body,
                 UpgradeProposalStatus.PROPOSED, drafter, null, null, null, null, null, null, null, 0)),
-                saved -> record(saved, Action.DRAFTED, drafter, null)));
+                saved -> record(saved, serviceName, Action.DRAFTED, drafter, null)));
     }
 
     /**
@@ -301,8 +305,9 @@ public class UpgradeProposalService {
     /**
      * Open the draft pull request. The approver is never the drafter — retrying a failed opening is approving
      * too. The proposal is claimed first (so a second, concurrent approval gets a conflict, not a second pull
-     * request); a failure is recorded on the proposal, which can then be approved again or dismissed, and is
-     * rethrown to the approver.
+     * request); a failure to open it is recorded on the proposal, which can then be approved again or dismissed, and
+     * is rethrown to the approver. Once the pull request is open it is never recorded as failing to open: if Aegis
+     * can't record it, the proposal stays opening and the approver is told where the pull request is.
      */
     private UpgradeProposal open(UpgradeProposal proposal, UUID approver, String issueKey) {
         if (proposal.createdBy().equals(approver)) {
@@ -323,20 +328,32 @@ public class UpgradeProposalService {
                     + "dismiss it and draft a new one");
         }
         String title = issueKey == null ? proposal.title() : UpgradePullRequestText.titled(issueKey, proposal.title());
+        String serviceName = SensitiveText.redact(service.getName());
         UpgradeProposal opening = trail.recorded(() -> store.update(proposal.opening(approver, now, title)),
-                saved -> record(saved, Action.APPROVED, approver, null));
+                saved -> record(saved, serviceName, Action.APPROVED, approver, null));
+        PullRequestRef pullRequest;
         try {
-            PullRequestRef pullRequest = openDraftPullRequest(opening, issueKey);
-            return trail.recorded(() -> store.update(opening.opened(pullRequest)),
-                    saved -> record(saved, Action.OPENED, approver, null));
+            pullRequest = openDraftPullRequest(opening, issueKey);
         } catch (RuntimeException failure) {
             try {
                 trail.recorded(() -> store.update(opening.failed(failureMessage(failure))),
-                        saved -> record(saved, Action.OPENING_FAILED, approver, saved.failureMessage()));
+                        saved -> record(saved, serviceName, Action.OPENING_FAILED, approver, saved.failureMessage()));
             } catch (RuntimeException recording) {
                 failure.addSuppressed(recording);
             }
             throw failure;
+        }
+        try {
+            return trail.recorded(() -> store.update(opening.opened(pullRequest)),
+                    saved -> record(saved, serviceName, Action.OPENED, approver, null));
+        } catch (RuntimeException recording) {
+            log.error("upgrade proposal {}: opened as {} but not recorded ({}); it stays opening", opening.id(),
+                    pullRequest.url(), recording.getClass().getSimpleName());
+            ApiExceptions.Conflict unrecorded = new ApiExceptions.Conflict("The draft pull request is open at "
+                    + pullRequest.url() + ", but Aegis couldn't record it: the proposal stays opening. Check the pull "
+                    + "request before approving it again");
+            unrecorded.initCause(recording);
+            throw unrecorded;
         }
     }
 
@@ -346,8 +363,9 @@ public class UpgradeProposalService {
             throw new ApiExceptions.Conflict("An upgrade proposal that is "
                     + proposal.status().name().toLowerCase(Locale.ROOT) + " cannot be dismissed");
         }
+        String serviceName = serviceNames(List.of(proposal.serviceId())).get(proposal.serviceId());
         return trail.recorded(() -> store.update(proposal.dismissed(by, Instant.now(), reason.trim())),
-                saved -> record(saved, Action.DISMISSED, by, saved.dismissReason()));
+                saved -> record(saved, serviceName, Action.DISMISSED, by, saved.dismissReason()));
     }
 
     public UpgradeProposal get(UUID proposalId) {
@@ -377,14 +395,16 @@ public class UpgradeProposalService {
     }
 
     /**
-     * A step on this proposal for the decision trail, with the proposal as it now stands. It belongs to its response
-     * (the risk ticket), or stands as its own when it was drafted before responses.
+     * A step on this proposal for the decision trail, with the proposal as it now stands and its score and tier as
+     * drafted. It belongs to its response (the risk ticket), or stands as its own when it was drafted before
+     * responses.
      */
-    private DecisionRecord.Entry record(UpgradeProposal proposal, Action action, UUID actor, String reason) {
+    private static DecisionRecord.Entry record(UpgradeProposal proposal, String serviceName, Action action, UUID actor,
+            String reason) {
         return new DecisionRecord.Entry(Subject.UPGRADE_PULL_REQUEST, proposal.id(),
                 proposal.riskTicketId() == null ? proposal.id() : proposal.riskTicketId(), proposal.serviceId(),
-                serviceNames(List.of(proposal.serviceId())).get(proposal.serviceId()), proposal.changeSignalId(),
-                proposal.vulnerabilityId(), action, actor, reason, null, null, proposal);
+                serviceName, List.of(proposal.serviceId()), proposal.changeSignalId(), proposal.vulnerabilityId(),
+                action, actor, reason, proposal.score(), proposal.tier(), proposal);
     }
 
     /**

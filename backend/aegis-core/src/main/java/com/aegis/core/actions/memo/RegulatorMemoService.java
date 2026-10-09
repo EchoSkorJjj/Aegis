@@ -107,12 +107,13 @@ public class RegulatorMemoService {
                 components(scored), evidence(impact.change(), signal, scored));
         Drafted drafted = draft(id, kind, type, changeTitle, signal, facts);
         Sections sections = drafted.sections();
-        return trail.recorded(() -> store.create(new RegulatorMemo(id, changeSignalId, type, changeTitle, kind, facts.reference(),
+        RegulatorMemo memo = new RegulatorMemo(id, changeSignalId, type, changeTitle, kind, facts.reference(),
                 facts.detectedAt(), services, sections.summary(), sections.impact(), sections.measures(),
                 sections.nextSteps(), drafted.aiDrafted(), drafted.citations(),
                 MemoTemplate.render(kind, facts, sections, drafted.citations()), RegulatorMemoStatus.PROPOSED,
                 drafterId, null, null, null,
-                null, 0)), saved -> record(saved, Action.DRAFTED, drafterId, null));
+                null, 0);
+        return trail.recorded(() -> store.create(memo), saved -> record(saved, Action.DRAFTED, drafterId, null));
     }
 
     /** A second analyst's approval finalises the memo; the drafter never approves their own. */
@@ -151,13 +152,15 @@ public class RegulatorMemoService {
 
     /**
      * A step on this memo for the decision trail, with the memo as it now stands. A memo covers every service the
-     * change affects, so it names none; its score and tier are the most affected service's.
+     * change affects, so it names no single one, but the step is in each of their trails; its score and tier are the
+     * most affected service's.
      */
     private static DecisionRecord.Entry record(RegulatorMemo memo, Action action, UUID actor, String reason) {
         AffectedService top = memo.services().stream().max(Comparator.comparingDouble(AffectedService::score))
                 .orElse(null);
         return new DecisionRecord.Entry(Subject.REGULATOR_MEMO, memo.id(), memo.id(), null, null,
-                memo.changeSignalId(), memo.changeTitle(), action, actor, reason, top == null ? null : top.score(),
+                memo.services().stream().map(AffectedService::serviceId).distinct().toList(), memo.changeSignalId(),
+                memo.changeTitle(), action, actor, reason, top == null ? null : top.score(),
                 top == null ? null : top.tier(), memo);
     }
 

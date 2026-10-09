@@ -8,8 +8,16 @@
 -- import, a re-scored change or an edited response never alters what a past record says. service_name and
 -- change_title are copies too, for the same reason.
 --
--- Append-only, enforced by the database: a trigger refuses every update and delete, and truncate. No foreign keys:
--- a record outlives the service, ticket or memo it describes (a service's tickets are removed with it, V23).
+-- service_ids are the services a step covers: a ticket's or pull request's one service (service_id, also named), or
+-- every service a regulator memo covers, so each of those services' trails holds the memo though it names no single
+-- service.
+--
+-- Append-only: while enabled, a trigger refuses every update, delete and truncate, from any role, the superuser
+-- included. A trigger is not a lock against the table's owner or a superuser, though, who can disable or drop it, and
+-- the owner today is the role aegis-core connects with (it also runs these migrations). Closing that needs the
+-- owner/app role split in todo/aws-deployment.md, with the application's role holding only insert and select here.
+-- No foreign keys: a record outlives the service, ticket or memo it describes (a service's tickets are removed with
+-- it, V23).
 -- Org-scoped with the same row-level security backstop as the tables it records; seq orders records written in the
 -- same instant.
 
@@ -23,6 +31,7 @@ create table decision_records (
     response_id      uuid             not null,
     service_id       uuid,
     service_name     varchar(255),
+    service_ids      uuid[]           not null,
     change_signal_id uuid             not null,
     change_title     varchar(300)     not null,
     action           varchar(24)      not null,
@@ -36,11 +45,12 @@ create table decision_records (
     constraint ck_decision_records_action
         check (action in ('DRAFTED', 'EDITED', 'OVERRIDDEN', 'OVERRIDE_WITHDRAWN', 'APPROVED', 'FILED',
                           'FILING_FAILED', 'OPENED', 'OPENING_FAILED', 'DISMISSED')),
-    constraint ck_decision_records_tier check (tier in ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'NEGLIGIBLE'))
+    constraint ck_decision_records_tier check (tier in ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'NEGLIGIBLE')),
+    constraint ck_decision_records_services check (service_id is null or service_id = any (service_ids))
 );
 
-create index ix_decision_records_item on decision_records (org_id, change_signal_id, service_id, seq);
-create index ix_decision_records_service on decision_records (org_id, service_id, seq);
+create index ix_decision_records_item on decision_records (org_id, change_signal_id, seq);
+create index ix_decision_records_services on decision_records using gin (service_ids);
 create index ix_decision_records_response on decision_records (org_id, response_id, seq);
 create index ix_decision_records_occurred on decision_records (org_id, occurred_at desc);
 
@@ -62,3 +72,10 @@ alter table decision_records enable row level security;
 alter table decision_records force row level security;
 create policy tenant_isolation on decision_records
     using (org_id = current_org()) with check (org_id = current_org());
+
+-- An upgrade pull request keeps its service's score and tier as drafted, as its risk ticket does, so each of its
+-- records carries them. Pull requests drafted before V36 have none (not backfilled).
+alter table upgrade_proposals
+    add column score double precision,
+    add column tier  varchar(16),
+    add constraint ck_upgrade_proposals_tier check (tier in ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'NEGLIGIBLE'));
