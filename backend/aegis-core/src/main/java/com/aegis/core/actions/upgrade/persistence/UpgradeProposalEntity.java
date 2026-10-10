@@ -15,6 +15,7 @@ import jakarta.persistence.Version;
 import com.aegis.core.actions.upgrade.UpgradeProposal;
 import com.aegis.core.actions.upgrade.UpgradeProposalStatus;
 import com.aegis.core.matching.MatchingDtos.MatchConfidence;
+import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.SourceType;
 import org.hibernate.annotations.UpdateTimestamp;
@@ -62,6 +63,13 @@ class UpgradeProposalEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "match_confidence", nullable = false, updatable = false, length = 16)
     private MatchConfidence matchConfidence;
+
+    @Column(name = "score", updatable = false)
+    private Double score;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "tier", updatable = false, length = 16)
+    private ImpactTier tier;
 
     /** Updatable: opening a response's pull request puts its risk ticket's key in front. */
     @Column(name = "title", nullable = false, length = 256)
@@ -124,6 +132,8 @@ class UpgradeProposalEntity {
         entity.baseBranch = proposal.baseBranch();
         entity.headBranch = proposal.headBranch();
         entity.matchConfidence = proposal.matchConfidence();
+        entity.score = proposal.score();
+        entity.tier = proposal.tier();
         entity.title = proposal.title();
         entity.body = proposal.body();
         entity.createdBy = proposal.createdBy();
@@ -145,8 +155,9 @@ class UpgradeProposalEntity {
 
     UpgradeProposal toDomain(List<UpgradeProposal.Edit> parsedEdits) {
         return new UpgradeProposal(id, serviceId, changeSignalId, vulnerabilityId, riskTicketId, parsedEdits,
-                repositoryUrl, baseBranch, headBranch, matchConfidence, title, body, status, createdBy, createdAt,
-                decidedBy, decidedAt, dismissReason, pullRequestUrl, pullRequestNumber, failureMessage, version);
+                repositoryUrl, baseBranch, headBranch, matchConfidence, score, tier, title, body, status, createdBy,
+                createdAt, decidedBy, decidedAt, dismissReason, pullRequestUrl, pullRequestNumber, failureMessage,
+                version);
     }
 
     String edits() {

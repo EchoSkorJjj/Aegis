@@ -43,6 +43,7 @@ and the modules are cycle-free.
 | `scoring`    | Deterministic impact score per service and owner, with a "why" breakdown |
 | `actions`    | Responses: what to respond to next (the triage queue, `triage`, E9 story 1), the draft-PR port + GitHub App adapter and safe-upgrade proposals (`pr`, `upgrade`, E8 story 4), the issue-tracker port + Jira adapter and risk tickets (`tracker`, `ticket`, story 5), and DORA regulator memos (`memo`, story 6) |
 | `notifications` | Owner notifications (E9 story 5): a scheduled job tells each service owner once — in the app and by email through identity-service — about every triage item in their services that needs a decision |
+| `audit`      | The decision audit trail (E10 story 1): every step a response takes, with who took it, when, why and the response as it stood then; append-only |
 | `ai`         | **Port** to the Python ai-service: `AiAssessor` / `AiDrafter` + DTOs + `HttpAiClient` |
 
 ## Triage queue and item detail (E9 Stories 1–2)
@@ -132,6 +133,38 @@ already waiting.
 The frontend's bell (`components/app/notification-bell.tsx`, in the top bar for service owners, the only ones ever
 notified) shows the unread count, checked every minute, and the latest ten; opening one marks it read and goes to the
 item.
+
+## Decision trail (E10 Story 1)
+
+Every step a response takes is recorded as it happens (`audit`, V36 `decision_records`): a risk ticket drafted,
+edited, overridden (and the override withdrawn), approved, filed or failed to file, dismissed; its upgrade pull
+request drafted, approved, opened or failed to open, dismissed; a regulator memo drafted, approved, dismissed. Each
+record keeps who took the step (`actorId`), when (`occurredAt`; `sequence` orders records within one instant), why
+(`reason`: an override's, a dismissal's, a failure's), the change, and the service's name, score and tier as they were
+then, and the response itself as it stood (`state`, JSON: the draft, any edit or override, the evidence with the score
+arithmetic, the decision and its result).
+
+- **A step and its record commit together** (`DecisionTrail.recorded`): a record that can't be written fails the
+  step, and the response stores refuse a write made outside the trail (`DecisionTrail.UnrecordedStep`), so a new path
+  that forgets it fails instead of leaving a gap. An issue filed or a pull request opened is never recorded as failed:
+  if Aegis can't record that outcome, the response stays filing (or the pull request opening) and the approver is told
+  the issue's key or the pull request's address (409).
+- **Append-only**: a trigger refuses every update, delete and truncate, from any role, the superuser included. It is
+  not a lock against the table's owner, today the role aegis-core connects with, which can disable a trigger; closing
+  that needs the owner/app role split in `todo/aws-deployment.md`.
+- **Copies, not references**: no foreign keys, so a record outlives its service, ticket or memo, and a later SBOM
+  import, re-score or edit never changes it. Org-scoped, with the row-level-security backstop.
+- **A service's trail** holds its tickets' and pull requests' records (`serviceId`) and those of every regulator memo
+  that covers it (`serviceIds`: a memo names no single service). A pull request's records carry its score and tier as
+  drafted, which are its ticket's. Responses decided before V36 have no records (not backfilled), and pull requests
+  drafted before V36 no score.
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | `/api/audit/decisions?serviceId=&changeSignalId=&responseId=&page=&size=` | `ANALYST`, `COMPLIANCE_ADMIN` | The trail, oldest first (50 a page by default), each record without its `state`. `serviceId` with `changeSignalId` is one item's chain; `responseId` one response's (a ticket and its pull requests share the ticket's id) |
+| GET | `/api/audit/decisions/{id}` | `ANALYST`, `COMPLIANCE_ADMIN` | One record, with `state` |
+
+Searching the trail by person and date, the Reports pages and evidence export are CS203-125 and CS203-126.
 
 ## Service repositories and draft PR providers (E8 Story 2)
 

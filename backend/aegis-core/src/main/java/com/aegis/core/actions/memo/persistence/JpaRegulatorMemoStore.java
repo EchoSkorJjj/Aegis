@@ -13,6 +13,7 @@ import com.aegis.core.actions.memo.RegulatorMemo;
 import com.aegis.core.actions.memo.RegulatorMemo.AffectedService;
 import com.aegis.core.actions.memo.RegulatorMemoStatus;
 import com.aegis.core.actions.memo.RegulatorMemoStore;
+import com.aegis.core.audit.DecisionTrail;
 import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.platform.tenant.CurrentOrg;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -51,6 +52,7 @@ class JpaRegulatorMemoStore implements RegulatorMemoStore {
     @Override
     @Transactional
     public RegulatorMemo create(RegulatorMemo memo) {
+        DecisionTrail.requireRecording("A regulator memo");
         RegulatorMemoEntity saved = memos.saveAndFlush(
                 RegulatorMemoEntity.create(scope(), memo, mapper.writeValueAsString(memo.services())));
         entityManager.refresh(saved); // created_at is the database's
@@ -87,6 +89,7 @@ class JpaRegulatorMemoStore implements RegulatorMemoStore {
     @Override
     @Transactional
     public RegulatorMemo update(RegulatorMemo memo) {
+        DecisionTrail.requireRecording("A regulator memo");
         RegulatorMemoEntity entity = memos.findForUpdateByIdAndOrgId(memo.id(), scope())
                 .orElseThrow(() -> new ApiExceptions.NotFound("Regulator memo not found: " + memo.id()));
         if (entity.getVersion() != memo.version()) {

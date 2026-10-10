@@ -8,7 +8,10 @@ import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
-/** Risk tickets, scoped to the caller's organization (V23). */
+/**
+ * Risk tickets, scoped to the caller's organization (V23). Every write is a step of the decision trail: inside
+ * {@code DecisionTrail.recorded}, or refused.
+ */
 public interface RiskTicketStore {
 
     /** Insert a new ticket in the caller's organization. */

@@ -13,6 +13,8 @@ import com.aegis.core.actions.upgrade.UpgradeProposal.Edit;
 import com.aegis.core.advisories.Advisory;
 import com.aegis.core.advisories.AdvisoryStore;
 import com.aegis.core.advisories.AffectedProduct;
+import com.aegis.core.audit.DecisionRecord;
+import com.aegis.core.audit.DecisionTrail;
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.domain.BusinessCriticality;
@@ -74,6 +76,7 @@ class UpgradeProposalIntegrationTest extends AbstractInventoryIntegrationTest {
     @Autowired private CurrentOrg currentOrg;
     @Autowired private UpgradeProposalService proposals;
     @Autowired private UpgradeProposalStore store;
+    @Autowired private DecisionTrail trail;
 
     private final UUID analyst = UUID.randomUUID();
     private final UUID approver = UUID.randomUUID();
@@ -471,12 +474,12 @@ class UpgradeProposalIntegrationTest extends AbstractInventoryIntegrationTest {
     @Test
     void aProposalDraftedBeforeResponsesIsStillDecidedOnItsOwn() throws Exception {
         Fixture f = fixture();
-        UpgradeProposal standalone = store.create(new UpgradeProposal(UUID.randomUUID(), f.service().getId(),
+        UpgradeProposal standalone = drafted(new UpgradeProposal(UUID.randomUUID(), f.service().getId(),
                 f.advisory().id(), f.cve(), null,
                 List.of(new Edit(f.component().getId(), "maven", f.component().getName(), "1.0.0", "1.3.0", "pom.xml")),
                 "https://gitlab.com/" + f.repository(), null, "aegis/upgrade-standalone-" + f.tag(),
-                MatchConfidence.CONFIRMED, "Upgrade it", "body", UpgradeProposalStatus.PROPOSED, analyst, null, null,
-                null, null, null, null, null, 0));
+                MatchConfidence.CONFIRMED, null, null, "Upgrade it", "body", UpgradeProposalStatus.PROPOSED, analyst,
+                null, null, null, null, null, null, null, 0));
 
         mvc.perform(get(PROPOSALS).param("serviceId", f.service().getId().toString()).param("standalone", "true")
                         .with(as("ANALYST", approver)))
@@ -490,17 +493,25 @@ class UpgradeProposalIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.title").value("Upgrade it"));
     }
 
+    /** A proposal drafted on its own, as before responses: saved, like every proposal, as a step of the trail. */
+    private UpgradeProposal drafted(UpgradeProposal proposal) {
+        return trail.recorded(() -> store.create(proposal), saved -> new DecisionRecord.Entry(
+                DecisionRecord.Subject.UPGRADE_PULL_REQUEST, saved.id(), saved.id(), saved.serviceId(), null,
+                List.of(saved.serviceId()), saved.changeSignalId(), saved.vulnerabilityId(),
+                DecisionRecord.Action.DRAFTED, saved.createdBy(), null, null, null, saved));
+    }
+
     @Test
     void twoPeopleDecidingAPullRequestAtOnceGetOneOutcomeAndAConflict() throws Exception {
         for (int round = 0; round < 3; round++) {
             Fixture f = fixture();
-            UpgradeProposal standalone = store.create(new UpgradeProposal(UUID.randomUUID(), f.service().getId(),
+            UpgradeProposal standalone = drafted(new UpgradeProposal(UUID.randomUUID(), f.service().getId(),
                     f.advisory().id(), f.cve(), null,
                     List.of(new Edit(f.component().getId(), "maven", f.component().getName(), "1.0.0", "1.3.0",
                             "pom.xml")),
                     "https://gitlab.com/" + f.repository(), null, "aegis/upgrade-race-" + f.tag(),
-                    MatchConfidence.CONFIRMED, "Upgrade it", "body", UpgradeProposalStatus.PROPOSED, analyst, null,
-                    null, null, null, null, null, null, 0));
+                    MatchConfidence.CONFIRMED, null, null, "Upgrade it", "body", UpgradeProposalStatus.PROPOSED,
+                    analyst, null, null, null, null, null, null, null, 0));
 
             List<MockHttpServletResponse> responses = Race.race(
                     () -> mvc.perform(post(PROPOSALS + "/{id}/approve", standalone.id())

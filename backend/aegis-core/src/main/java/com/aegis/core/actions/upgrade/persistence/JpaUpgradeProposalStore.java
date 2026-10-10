@@ -13,6 +13,7 @@ import jakarta.persistence.PersistenceContext;
 import com.aegis.core.actions.upgrade.UpgradeProposal;
 import com.aegis.core.actions.upgrade.UpgradeProposalStatus;
 import com.aegis.core.actions.upgrade.UpgradeProposalStore;
+import com.aegis.core.audit.DecisionTrail;
 import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.platform.tenant.CurrentOrg;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -56,6 +57,7 @@ class JpaUpgradeProposalStore implements UpgradeProposalStore {
     @Override
     @Transactional
     public UpgradeProposal create(UpgradeProposal proposal) {
+        DecisionTrail.requireRecording("An upgrade pull request");
         return domain(proposals.saveAndFlush(
                 UpgradeProposalEntity.create(scope(), proposal, mapper.writeValueAsString(proposal.edits()))));
     }
@@ -109,6 +111,7 @@ class JpaUpgradeProposalStore implements UpgradeProposalStore {
     @Override
     @Transactional
     public UpgradeProposal update(UpgradeProposal proposal) {
+        DecisionTrail.requireRecording("An upgrade pull request");
         UpgradeProposalEntity entity = proposals.findForUpdateByIdAndOrgId(proposal.id(), scope())
                 .orElseThrow(() -> new ApiExceptions.NotFound("Upgrade proposal not found: " + proposal.id()));
         if (entity.getVersion() != proposal.version()) {
