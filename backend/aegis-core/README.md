@@ -161,10 +161,15 @@ arithmetic, the decision and its result).
 
 | Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/api/audit/decisions?serviceId=&changeSignalId=&responseId=&page=&size=` | `ANALYST`, `COMPLIANCE_ADMIN` | The trail, oldest first (50 a page by default), each record without its `state`. `serviceId` with `changeSignalId` is one item's chain; `responseId` one response's (a ticket and its pull requests share the ticket's id) |
+| GET | `/api/audit/decisions?serviceId=&changeSignalId=&responseId=&actorId=&action=&subject=&from=&to=&page=&size=&sort=` | `ANALYST`, `COMPLIANCE_ADMIN` | The trail, oldest first (50 a page by default; `sort=sequence,desc` for newest first), each record without its `state`. `serviceId` with `changeSignalId` is one item's chain; `responseId` one response's (a ticket and its pull requests share the ticket's id). Search (E10 Story 2): `actorId` the person who took the step; `action` and `subject` any of several (comma-separated or repeated); `from`/`to` a period as ISO-8601 instants, `from` inclusive and `to` exclusive. Filters combine. A period that doesn't end after it starts, an unknown value, or any sort but `sequence` (or `occurredAt`, the same order) is a 400 |
 | GET | `/api/audit/decisions/{id}` | `ANALYST`, `COMPLIANCE_ADMIN` | One record, with `state` |
 
-Searching the trail by person and date, the Reports pages and evidence export are CS203-125 and CS203-126.
+**Searching the trail (E10 Story 2).** A compliance admin answers an auditor's question from **Reports → Audit log**
+(`/reports/audit`): the trail filtered by service, by the person who took each step (named from the organization's
+member directory), by the step and what it was taken on, and by a period of whole days in the reader's time zone
+(sent as `from` = the first day's start and `to` = the start of the day after the last), newest first by default.
+Each record opens to the response as it stood then. A person's search is indexed (V37, `org_id, actor_id, seq`); a
+period uses V36's `org_id, occurred_at`. Evidence export for a service and period is CS203-126.
 
 ## Service repositories and draft PR providers (E8 Story 2)
 

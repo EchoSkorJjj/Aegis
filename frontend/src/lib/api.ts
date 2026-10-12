@@ -9,6 +9,9 @@ import type {
   ChangeSignal,
   ChangeSignalFacets,
   CreateOrgInput,
+  DecisionAction,
+  DecisionRecord,
+  DecisionSubject,
   ForgotPasswordInput,
   GitHubConnectResult,
   GitHubIntegration,
@@ -481,6 +484,42 @@ export const notificationApi = {
   },
   markAllRead() {
     return bffFetch<{ marked: number }>("/api/notifications/read-all", { method: "POST" });
+  },
+};
+
+/**
+ * The decision trail (E10): every step a response took, searched by service, the person who took it, the step,
+ * what it was taken on and a period (`from` inclusive, `to` exclusive, ISO instants). Read-only; analysts and
+ * compliance admins only (403 otherwise). A listing leaves each record's `state` out; `get` has it.
+ */
+export const auditApi = {
+  search(
+    params: {
+      serviceId?: string;
+      changeSignalId?: string;
+      responseId?: string;
+      actorId?: string;
+      action?: DecisionAction[];
+      subject?: DecisionSubject[];
+      from?: string;
+      to?: string;
+      newestFirst?: boolean;
+      page?: number;
+      size?: number;
+    } = {},
+  ) {
+    const { action, subject, newestFirst, ...rest } = params;
+    return bffFetch<Page<DecisionRecord>>(
+      `/api/audit/decisions${qs({
+        ...rest,
+        action: action?.length ? action.join(",") : undefined,
+        subject: subject?.length ? subject.join(",") : undefined,
+        sort: newestFirst ? "sequence,desc" : undefined,
+      })}`,
+    );
+  },
+  get(id: string) {
+    return bffFetch<DecisionRecord>(`/api/audit/decisions/${id}`);
   },
 };
 

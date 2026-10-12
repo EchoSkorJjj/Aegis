@@ -882,3 +882,47 @@ export interface JiraOptions {
   projects: { key: string; name: string }[];
   issueTypes: string[];
 }
+
+// ---- aegis-core decision trail (E10; append-only, org-scoped) ---------------------------------
+
+/** What a step was taken on. */
+export type DecisionSubject = "RISK_TICKET" | "UPGRADE_PULL_REQUEST" | "REGULATOR_MEMO";
+
+/** The step taken. Outcomes (filed, opened, failed) are recorded under the approver who caused them. */
+export type DecisionAction =
+  | "DRAFTED"
+  | "EDITED"
+  | "OVERRIDDEN"
+  | "OVERRIDE_WITHDRAWN"
+  | "APPROVED"
+  | "FILED"
+  | "FILING_FAILED"
+  | "OPENED"
+  | "OPENING_FAILED"
+  | "DISMISSED";
+
+/**
+ * One step in the decision trail: who took it on which response, when and why. The service's name, the change's
+ * title, the score and the tier are copies as they were then. `serviceIds` are every service the step covers (a
+ * regulator memo's several; `serviceId` is null for a memo). `state`, the response as it stood then, is only on a
+ * record read on its own.
+ */
+export interface DecisionRecord {
+  id: string;
+  sequence: number;
+  occurredAt: string;
+  subject: DecisionSubject;
+  subjectId: string;
+  responseId: string;
+  serviceId: string | null;
+  serviceName: string | null;
+  serviceIds: string[];
+  changeSignalId: string;
+  changeTitle: string;
+  action: DecisionAction;
+  actorId: string;
+  reason: string | null;
+  score: number | null;
+  tier: ImpactTier | null;
+  state?: unknown;
+}

@@ -10,6 +10,7 @@ import jakarta.persistence.PersistenceContext;
 
 import com.aegis.core.audit.DecisionRecord;
 import com.aegis.core.audit.DecisionRecordStore;
+import com.aegis.core.audit.DecisionTrailQuery;
 import com.aegis.core.platform.tenant.CurrentOrg;
 import org.hibernate.query.criteria.HibernateCriteriaBuilder;
 import org.springframework.data.domain.Page;
@@ -59,20 +60,35 @@ class JpaDecisionRecordStore implements DecisionRecordStore {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<DecisionRecord> findPage(UUID serviceId, UUID changeSignalId, UUID responseId, Pageable pageable) {
+    public Page<DecisionRecord> findPage(DecisionTrailQuery filter, Pageable pageable) {
         UUID org = scope();
         List<Specification<DecisionRecordEntity>> specs = new ArrayList<>();
         specs.add((root, query, cb) -> cb.equal(root.get("orgId"), org));
-        if (serviceId != null) {
+        if (filter.serviceId() != null) {
             // Every record covering the service: its tickets and pull requests, and the memos that cover it.
-            specs.add((root, query, cb) ->
-                    ((HibernateCriteriaBuilder) cb).arrayContains(root.<UUID[]>get("serviceIds"), serviceId));
+            specs.add((root, query, cb) -> ((HibernateCriteriaBuilder) cb)
+                    .arrayContains(root.<UUID[]>get("serviceIds"), filter.serviceId()));
         }
-        if (changeSignalId != null) {
-            specs.add((root, query, cb) -> cb.equal(root.get("changeSignalId"), changeSignalId));
+        if (filter.changeSignalId() != null) {
+            specs.add((root, query, cb) -> cb.equal(root.get("changeSignalId"), filter.changeSignalId()));
         }
-        if (responseId != null) {
-            specs.add((root, query, cb) -> cb.equal(root.get("responseId"), responseId));
+        if (filter.responseId() != null) {
+            specs.add((root, query, cb) -> cb.equal(root.get("responseId"), filter.responseId()));
+        }
+        if (filter.actorId() != null) {
+            specs.add((root, query, cb) -> cb.equal(root.get("actorId"), filter.actorId()));
+        }
+        if (!filter.actions().isEmpty()) {
+            specs.add((root, query, cb) -> root.get("action").in(filter.actions()));
+        }
+        if (!filter.subjects().isEmpty()) {
+            specs.add((root, query, cb) -> root.get("subject").in(filter.subjects()));
+        }
+        if (filter.from() != null) {
+            specs.add((root, query, cb) -> cb.greaterThanOrEqualTo(root.get("occurredAt"), filter.from()));
+        }
+        if (filter.to() != null) {
+            specs.add((root, query, cb) -> cb.lessThan(root.get("occurredAt"), filter.to()));
         }
         return records.findAll(Specification.allOf(specs), pageable).map(DecisionRecordEntity::toDomain);
     }

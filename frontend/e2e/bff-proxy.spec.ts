@@ -11,6 +11,7 @@ const ESCAPES = [
   "/api/change-signals/..%2F..%2Fusers",
   "/api/findings/..%2Finventory%2Fservices",
   "/api/notifications/..%2Finventory%2Fservices",
+  "/api/audit/..%2Finventory%2Fservices",
 ];
 
 for (const path of ESCAPES) {

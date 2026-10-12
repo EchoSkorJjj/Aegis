@@ -51,3 +51,12 @@ export function canRespondForService(roles: readonly Role[], isAssignedOwner: bo
 export function respondsForAnyService(roles: readonly Role[]): boolean {
   return roles.includes("ANALYST");
 }
+
+/**
+ * May the caller read the decision trail (E10)? Mirrors aegis-core's `DecisionTrailController.READ`: an analyst,
+ * who decides responses, or a compliance admin, who audits them. A service owner doesn't (their own decisions are
+ * on each response's page).
+ */
+export function canReadDecisionTrail(roles: readonly Role[]): boolean {
+  return roles.includes("ANALYST") || roles.includes("COMPLIANCE_ADMIN");
+}

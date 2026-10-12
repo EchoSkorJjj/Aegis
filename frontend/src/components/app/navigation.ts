@@ -57,7 +57,8 @@ export const domainNav: NavItem[] = [
     icon: FileText,
     items: [
       { title: "Evidence", href: "/reports/evidence" },
-      { title: "Audit log", href: "/reports/audit" },
+      // The decision trail is governance's: aegis-core refuses it to anyone else.
+      { title: "Audit log", href: "/reports/audit", roles: ["ANALYST", "COMPLIANCE_ADMIN"] },
     ],
   },
 ];

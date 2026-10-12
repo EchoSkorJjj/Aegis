@@ -72,9 +72,12 @@ public class DecisionTrail {
         }
     }
 
-    /** The trail of one item, response or service, oldest first, each record without its snapshot. */
-    public Page<DecisionRecord> list(UUID serviceId, UUID changeSignalId, UUID responseId, Pageable pageable) {
-        return store.findPage(serviceId, changeSignalId, responseId, pageable).map(DecisionRecord::withoutState);
+    /**
+     * The records matching {@code query} (one item, response or service; a person's decisions; a period), each without
+     * its snapshot.
+     */
+    public Page<DecisionRecord> list(DecisionTrailQuery query, Pageable pageable) {
+        return store.findPage(query, pageable).map(DecisionRecord::withoutState);
     }
 
     /** One record with the response as it stood then. */
