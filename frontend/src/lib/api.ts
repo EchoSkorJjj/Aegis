@@ -34,6 +34,7 @@ import type {
   RegisterInput,
   RegulatorMemo,
   RegulatorMemoStatus,
+  RemovedService,
   ResetPasswordInput,
   RiskTicket,
   RiskTicketStatus,
@@ -267,6 +268,19 @@ export const adminApi = {
 export const directoryApi = {
   listMembers(params: { search?: string; role?: Role; page?: number; size?: number } = {}) {
     return bffFetch<Page<DirectoryMember>>(`/api/users${qs(params)}`);
+  },
+  /**
+   * Every member, page by page (500 at a time, by id so pages don't shift): for naming everyone who appears in a
+   * list, where one page would leave members past it looking like former ones.
+   */
+  async listAllMembers(): Promise<DirectoryMember[]> {
+    const members: DirectoryMember[] = [];
+    for (let page = 0; page < 200; page++) {
+      const batch = await bffFetch<Page<DirectoryMember>>(`/api/users${qs({ page, size: 500, sort: "id,asc" })}`);
+      members.push(...batch.content);
+      if (batch.content.length < 500) break;
+    }
+    return members;
   },
 };
 
@@ -520,6 +534,10 @@ export const auditApi = {
   },
   get(id: string) {
     return bffFetch<DecisionRecord>(`/api/audit/decisions/${id}`);
+  },
+  /** Services the trail covers that are no longer in the inventory: still searchable and exportable. */
+  removedServices() {
+    return bffFetch<RemovedService[]>("/api/audit/decisions/removed-services");
   },
   /**
    * A service's evidence for a period (E10 story 3), as the file to save: every decision record covering the

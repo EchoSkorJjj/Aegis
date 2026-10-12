@@ -6,13 +6,13 @@ import { Download } from "lucide-react";
 
 import { DateRangePicker } from "@/components/app/date-range-picker";
 import { DECISION_ACTION, DECISION_SUBJECT, startOfDay } from "@/components/app/reports/decision-trail";
-import { FilterSelect } from "@/components/app/responses/upgrade-recommendations";
+import { ServicePicker } from "@/components/app/reports/service-picker";
 import { StatusBadge, formatDateTime } from "@/components/app/responses/response-status";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ApiError, auditApi, inventoryApi, type EvidenceFile } from "@/lib/api";
+import { ApiError, auditApi, type EvidenceFile } from "@/lib/api";
 import { canReadDecisionTrail } from "@/lib/roles";
-import type { BusinessService, DecisionRecord, Page } from "@/lib/types";
+import type { DecisionRecord, Page, RemovedService } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
 
 const DAY = "yyyy-MM-dd";
@@ -20,8 +20,9 @@ const PREVIEW = 5;
 
 /**
  * Evidence export (E10 story 3): a service's decision trail for a period, downloaded as a PDF to hand an auditor or
- * regulator, or as CSV to work with. Both hold the same records; the PDF prints the CSV's SHA-256 so whoever holds
- * both can check they agree. The page previews what the period holds before anything is downloaded.
+ * regulator, or as CSV to work with. The PDF carries the CSV of the same records attached, from the same reading of
+ * the trail, and prints its SHA-256. The page previews what the period holds before anything is downloaded; any
+ * service can be chosen, those since removed from the inventory too.
  */
 export function EvidenceExport() {
   const { user, isLoading } = useAuth();
@@ -50,7 +51,7 @@ export function EvidenceExport() {
 
 function ExportForm() {
   const id = useId();
-  const [services, setServices] = useState<BusinessService[] | null>(null);
+  const [removed, setRemoved] = useState<RemovedService[] | null>(null);
   const [serviceId, setServiceId] = useState("");
   // The last 90 days, today included, by default.
   const [period, setPeriod] = useState<{ from?: string; to?: string }>(() => ({
@@ -60,18 +61,19 @@ function ExportForm() {
   const [preview, setPreview] = useState<Page<DecisionRecord> | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"pdf" | "csv" | null>(null);
-  const [saved, setSaved] = useState<EvidenceFile | null>(null);
+  const [saved, setSaved] = useState<(EvidenceFile & { kind: "pdf" | "csv" }) | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Services removed from the inventory keep their records: they can still be exported.
   useEffect(() => {
     let cancelled = false;
-    inventoryApi
-      .listServices({ size: 100, sort: "name,asc" })
-      .then((page) => {
-        if (!cancelled) setServices(page.content);
+    auditApi
+      .removedServices()
+      .then((services) => {
+        if (!cancelled) setRemoved(services);
       })
       .catch(() => {
-        if (!cancelled) setServices([]);
+        if (!cancelled) setRemoved([]);
       });
     return () => {
       cancelled = true;
@@ -116,9 +118,16 @@ function ExportForm() {
         zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       });
       save(file);
-      setSaved(file);
+      setSaved({ ...file, kind });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not export the evidence. Please try again.");
+      setError(
+        err instanceof ApiError && err.status === 502
+          ? "Aegis couldn't reach the member directory to name the people in the export, so it made none. Please " +
+            "try again in a moment."
+          : err instanceof ApiError
+            ? err.message
+            : "Could not export the evidence. Please try again.",
+      );
     } finally {
       setBusy(null);
     }
@@ -127,22 +136,17 @@ function ExportForm() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-        <FilterSelect
+        <ServicePicker
           id={`${id}-service`}
           label="Service"
           value={serviceId}
-          allLabel={services === null ? "Loading services…" : "Choose a service"}
+          emptyLabel="Choose a service"
+          removed={removed}
           onChange={(value) => {
             setServiceId(value);
             setSaved(null);
           }}
-        >
-          {services?.map((service) => (
-            <option key={service.id} value={service.id}>
-              {service.name}
-            </option>
-          ))}
-        </FilterSelect>
+        />
         <DateRangePicker
           label="Period"
           from={period.from}
@@ -217,20 +221,34 @@ function ExportForm() {
             Saved <span className="font-medium">{saved.fileName}</span>:{" "}
             {saved.records === 1 ? "1 decision record" : `${saved.records} decision records`}.
           </p>
-          <p className="text-muted-foreground">
-            CSV SHA-256 <code className="font-mono text-xs break-all">{saved.csvSha256}</code>
-          </p>
-          <p className="text-xs text-muted-foreground">
-            The PDF prints this digest. Whoever holds the CSV of the same service and period can check it matches
-            (for example with <code className="font-mono">sha256sum</code>), so the PDF and the data agree.
-          </p>
+          {saved.kind === "pdf" ? (
+            <>
+              <p className="text-muted-foreground">
+                The CSV of these records is attached inside the PDF (open its attachments), and the SHA-256 on its
+                cover is that CSV&apos;s: <code className="font-mono text-xs break-all">{saved.csvSha256}</code>
+              </p>
+              <p className="text-xs text-muted-foreground">
+                The PDF and its attached CSV come from one reading of the trail, so they always agree. A CSV
+                downloaded on its own is another reading: it differs if a decision was made or a name changed in
+                between.
+              </p>
+            </>
+          ) : (
+            <p className="text-muted-foreground">
+              SHA-256 of this file: <code className="font-mono text-xs break-all">{saved.csvSha256}</code>
+            </p>
+          )}
         </div>
       )}
 
       <p className="text-xs text-muted-foreground">
-        Times in the PDF are in your time zone ({Intl.DateTimeFormat().resolvedOptions().timeZone}); the CSV keeps
-        them in UTC. The PDF prints characters outside Latin-1 as “?”; the CSV keeps every character. At most 5,000
-        records per export: choose a shorter period for more.
+        Each export reads the trail at one moment: a decision made after it is in the next one. Times in the PDF are in
+        your time zone ({Intl.DateTimeFormat().resolvedOptions().timeZone}); the CSV keeps them in UTC. The PDF prints
+        characters outside Latin-1 as “?”; the CSV keeps them. The CSV keeps every field as recorded, except that a
+        field beginning with =, +, -, @, a tab or a carriage return starts with &apos; so that a spreadsheet shows it
+        rather than running it as a formula. People are named as the directory names them now; a member without a
+        display name, or a former member, by the start of their user id. At most 5,000 records per CSV and 2,000 per
+        PDF: choose a shorter period for more.
       </p>
     </div>
   );

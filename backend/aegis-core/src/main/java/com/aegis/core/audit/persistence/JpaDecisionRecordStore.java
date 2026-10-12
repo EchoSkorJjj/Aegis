@@ -1,7 +1,9 @@
 package com.aegis.core.audit.persistence;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -90,7 +92,34 @@ class JpaDecisionRecordStore implements DecisionRecordStore {
         if (filter.to() != null) {
             specs.add((root, query, cb) -> cb.lessThan(root.get("occurredAt"), filter.to()));
         }
-        return records.findAll(Specification.allOf(specs), pageable).map(DecisionRecordEntity::toDomain);
+        Page<DecisionRecordEntity> page = records.findAll(Specification.allOf(specs), pageable);
+        Page<DecisionRecord> read = page.map(DecisionRecordEntity::toDomain);
+        // Records are never changed, so nothing is lost by letting go of what was read: an export reads many pages,
+        // snapshots and all, in one transaction.
+        page.getContent().forEach(entityManager::detach);
+        return read;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, String> servicesCovered() {
+        UUID org = scope();
+        List<?> rows = entityManager.createNativeQuery("""
+                        select covered.id,
+                               (select r.service_name from core.decision_records r
+                                 where r.org_id = :org and r.service_id = covered.id and r.service_name is not null
+                                 order by r.seq desc limit 1)
+                          from (select distinct unnest(service_ids) as id from core.decision_records
+                                 where org_id = :org) covered
+                        """)
+                .setParameter("org", org)
+                .getResultList();
+        Map<UUID, String> services = new LinkedHashMap<>();
+        for (Object row : rows) {
+            Object[] columns = (Object[]) row;
+            services.put((UUID) columns[0], (String) columns[1]);
+        }
+        return services;
     }
 
     private UUID scope() {

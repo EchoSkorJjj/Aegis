@@ -1,6 +1,8 @@
 package com.aegis.core.platform.identity;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -21,7 +23,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.ObjectReader;
 
 /**
- * {@link IdentityDirectory} over identity-service's REST API ({@code GET /users/{id}}).
+ * {@link IdentityDirectory} over identity-service's REST API ({@code GET /users/{id}}, {@code GET /users}).
  *
  * <p><b>Token relay, not a service credential.</b> The lookup carries the <em>caller's</em> bearer
  * token, so identity-service authorizes and org-scopes it exactly as it would the caller's own request:
@@ -36,8 +38,14 @@ import tools.jackson.databind.ObjectReader;
 @Component
 class HttpIdentityDirectory implements IdentityDirectory {
 
+    /** Members per page of {@code GET /users}: within identity-service's page limit (Spring's default, 2,000). */
+    static final int MEMBER_PAGE = 500;
+    /** At most this many pages (100,000 members): a guard against a directory that never ends. */
+    private static final int MAX_MEMBER_PAGES = 200;
+
     private final RestClient http;
     private final ObjectReader memberReader;
+    private final ObjectReader memberPageReader;
 
     HttpIdentityDirectory(
             @Value("${aegis.identity.base-url:http://localhost:8081}") String baseUrl,
@@ -52,6 +60,8 @@ class HttpIdentityDirectory implements IdentityDirectory {
                 .observationRegistry(observationRegistry)
                 .build();
         this.memberReader = objectMapper.readerFor(DirectoryUser.class)
+                .without(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        this.memberPageReader = objectMapper.readerFor(MemberPage.class)
                 .without(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     }
 
@@ -78,6 +88,50 @@ class HttpIdentityDirectory implements IdentityDirectory {
         } catch (JacksonException malformed) {
             throw new ApiExceptions.UpstreamUnavailable("identity-service returned an unreadable member record");
         }
+    }
+
+    /**
+     * Pages through {@code GET /users} (org-scoped by the caller's own token), {@value #MEMBER_PAGE} at a time by id, so
+     * a member joining meanwhile can't shift a page. Stops at a page that isn't full.
+     */
+    @Override
+    public List<DirectoryUser> members() {
+        String token = callerToken();
+        List<DirectoryUser> members = new ArrayList<>();
+        for (int page = 0; page < MAX_MEMBER_PAGES; page++) {
+            int number = page;
+            String body;
+            try {
+                body = http.get()
+                        .uri(uri -> uri.path("/users").queryParam("page", number).queryParam("size", MEMBER_PAGE)
+                                .queryParam("sort", "id,asc").build())
+                        .headers(headers -> headers.setBearerAuth(token))
+                        .retrieve()
+                        .body(String.class);
+            } catch (RestClientException unreachableOrFailed) {
+                throw new ApiExceptions.UpstreamUnavailable("Could not list the organization's members with "
+                        + "identity-service");
+            }
+            List<DirectoryUser> content;
+            try {
+                MemberPage read = body == null || body.isBlank() ? null : memberPageReader.readValue(body);
+                content = read == null || read.content() == null ? null : read.content();
+            } catch (JacksonException malformed) {
+                content = null;
+            }
+            if (content == null) {
+                throw new ApiExceptions.UpstreamUnavailable("identity-service returned an unreadable member list");
+            }
+            members.addAll(content);
+            if (content.size() < MEMBER_PAGE) {
+                break;
+            }
+        }
+        return members;
+    }
+
+    /** One page of {@code GET /users}: only its members are read. */
+    record MemberPage(List<DirectoryUser> content) {
     }
 
     /** The caller's raw access token — lookups happen only on behalf of an authenticated request. */

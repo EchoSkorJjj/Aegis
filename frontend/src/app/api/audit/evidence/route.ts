@@ -2,13 +2,16 @@ import { NextResponse } from "next/server";
 
 import { authedBackendDownload } from "@/lib/server/api";
 
-/** What the browser needs from the export's response: the file's type and name, and what it holds. */
+/**
+ * What the browser needs from the export's response: the file's type and name, and what it holds. Not its length:
+ * `fetch` undoes any compression on the way, so the backend's length might not be the length streamed on.
+ */
 const PASSED_ON = ["content-type", "content-disposition", "x-evidence-csv-sha256", "x-evidence-records"];
 
 /**
  * BFF route for aegis-core's evidence export (E10 story 3): `/api/audit/evidence?serviceId=&from=&to=&format=&zone=`,
- * a service's decision trail for a period as a PDF or CSV. Its bytes pass through untouched (the catch-all
- * `/api/audit/**` proxy reads JSON only); an error stays the backend's JSON error with its status.
+ * a service's decision trail for a period as a PDF or CSV. Its bytes are streamed through untouched, never held here
+ * whole (the catch-all `/api/audit/**` proxy reads JSON only); an error stays the backend's JSON error with its status.
  */
 export async function GET(request: Request) {
   const query = new URL(request.url).search;

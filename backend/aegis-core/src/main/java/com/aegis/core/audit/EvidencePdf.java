@@ -1,20 +1,33 @@
 package com.aegis.core.audit;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.GregorianCalendar;
 import java.util.Locale;
+import java.util.Map;
 
 import com.aegis.core.audit.DecisionRecord.Action;
 import com.aegis.core.audit.DecisionRecord.Subject;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentInformation;
+import org.apache.pdfbox.pdmodel.PDDocumentNameDictionary;
+import org.apache.pdfbox.pdmodel.PDEmbeddedFilesNameTreeNode;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.PageMode;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.common.filespecification.PDComplexFileSpecification;
+import org.apache.pdfbox.pdmodel.common.filespecification.PDEmbeddedFile;
 import org.apache.pdfbox.pdmodel.font.PDFont;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
@@ -26,9 +39,10 @@ import tools.jackson.databind.ObjectMapper;
  * then each decision record oldest first (when, what, who, why, the change and its impact then), then each record's
  * snapshot, the response as it stood. Times are shown in the reader's time zone; the CSV keeps them in UTC.
  *
- * <p>It names the SHA-256 of the CSV of the same records, so whoever holds both can check that they agree. The PDF uses
- * the standard fonts, which cover Latin-1 text only: any other character is printed as {@code ?} here and kept exactly
- * in the CSV.
+ * <p>The PDF carries the CSV of the same records attached (a PDF file attachment, listed in a viewer's attachments
+ * panel) and prints its SHA-256, so the two always travel together and agree: they come from one reading of the trail.
+ * The PDF uses the standard fonts, which cover Latin-1 text only: any other character is printed as {@code ?} here and
+ * kept in the attached CSV. The document is built in temporary files, not in memory.
  */
 public final class EvidencePdf {
 
@@ -38,15 +52,22 @@ public final class EvidencePdf {
     private static final float WIDTH = SIZE.getWidth() - 2 * MARGIN;
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.ROOT);
 
-    /** Who made the export, when, in which time zone it is read, and the digest of the matching CSV. */
-    public record Cover(String generatedBy, Instant generatedAt, ZoneId zone, String csvSha256) {
+    /**
+     * Who made the export, when, in which time zone it is read, and the CSV of the same records it carries attached
+     * ({@code csv}, attached as {@code csvName}) with that CSV's SHA-256.
+     */
+    public record Cover(String generatedBy, Instant generatedAt, ZoneId zone, Path csv, String csvName,
+                        String csvSha256) {
     }
 
     private EvidencePdf() {
     }
 
-    public static byte[] write(EvidenceExport.Evidence evidence, Cover cover, ObjectMapper mapper) {
-        try (PDDocument document = new PDDocument()) {
+    /** Write the PDF to {@code out} (left open). {@code records} is read twice: the decisions, then the snapshots. */
+    public static void write(EvidenceExport.Evidence evidence, EvidenceExport.Records records,
+                             EvidenceExport.People people, Cover cover, ObjectMapper mapper, OutputStream out)
+            throws IOException {
+        try (PDDocument document = new PDDocument(IOUtils.createTempFileOnlyStreamCache())) {
             Layout layout = new Layout(document);
             String service = evidence.serviceName() == null ? "A removed service" : evidence.serviceName();
 
@@ -57,28 +78,34 @@ public final class EvidencePdf {
             layout.field("Service", service + " (" + evidence.serviceId() + ")");
             layout.field("Period", time(evidence.from(), cover.zone()) + " to " + time(evidence.to(), cover.zone())
                     + " (" + cover.zone().getId() + "; the end not included)");
-            layout.field("Records", Integer.toString(evidence.records().size()));
+            layout.field("Records", Integer.toString(evidence.records()));
             layout.field("Generated", time(cover.generatedAt(), cover.zone()) + " by " + cover.generatedBy());
+            layout.field("Attached CSV", cover.csvName());
             layout.field("CSV SHA-256", cover.csvSha256());
             layout.gap(8);
             layout.text("Every step taken in this period on a response covering this service, as Aegis recorded it "
                     + "when the step was taken: a risk ticket and its upgrade pull request for this service, and each "
-                    + "regulator memo covering it. Records can't be changed or removed. The names, score and tier are "
-                    + "as they were then; people are named as the organization's directory names them now. The CSV "
-                    + "export of the same records has the SHA-256 above and keeps every field exactly.",
-                    layout.regular, 9, 0);
+                    + "regulator memo covering it, read at one moment, when this was generated. Records can't be "
+                    + "changed or removed. The names, score and tier are as they were then; people are named as the "
+                    + "organization's directory names them now, a member without a display name or a former member "
+                    + "by the start of their user id.", layout.regular, 9, 0);
+            layout.gap(4);
+            layout.text("The CSV attached to this PDF holds the same records with every field, the snapshots "
+                    + "included, and has the SHA-256 above. It keeps every field as recorded, except that a field "
+                    + "beginning with =, +, -, @, a tab or a carriage return starts with ' there, so that a "
+                    + "spreadsheet shows it rather than running it as a formula.", layout.regular, 9, 0);
 
             layout.gap(14);
             layout.text("Decisions", layout.bold, 14, 0);
             layout.gap(4);
-            if (evidence.records().isEmpty()) {
+            if (evidence.records() == 0) {
                 layout.text("No decision was recorded for this service in this period.", layout.regular, 10, 0);
             }
-            for (DecisionRecord record : evidence.records()) {
+            records.forEach(record -> unchecked(() -> {
                 layout.keep(5 * 14);
                 layout.text("#" + record.sequence() + "  " + time(record.occurredAt(), cover.zone()) + "  "
                         + label(record.action()) + " - " + label(record.subject()), layout.bold, 10, 0);
-                layout.text("By " + evidence.nameOf(record.actorId()) + impact(record), layout.regular, 9, 12);
+                layout.text("By " + people.nameOf(record.actorId()) + impact(record), layout.regular, 9, 12);
                 layout.text("Change: " + record.changeTitle(), layout.regular, 9, 12);
                 // A memo names no single service: it covers this one, and maybe others.
                 if (record.serviceIds().size() > 1) {
@@ -90,32 +117,67 @@ public final class EvidencePdf {
                 }
                 layout.text("Response " + record.responseId() + " - record " + record.id(), layout.regular, 7, 12);
                 layout.gap(6);
-            }
+            }));
 
-            if (!evidence.records().isEmpty()) {
+            if (evidence.records() > 0) {
                 layout.page();
                 layout.text("The responses as they stood", layout.bold, 14, 0);
                 layout.text("Each record's snapshot, as recorded with it.", layout.regular, 9, 0);
                 layout.gap(6);
-                for (DecisionRecord record : evidence.records()) {
+                records.forEach(record -> unchecked(() -> {
                     layout.keep(3 * 12);
                     layout.text("#" + record.sequence() + "  " + label(record.action()) + " - "
                             + label(record.subject()), layout.bold, 9, 0);
                     layout.mono(pretty(record.state(), mapper), 6.5f, 12);
                     layout.gap(6);
-                }
+                }));
             }
 
             layout.finish("Aegis decision evidence - " + service);
+            attach(document, cover);
             PDDocumentInformation info = document.getDocumentInformation();
             info.setTitle("Decision evidence: " + printable(service, layout.regular));
             info.setCreator("Aegis");
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
             document.save(out);
-            return out.toByteArray();
+        }
+    }
+
+    /** The CSV, attached to the document and shown in the viewer's attachments panel when it opens. */
+    private static void attach(PDDocument document, Cover cover) throws IOException {
+        PDEmbeddedFile file;
+        try (InputStream csv = Files.newInputStream(cover.csv())) {
+            file = new PDEmbeddedFile(document, csv, COSName.FLATE_DECODE);
+        }
+        file.setSubtype("text/csv");
+        file.setSize((int) Math.min(Integer.MAX_VALUE, Files.size(cover.csv())));
+        file.setCreationDate(GregorianCalendar.from(cover.generatedAt().atZone(ZoneOffset.UTC)));
+        PDComplexFileSpecification attachment = new PDComplexFileSpecification();
+        attachment.setFile(cover.csvName());
+        attachment.setFileUnicode(cover.csvName());
+        attachment.setEmbeddedFile(file);
+        attachment.setEmbeddedFileUnicode(file);
+        attachment.setFileDescription("The decision records in this PDF, every field, as CSV (SHA-256 "
+                + cover.csvSha256() + ")");
+        PDEmbeddedFilesNameTreeNode files = new PDEmbeddedFilesNameTreeNode();
+        files.setNames(Map.of(cover.csvName(), attachment));
+        PDDocumentNameDictionary names = new PDDocumentNameDictionary(document.getDocumentCatalog());
+        names.setEmbeddedFiles(files);
+        document.getDocumentCatalog().setNames(names);
+        document.getDocumentCatalog().setPageMode(PageMode.USE_ATTACHMENTS);
+    }
+
+    /** A layout step inside a record callback, which can't throw {@link IOException}. */
+    private static void unchecked(IoStep step) {
+        try {
+            step.run();
         } catch (IOException e) {
             throw new UncheckedIOException("The evidence PDF could not be written", e);
         }
+    }
+
+    @FunctionalInterface
+    private interface IoStep {
+        void run() throws IOException;
     }
 
     static String time(Instant instant, ZoneId zone) {

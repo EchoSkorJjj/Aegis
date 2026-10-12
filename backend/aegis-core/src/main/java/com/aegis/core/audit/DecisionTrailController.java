@@ -74,6 +74,15 @@ public class DecisionTrailController {
         return trail.list(query, inWrittenOrder(pageable));
     }
 
+    @GetMapping("/removed-services")
+    @PreAuthorize(READ)
+    @Operation(summary = "The services the trail covers that have since been removed from the inventory, each with the "
+            + "name its latest ticket's or pull request's record gave it (null when only regulator memos covered it): "
+            + "their trail outlives them, so they can still be searched and exported")
+    public List<DecisionTrail.RemovedService> removedServices() {
+        return trail.removedServices();
+    }
+
     @GetMapping("/{id}")
     @PreAuthorize(READ)
     @Operation(summary = "One decision record, with the response as it stood then (state: the draft, any edit or "

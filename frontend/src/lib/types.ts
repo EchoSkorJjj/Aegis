@@ -926,3 +926,12 @@ export interface DecisionRecord {
   tier: ImpactTier | null;
   state?: unknown;
 }
+
+/**
+ * A service the decision trail covers that has since been removed from the inventory: its trail outlives it. Named as
+ * its latest ticket's or pull request's record named it; `null` when only regulator memos covered it.
+ */
+export interface RemovedService {
+  id: string;
+  name: string | null;
+}

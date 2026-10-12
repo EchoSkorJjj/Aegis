@@ -7,6 +7,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import com.aegis.core.advisories.Advisory;
 import com.aegis.core.advisories.AdvisoryStore;
@@ -18,6 +20,8 @@ import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.platform.identity.DirectoryUser;
+import com.aegis.core.platform.tenant.CurrentOrg;
+import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 import com.aegis.core.support.AbstractInventoryIntegrationTest;
 import com.aegis.core.support.FakeIdentityDirectory;
 import com.jayway.jsonpath.JsonPath;
@@ -32,6 +36,8 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
@@ -57,6 +63,10 @@ class EvidenceExportCorrectnessIntegrationTest extends AbstractInventoryIntegrat
     @Autowired private InventoryService inventory;
     @Autowired private AdvisoryStore advisories;
     @Autowired private FakeIdentityDirectory directory;
+    @Autowired private DecisionTrail decisions;
+    @Autowired private EvidenceExport exports;
+    @Autowired private CurrentOrg currentOrg;
+    @Autowired private PlatformTransactionManager transactions;
 
     private DirectoryUser drafter;
     private DirectoryUser reviewer;
@@ -137,6 +147,9 @@ class EvidenceExportCorrectnessIntegrationTest extends AbstractInventoryIntegrat
             for (String id : outside) {
                 assertThat(text).doesNotContain(id);
             }
+            // And the CSV it carries attached is that period's CSV, byte for byte.
+            assertThat(EvidenceExportIntegrationTest.attachedCsv(pdf.getContentAsByteArray()))
+                    .isEqualTo(csv.getContentAsByteArray());
             exported.add(expectedIds);
         }
 
@@ -151,7 +164,83 @@ class EvidenceExportCorrectnessIntegrationTest extends AbstractInventoryIntegrat
         assertThat(duringText).contains("By Riley Reviewer", "By Dana Drafter", "Why: Behind the WAF");
     }
 
+    @Test
+    void aDecisionCommittedWhileAnExportIsReadNeitherShiftsItsPagesNorSlipsIntoIt() throws Exception {
+        UUID service = UUID.randomUUID();
+        Instant start = Instant.now().minusSeconds(1);
+        CountDownLatch written = new CountDownLatch(1);
+        CountDownLatch commit = new CountDownLatch(1);
+        UUID[] late = new UUID[1];
+        // A decision written first, so it draws the earliest sequence, but committed only after the export has read
+        // its first page: read page by page in separate transactions, it would push the second page back by one.
+        Thread lateDecision = new Thread(() -> currentOrg.runAs(DemoEstateSeeder.DEMO_ORG_ID,
+                () -> new TransactionTemplate(transactions).executeWithoutResult(status -> {
+                    late[0] = append(service, DecisionRecord.Action.DRAFTED);
+                    written.countDown();
+                    await(commit);
+                })));
+        lateDecision.start();
+        try {
+            assertThat(written.await(30, TimeUnit.SECONDS)).isTrue();
+            for (int i = 0; i < 600; i++) {
+                append(service, DecisionRecord.Action.EDITED);
+            }
+            exports.onPageRead(page -> {
+                if (page == 0) {
+                    commit.countDown();
+                    join(lateDecision);
+                }
+            });
+            MockHttpServletResponse csv = export(service, start, Instant.parse("2999-01-01T00:00:00Z"), "csv");
+
+            List<Map<String, String>> rows = EvidenceExportIntegrationTest.parse(csv.getContentAsByteArray());
+            // The 600 records committed when the export began: each once, in order, and not the late one.
+            assertThat(rows).hasSize(600);
+            assertThat(rows).extracting(row -> row.get("record_id")).doesNotHaveDuplicates();
+            assertThat(rows).extracting(row -> row.get("action")).containsOnly("EDITED");
+            assertThat(rows).extracting(row -> row.get("response_id")).doesNotContain(late[0].toString());
+            List<Long> sequences = rows.stream().map(row -> Long.parseLong(row.get("sequence"))).toList();
+            assertThat(sequences).isSorted();
+            assertThat(csv.getHeader(EvidenceController.RECORDS)).isEqualTo("600");
+        } finally {
+            exports.onPageRead(null);
+            commit.countDown();
+            lateDecision.join(30_000);
+        }
+        // Committed now, the late decision is in the next export: the trail itself was never short of it.
+        assertThat(EvidenceExportIntegrationTest.parse(export(service, start,
+                Instant.parse("2999-01-01T00:00:00Z"), "csv").getContentAsByteArray())).hasSize(601);
+    }
+
     // ---- helpers -----------------------------------------------------------------------------------
+
+    /** One step on a response of its own in {@code service}, recorded as decisions are; its response's id. */
+    private UUID append(UUID service, DecisionRecord.Action action) {
+        return decisions.recorded(UUID::randomUUID, response -> new DecisionRecord.Entry(
+                DecisionRecord.Subject.RISK_TICKET, response, response, service, "Paged " + service, List.of(service),
+                UUID.randomUUID(), "CVE-2098-0001 in paged-lib", action, reviewer.id(), null, 50.0, ImpactTier.MEDIUM,
+                Map.of("status", action.name())));
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(60, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Never told to commit");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static void join(Thread thread) {
+        try {
+            thread.join(30_000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+    }
 
     private record Row(String id, long sequence, Instant at, String action, String reason) {
     }

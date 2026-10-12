@@ -44,6 +44,11 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.FORBIDDEN, ex.getMessage(), req);
     }
 
+    @ExceptionHandler(ApiExceptions.TooManyRequests.class)
+    public ResponseEntity<ApiError> tooManyRequests(ApiExceptions.TooManyRequests ex, HttpServletRequest req) {
+        return build(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage(), req);
+    }
+
     @ExceptionHandler(ApiExceptions.UpstreamUnavailable.class)
     public ResponseEntity<ApiError> upstream(ApiExceptions.UpstreamUnavailable ex, HttpServletRequest req) {
         return build(HttpStatus.BAD_GATEWAY, ex.getMessage(), req);

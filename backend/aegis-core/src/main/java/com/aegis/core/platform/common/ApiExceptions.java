@@ -36,6 +36,13 @@ public final class ApiExceptions {
         }
     }
 
+    /** The work asked for is limited to a few at once and those are taken: try again shortly (429). */
+    public static class TooManyRequests extends RuntimeException {
+        public TooManyRequests(String message) {
+            super(message);
+        }
+    }
+
     /** The ai-service was unreachable or returned an error. */
     public static class UpstreamUnavailable extends RuntimeException {
         public UpstreamUnavailable(String message) {

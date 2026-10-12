@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import type { DecisionRecord, Role } from "../src/lib/types";
+import type { DecisionRecord, RemovedService, Role } from "../src/lib/types";
 
 // Browser contract checks with a fake BFF: the audit log sends each filter to aegis-core and shows what comes back.
 // What the trail holds and how each filter matches (memos in every covered service, the half-open period, newest
@@ -31,9 +31,16 @@ const RECORDS: DecisionRecord[] = [
     serviceName: LEDGER.name, serviceIds: [LEDGER.id], score: null, tier: null }),
 ];
 
-async function fakeBff(page: Page, role: Role, records: DecisionRecord[] = RECORDS) {
+async function fakeBff(
+  page: Page,
+  role: Role,
+  records: DecisionRecord[] = RECORDS,
+  removed: RemovedService[] = [],
+) {
   const searches: URLSearchParams[] = [];
   const lookups: string[] = [];
+  const memberPages: URLSearchParams[] = [];
+  const serviceSearches: (string | null)[] = [];
   await page.context().addCookies([{ name: "um_refresh", value: "browser-fixture", url: "http://localhost:3000" }]);
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -48,11 +55,18 @@ async function fakeBff(page: Page, role: Role, records: DecisionRecord[] = RECOR
       return route.fulfill({ json: [{ id: "demo-org", name: "Demo org", roles: [role], status: "ACTIVE" }] });
     }
     if (path === "/api/users") {
+      memberPages.push(url.searchParams);
       const members = [ALICE, BOB].map((member) => ({ ...member, roles: ["ANALYST"], enabled: true }));
-      return route.fulfill({ json: { content: members, totalElements: 2, totalPages: 1, number: 0, size: 100 } });
+      return route.fulfill({ json: { content: members, totalElements: 2, totalPages: 1, number: 0, size: 500 } });
     }
     if (path === "/api/inventory/services") {
-      return route.fulfill({ json: { content: [LEDGER, PAYMENTS], totalElements: 2, totalPages: 1, number: 0, size: 100 } });
+      const search = url.searchParams.get("search");
+      serviceSearches.push(search);
+      const found = [LEDGER, PAYMENTS].filter((item) => !search || item.name.toLowerCase().includes(search.toLowerCase()));
+      return route.fulfill({ json: { content: found, totalElements: found.length, totalPages: 1, number: 0, size: 50 } });
+    }
+    if (path === "/api/audit/decisions/removed-services") {
+      return route.fulfill({ json: removed });
     }
     const service = path.match(/^\/api\/inventory\/services\/([^/]+)$/);
     if (service) {
@@ -82,11 +96,11 @@ async function fakeBff(page: Page, role: Role, records: DecisionRecord[] = RECOR
     }
     return route.fulfill({ json: { content: [], totalElements: 0, totalPages: 1, number: 0, size: 20 } });
   });
-  return { searches, lookups };
+  return { searches, lookups, memberPages, serviceSearches };
 }
 
 test("a compliance admin searches the trail by person, decision and service, newest first", async ({ page }) => {
-  const { searches } = await fakeBff(page, "COMPLIANCE_ADMIN");
+  const { searches, memberPages } = await fakeBff(page, "COMPLIANCE_ADMIN");
   await page.goto("/reports/audit");
   const log = page.getByRole("region", { name: "Decision records" });
   const rows = log.getByRole("row").filter({ has: page.getByRole("cell") });
@@ -94,6 +108,10 @@ test("a compliance admin searches the trail by person, decision and service, new
   await expect(log).toContainText("4 decision records in total");
   await expect(page.getByRole("link", { name: "Audit log" })).toHaveAttribute("href", "/reports/audit");
   expect(searches.at(-1)?.get("sort")).toBe("sequence,desc");
+  // Everyone is named: the member directory is read page by page, not one page of it.
+  await expect.poll(() => memberPages.length).toBeGreaterThan(0);
+  expect(memberPages.at(0)?.get("size")).toBe("500");
+  expect(memberPages.at(0)?.get("sort")).toBe("id,asc");
 
   // Newest first: the memo, covering two services, dismissed with why.
   const memo = rows.first();
@@ -106,7 +124,7 @@ test("a compliance admin searches the trail by person, decision and service, new
   await expect(memo).not.toContainText("removed");
   await expect(memo).toContainText("Why: Not a significant threat");
   // Someone the directory no longer lists is still shown, by id; a record without a score shows none.
-  await expect(rows.last()).toContainText("Former or unknown member (user-gon)");
+  await expect(rows.last()).toContainText("Former member (user-gon)");
 
   await page.getByLabel("Decided by", { exact: true }).selectOption(BOB.id);
   await expect(rows).toHaveCount(2);
@@ -130,7 +148,7 @@ test("a compliance admin searches the trail by person, decision and service, new
   expect(searches.at(-1)?.get("serviceId")).toBe(LEDGER.id);
 
   await page.getByLabel("Order", { exact: true }).selectOption("oldest");
-  await expect(rows.first()).toContainText("Former or unknown member");
+  await expect(rows.first()).toContainText("Former member");
   expect(searches.at(-1)?.get("sort")).toBeNull();
   await page.screenshot({ path: test.info().outputPath("audit-log.png"), fullPage: true });
 });
@@ -152,21 +170,37 @@ test("a record opens to the response as it stood then", async ({ page }) => {
   await expect(dialog.getByRole("link", { name: "CVE-2021-44228 in log4j-core 2.14.1" })).toHaveAttribute("href", "/findings/signal-1");
 });
 
-test("a memo's services past the listed ones are looked up, and one since removed says so", async ({ page }) => {
-  const memo = (id: string, serviceIds: string[]) => record({ id, sequence: id === "memo-a" ? 201 : 200,
+test("a memo's services are named from the inventory, or as the trail named them once removed", async ({ page }) => {
+  const memo = (id: string, sequence: number, serviceIds: string[]) => record({ id, sequence,
     subject: "REGULATOR_MEMO", subjectId: id, responseId: id, serviceId: null, serviceName: null, serviceIds });
-  const { lookups } = await fakeBff(page, "COMPLIANCE_ADMIN", [
-    memo("memo-a", [RENAMED.id]),
-    memo("memo-b", ["service-gone", PAYMENTS.id]),
-  ]);
+  const { lookups, searches, serviceSearches } = await fakeBff(page, "COMPLIANCE_ADMIN", [
+    memo("memo-a", 202, [RENAMED.id]),
+    memo("memo-b", 201, ["service-gone", PAYMENTS.id]),
+    memo("memo-c", 200, ["service-unnamed"]),
+  ], [{ id: "service-gone", name: "Old billing" }, { id: "service-unnamed", name: null }]);
   await page.goto("/reports/audit");
   const rows = page.getByRole("region", { name: "Decision records" }).getByRole("row").filter({ has: page.getByRole("cell") });
 
-  await expect(rows.first().getByRole("button", { name: RENAMED.name })).toBeVisible();
-  await expect(rows.last().getByRole("button", { name: "A removed service" })).toBeVisible();
-  await expect(rows.last()).toContainText("and 1 other service");
-  // Only what the service list didn't name is looked up, each once.
-  expect([...lookups].sort()).toEqual([RENAMED.id, "service-gone"]);
+  // From the inventory, however many services it has; as their records named them once removed; else said so.
+  await expect(rows.nth(0).getByRole("button", { name: RENAMED.name })).toBeVisible();
+  await expect(rows.nth(1).getByRole("button", { name: "Old billing" })).toBeVisible();
+  await expect(rows.nth(1)).toContainText("and 1 other service");
+  await expect(rows.nth(2).getByRole("button", { name: "A removed service" })).toBeVisible();
+  // Only what the removed list didn't name is looked up, each once.
+  expect([...lookups].sort()).toEqual([PAYMENTS.id, RENAMED.id].sort());
+
+  // The service filter searches the inventory on the server, and offers the removed services too.
+  const picker = page.getByLabel("Service", { exact: true });
+  await expect(picker.locator("optgroup[label='No longer in the inventory'] option")).toHaveText([
+    "Old billing (removed)", "A service (service-) (removed)",
+  ]);
+  await page.getByLabel("Search services by name").fill("led");
+  await expect(picker.locator("option", { hasText: LEDGER.name })).toHaveCount(1);
+  await expect(picker.locator("option", { hasText: PAYMENTS.name })).toHaveCount(0);
+  expect(serviceSearches).toContain("led");
+  await picker.selectOption({ label: "Old billing (removed)" });
+  await expect(rows).toHaveCount(1);
+  expect(searches.at(-1)?.get("serviceId")).toBe("service-gone");
 });
 
 test("a service owner has no audit log", async ({ page }) => {

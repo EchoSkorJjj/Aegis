@@ -2,13 +2,18 @@ package com.aegis.core.audit;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Semaphore;
+import java.util.stream.Stream;
 
 import com.aegis.core.audit.DecisionRecord.Action;
 import com.aegis.core.audit.DecisionRecord.Subject;
@@ -24,7 +29,9 @@ import com.aegis.core.support.FakeIdentityDirectory;
 import com.jayway.jsonpath.JsonPath;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.common.filespecification.PDComplexFileSpecification;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -60,6 +67,7 @@ class EvidenceExportIntegrationTest extends AbstractInventoryIntegrationTest {
     @Autowired private InventoryService inventory;
     @Autowired private FakeIdentityDirectory directory;
     @Autowired private ObjectMapper mapper;
+    @Autowired private EvidenceExport exports;
 
     private DirectoryUser alice;
     private DirectoryUser casey;
@@ -69,6 +77,11 @@ class EvidenceExportIntegrationTest extends AbstractInventoryIntegrationTest {
     void members() {
         alice = directory.member("Alice Analyst", "ANALYST");
         casey = directory.member("Casey Compliance", "COMPLIANCE_ADMIN");
+    }
+
+    @AfterEach
+    void reachable() {
+        directory.unavailable(false);
     }
 
     @Test
@@ -116,7 +129,7 @@ class EvidenceExportIntegrationTest extends AbstractInventoryIntegrationTest {
 
         // People by name where the directory knows them, by id where they've left; formulas made inert.
         assertThat(rows.get(0).get("actor_name")).isEqualTo("Alice Analyst");
-        assertThat(rows.get(1).get("actor_name")).isEqualTo("Unknown member " + formerMember);
+        assertThat(rows.get(1).get("actor_name")).isEqualTo("Former member " + formerMember.toString().substring(0, 8));
         assertThat(rows.get(1).get("reason")).isEqualTo("'=HYPERLINK(\"https://evil.example\",\"WAF\")");
         assertThat(rows.get(2).get("service_ids").split(" ")).hasSize(2);
         // A memo names no single service, as the trail records it.
@@ -150,6 +163,101 @@ class EvidenceExportIntegrationTest extends AbstractInventoryIntegrationTest {
         assertThat(text).contains("By Alice Analyst - impact then 72.5 (HIGH)", "Why: Accepted for this quarter",
                 "Covers 2 services, this one among them", "The responses as they stood", "\"note\" : \"step 2\"");
         assertThat(text).doesNotContain("null");
+
+        // The PDF carries its CSV: the one its digest is of, from the same reading. Nothing changed between the two
+        // downloads here, so it is byte for byte the CSV downloaded on its own.
+        byte[] attached = attachedCsv(pdf.getContentAsByteArray());
+        assertThat(EvidenceCsv.sha256(attached)).isEqualTo(digest);
+        assertThat(attached).isEqualTo(csv.getContentAsByteArray());
+        assertThat(text).contains("Attached CSV: aegis-evidence-evidence-");
+    }
+
+    @Test
+    void aMemberWithoutADisplayNameIsNamedByIdNeverByEmail() throws Exception {
+        DirectoryUser nameless = directory.register(new DirectoryUser(UUID.randomUUID(),
+                "nameless-" + UUID.randomUUID() + "@example.com", null, Set.of("ANALYST"), true));
+        UUID service = UUID.randomUUID();
+        record(service, "Nameless " + service, Subject.RISK_TICKET, Action.DISMISSED, nameless.id(), "Accepted");
+        String name = "Member " + nameless.id().toString().substring(0, 8);
+
+        byte[] csv = export(get(EVIDENCE).param("serviceId", service.toString())
+                .param("from", "2000-01-01T00:00:00Z").param("to", FAR_FUTURE)).getContentAsByteArray();
+        byte[] pdf = export(get(EVIDENCE).param("serviceId", service.toString())
+                .param("from", "2000-01-01T00:00:00Z").param("to", FAR_FUTURE).param("format", "pdf"))
+                .getContentAsByteArray();
+
+        assertThat(parse(csv)).singleElement().satisfies(row -> assertThat(row.get("actor_name")).isEqualTo(name));
+        assertThat(new String(csv, StandardCharsets.UTF_8)).doesNotContain(nameless.email());
+        assertThat(text(pdf)).contains("By " + name).doesNotContain(nameless.email());
+    }
+
+    @Test
+    void anExportIsRefusedWhileTheMemberDirectoryIsUnreachableRatherThanMadeWithoutNames() throws Exception {
+        UUID service = UUID.randomUUID();
+        record(service, "Directory " + service, Subject.RISK_TICKET, Action.DRAFTED, alice.id(), null);
+        long filesBefore = exportFiles();
+        directory.unavailable(true);
+        try {
+            for (String format : List.of("csv", "pdf")) {
+                mvc.perform(get(EVIDENCE).param("serviceId", service.toString())
+                                .param("from", "2000-01-01T00:00:00Z").param("to", FAR_FUTURE).param("format", format)
+                                .with(as("COMPLIANCE_ADMIN", casey)))
+                        .andExpect(status().isBadGateway())
+                        .andExpect(jsonPath("$.message").value(containsString("identity-service")));
+            }
+        } finally {
+            directory.unavailable(false);
+        }
+        assertThat(exportFiles()).isEqualTo(filesBefore);
+        // Back, the same export is made, with the name.
+        assertThat(parse(export(get(EVIDENCE).param("serviceId", service.toString())
+                .param("from", "2000-01-01T00:00:00Z").param("to", FAR_FUTURE)).getContentAsByteArray()))
+                .singleElement().satisfies(row -> assertThat(row.get("actor_name")).isEqualTo("Alice Analyst"));
+    }
+
+    @Test
+    void onlyAFewExportsArePreparedAtOnce() throws Exception {
+        Semaphore running = exports.running();
+        running.acquire(EvidenceExport.AT_ONCE);
+        try {
+            mvc.perform(get(EVIDENCE).param("serviceId", UUID.randomUUID().toString())
+                            .param("from", "2000-01-01T00:00:00Z").param("to", FAR_FUTURE)
+                            .with(as("COMPLIANCE_ADMIN", casey)))
+                    .andExpect(status().isTooManyRequests())
+                    .andExpect(jsonPath("$.message").value(containsString("try again")));
+        } finally {
+            running.release(EvidenceExport.AT_ONCE);
+        }
+        mvc.perform(get(EVIDENCE).param("serviceId", UUID.randomUUID().toString())
+                        .param("from", "2000-01-01T00:00:00Z").param("to", FAR_FUTURE)
+                        .with(as("COMPLIANCE_ADMIN", casey)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void servicesRemovedFromTheInventoryAreListedWithTheNameTheirRecordsGaveThem() throws Exception {
+        UUID retired = UUID.randomUUID();
+        UUID memoOnly = UUID.randomUUID();
+        BusinessService current = inventory.createBusinessService("Current " + retired, BusinessCriticality.LOW,
+                ServiceExposure.INTERNAL);
+        record(retired, "Retired " + retired, Subject.RISK_TICKET, Action.DRAFTED, alice.id(), null);
+        record(current.getId(), current.getName(), Subject.RISK_TICKET, Action.DRAFTED, alice.id(), null);
+        trail.recorded(UUID::randomUUID, memo -> new DecisionRecord.Entry(Subject.REGULATOR_MEMO, memo, memo, null,
+                null, List.of(memoOnly), UUID.randomUUID(), "CVE-2097-0004 in evidence-lib", Action.DRAFTED,
+                alice.id(), null, 80.0, ImpactTier.HIGH, Map.of("note", "memo")));
+
+        String removed = mvc.perform(get(TRAIL + "/removed-services").with(as("COMPLIANCE_ADMIN", casey)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(JsonPath.<List<Object>>read(removed, "$[?(@.id == '%s')].name".formatted(retired)))
+                .containsExactly("Retired " + retired);
+        assertThat(JsonPath.<List<Object>>read(removed, "$[?(@.id == '%s')]".formatted(memoOnly))).hasSize(1);
+        assertThat(JsonPath.<List<Object>>read(removed, "$[?(@.id == '%s')].name".formatted(memoOnly)))
+                .containsExactly((Object) null);
+        assertThat(JsonPath.<List<Object>>read(removed, "$[?(@.id == '%s')]".formatted(current.getId()))).isEmpty();
+        mvc.perform(get(TRAIL + "/removed-services").with(as("SERVICE_OWNER", alice)))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -277,6 +385,23 @@ class EvidenceExportIntegrationTest extends AbstractInventoryIntegrationTest {
 
     private static String orEmpty(Object value) {
         return value == null ? "" : value.toString();
+    }
+
+    /** The CSV a PDF carries attached: its only attachment. */
+    static byte[] attachedCsv(byte[] pdf) throws IOException {
+        try (PDDocument document = Loader.loadPDF(pdf)) {
+            Map<String, PDComplexFileSpecification> attached =
+                    document.getDocumentCatalog().getNames().getEmbeddedFiles().getNames();
+            assertThat(attached).hasSize(1);
+            return attached.values().iterator().next().getEmbeddedFile().toByteArray();
+        }
+    }
+
+    /** The export files on disk: each is removed once sent, or when its export fails. */
+    private static long exportFiles() throws IOException {
+        try (Stream<Path> files = Files.list(Path.of(System.getProperty("java.io.tmpdir")))) {
+            return files.filter(file -> file.getFileName().toString().startsWith("aegis-evidence-")).count();
+        }
     }
 
     private static String text(byte[] pdf) throws IOException {

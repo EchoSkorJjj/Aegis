@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { DataPagination } from "@/components/app/data-pagination";
 import { DateRangePicker } from "@/components/app/date-range-picker";
+import { ServicePicker } from "@/components/app/reports/service-picker";
 import { StatusBadge, formatDateTime, type ResponseTone } from "@/components/app/responses/response-status";
 import { FilterSelect, ImpactBadge, MessageRow } from "@/components/app/responses/upgrade-recommendations";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ApiError, auditApi, directoryApi, inventoryApi } from "@/lib/api";
 import { canReadDecisionTrail } from "@/lib/roles";
-import type { BusinessService, DecisionAction, DecisionRecord, DecisionSubject, Page } from "@/lib/types";
+import type { DecisionAction, DecisionRecord, DecisionSubject, Page, RemovedService } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
 
 const PAGE_SIZE = 25;
@@ -113,31 +114,35 @@ function TrailSearch({ userId }: { userId: string | undefined }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<"forbidden" | "invalid" | "error" | null>(null);
   const [refresh, setRefresh] = useState(0);
-  const [services, setServices] = useState<BusinessService[] | null>(null);
-  // Each service's name by id; null once the inventory says it's gone (its records outlive it).
+  // Services removed from the inventory whose decisions are on record: offered in the picker, and their names.
+  const [removed, setRemoved] = useState<RemovedService[] | null>(null);
+  // Each service's name by id; null once the inventory says it's gone and no record named it.
   const [serviceNames, setServiceNames] = useState<Map<string, string | null>>(new Map());
   const lookedUp = useRef(new Set<string>());
+  // The service filtered by, named as the row it was picked from named it.
+  const [pickedService, setPickedService] = useState<{ id: string; name: string } | null>(null);
   const [people, setPeople] = useState<Map<string, string>>(new Map());
   const [open, setOpen] = useState<DecisionRecord | null>(null);
   const filterId = useId();
 
-  // What to search among: the organization's services and members. Names are a nicety; the search works without.
+  // Who's who: every member (not one page of them, which would leave the rest looking like former members), and the
+  // removed services. Names are a nicety; the search works without them.
   useEffect(() => {
     let cancelled = false;
-    inventoryApi
-      .listServices({ size: 100, sort: "name,asc" })
-      .then((page) => {
+    auditApi
+      .removedServices()
+      .then((services) => {
         if (cancelled) return;
-        setServices(page.content);
-        setServiceNames((known) => new Map([...known, ...page.content.map((s) => [s.id, s.name] as const)]));
+        setRemoved(services);
+        setServiceNames((known) => new Map([...known, ...services.map((s) => [s.id, s.name] as const)]));
       })
       .catch(() => {
-        if (!cancelled) setServices([]);
+        if (!cancelled) setRemoved([]);
       });
     directoryApi
-      .listMembers({ size: 100 })
-      .then((page) => {
-        if (!cancelled) setPeople(new Map(page.content.map((member) => [member.id, member.displayName || member.email])));
+      .listAllMembers()
+      .then((members) => {
+        if (!cancelled) setPeople(new Map(members.map((member) => [member.id, member.displayName || member.email])));
       })
       .catch(() => {});
     return () => {
@@ -179,10 +184,10 @@ function TrailSearch({ userId }: { userId: string | undefined }) {
     };
   }, [filters, refresh]);
 
-  // A regulator memo names no single service, only the ids it covers: name the ones the service list didn't
-  // (it holds the first 100), asking the inventory once for each; a 404 means the service has since been removed.
+  // A regulator memo names no single service, only the ids it covers: name each from the inventory, asked once per
+  // service; a 404 means it has since been removed (and the removed list didn't name it either).
   useEffect(() => {
-    if (services === null || !data) return;
+    if (removed === null || !data) return;
     const missing = [...new Set(data.content.filter((record) => !record.serviceName).flatMap((r) => r.serviceIds))]
       .filter((id) => !serviceNames.has(id) && !lookedUp.current.has(id));
     for (const id of missing) {
@@ -196,13 +201,14 @@ function TrailSearch({ userId }: { userId: string | undefined }) {
           }
         });
     }
-  }, [data, services, serviceNames]);
+  }, [data, removed, serviceNames]);
 
+  // Only members act on an organization's responses, and every member is listed: anyone else has left it.
   const nameOf = useMemo(
     () => (id: string) => {
       const name = people.get(id);
       if (id === userId) return name ? `${name} (you)` : "You";
-      return name ?? `Former or unknown member (${id.slice(0, 8)})`;
+      return name ?? `Former member (${id.slice(0, 8)})`;
     },
     [people, userId],
   );
@@ -225,19 +231,15 @@ function TrailSearch({ userId }: { userId: string | undefined }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-        <FilterSelect
+        <ServicePicker
           id={`${filterId}-service`}
           label="Service"
           value={filters.serviceId}
-          allLabel="All services"
+          emptyLabel="All services"
+          removed={removed}
+          valueName={pickedService?.id === filters.serviceId ? pickedService.name : undefined}
           onChange={(serviceId) => filter({ serviceId })}
-        >
-          {services?.map((service) => (
-            <option key={service.id} value={service.id}>
-              {service.name}
-            </option>
-          ))}
-        </FilterSelect>
+        />
         <FilterSelect
           id={`${filterId}-person`}
           label="Decided by"
@@ -351,7 +353,10 @@ function TrailSearch({ userId }: { userId: string | undefined }) {
                     nameOf={nameOf}
                     serviceNameOf={serviceNameOf}
                     onPerson={(actorId) => filter({ actorId })}
-                    onService={(serviceId) => filter({ serviceId })}
+                    onService={(serviceId, name) => {
+                      setPickedService({ id: serviceId, name });
+                      filter({ serviceId });
+                    }}
                     onOpen={() => setOpen(record)}
                   />
                 ))
@@ -406,7 +411,7 @@ function TrailRow({
   nameOf: (id: string) => string;
   serviceNameOf: ServiceNameOf;
   onPerson: (actorId: string) => void;
-  onService: (serviceId: string) => void;
+  onService: (serviceId: string, name: string) => void;
   onOpen: () => void;
 }) {
   // A ticket's or pull request's one service; a memo's first, then how many more it covers.
@@ -435,7 +440,7 @@ function TrailRow({
             type="button"
             className="text-left underline-offset-4 hover:underline"
             title="Show only this service's decisions"
-            onClick={() => onService(first)}
+            onClick={() => onService(first, serviceNameOf(record, first))}
           >
             {serviceNameOf(record, first)}
           </button>

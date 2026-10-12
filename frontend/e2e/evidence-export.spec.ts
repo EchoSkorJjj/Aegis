@@ -7,6 +7,7 @@ import type { DecisionRecord, Role } from "../src/lib/types";
 // the service, the period as whole local days and the reader's time zone, and saves the file under its own name.
 // What an export holds, and that it matches the trail, is EvidenceExportIntegrationTest's (aegis-core).
 const PAYMENTS = { id: "service-payments", name: "Payments API" };
+const RETIRED = { id: "service-retired", name: "Retired billing" };
 const DIGEST = "3f".repeat(32);
 
 function record(sequence: number, overrides: Partial<DecisionRecord> = {}): DecisionRecord {
@@ -35,7 +36,10 @@ async function fakeBff(page: Page, role: Role, exportStatus = 200) {
       return route.fulfill({ json: [{ id: "demo-org", name: "Demo org", roles: [role], status: "ACTIVE" }] });
     }
     if (path === "/api/inventory/services") {
-      return route.fulfill({ json: { content: [PAYMENTS], totalElements: 1, totalPages: 1, number: 0, size: 100 } });
+      return route.fulfill({ json: { content: [PAYMENTS], totalElements: 1, totalPages: 1, number: 0, size: 50 } });
+    }
+    if (path === "/api/audit/decisions/removed-services") {
+      return route.fulfill({ json: [RETIRED] });
     }
     if (path === "/api/audit/decisions") {
       searches.push(url.searchParams);
@@ -45,7 +49,9 @@ async function fakeBff(page: Page, role: Role, exportStatus = 200) {
     if (path === "/api/audit/evidence") {
       exports.push(url.searchParams);
       if (exportStatus !== 200) {
-        return route.fulfill({ status: exportStatus, json: { message: "This period holds 6000 decision records, more than one export takes (5000): export a shorter one" } });
+        const message = exportStatus === 502 ? "Could not list the organization's members with identity-service"
+          : "This period holds 6000 decision records, more than one CSV export takes (5000): export a shorter period";
+        return route.fulfill({ status: exportStatus, json: { message } });
       }
       const pdf = url.searchParams.get("format") === "pdf";
       return route.fulfill({
@@ -100,12 +106,34 @@ test("a compliance admin previews a service's period and downloads its evidence 
   const saved = page.getByRole("status");
   await expect(saved).toContainText("Saved aegis-evidence-payments-api-2026-07-14-to-2026-10-11.pdf: 7 decision records.");
   await expect(saved).toContainText(DIGEST);
+  // The digest is of the CSV the PDF carries; a CSV downloaded on its own is said to be another reading.
+  await expect(saved).toContainText("The CSV of these records is attached inside the PDF");
+  await expect(saved).toContainText("A CSV downloaded on its own is another reading");
   await page.screenshot({ path: test.info().outputPath("evidence.png"), fullPage: true });
 
   const csv = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download CSV" }).click();
   expect((await csv).suggestedFilename()).toMatch(/\.csv$/);
   expect(exports.at(-1)!.get("format")).toBe("csv");
+  await expect(saved).toContainText(`SHA-256 of this file: ${DIGEST}`);
+  // What the CSV keeps is said as it is.
+  await expect(page.getByText("The CSV keeps every field as recorded, except that a field beginning with", { exact: false }))
+    .toBeVisible();
+});
+
+test("a service removed from the inventory can still be exported", async ({ page }) => {
+  const { exports } = await fakeBff(page, "COMPLIANCE_ADMIN");
+  await page.goto("/reports/evidence");
+  const picker = page.getByLabel("Service", { exact: true });
+  await expect(picker.locator("optgroup[label='No longer in the inventory'] option")).toHaveText([
+    "Retired billing (removed)",
+  ]);
+  await picker.selectOption({ label: "Retired billing (removed)" });
+
+  const csv = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download CSV" }).click();
+  await csv;
+  expect(exports.at(-1)!.get("serviceId")).toBe(RETIRED.id);
 });
 
 test("an export the backend refuses says why", async ({ page }) => {
@@ -113,7 +141,18 @@ test("an export the backend refuses says why", async ({ page }) => {
   await page.goto("/reports/evidence");
   await page.getByLabel("Service", { exact: true }).selectOption(PAYMENTS.id);
   await page.getByRole("button", { name: "Download CSV" }).click();
-  await expect(page.getByRole("alert").filter({ hasText: "export a shorter one" })).toContainText("more than one export takes (5000)");
+  await expect(page.getByRole("alert").filter({ hasText: "export a shorter period" }))
+    .toContainText("more than one CSV export takes (5000)");
+  await expect(page.getByRole("status")).toHaveCount(0);
+});
+
+test("an export made while the member directory is unreachable is refused, and said so plainly", async ({ page }) => {
+  await fakeBff(page, "ANALYST", 502);
+  await page.goto("/reports/evidence");
+  await page.getByLabel("Service", { exact: true }).selectOption(PAYMENTS.id);
+  await page.getByRole("button", { name: "Download PDF" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "member directory" }))
+    .toContainText("couldn't reach the member directory to name the people in the export, so it made none");
   await expect(page.getByRole("status")).toHaveCount(0);
 });
 
