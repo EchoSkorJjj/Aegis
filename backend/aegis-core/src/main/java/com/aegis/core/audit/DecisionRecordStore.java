@@ -1,5 +1,6 @@
 package com.aegis.core.audit;
 
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -16,8 +17,14 @@ public interface DecisionRecordStore {
     Optional<DecisionRecord> find(UUID id);
 
     /**
-     * Records in the order they were written. Any filter may be null: no restriction on that field. A service
-     * matches every record that covers it, a regulator memo's included.
+     * The records matching {@code query}, in the order {@code pageable} sorts them ({@code sequence}). Nothing read is
+     * kept in the persistence context, so a caller may read many pages in one transaction.
      */
-    Page<DecisionRecord> findPage(UUID serviceId, UUID changeSignalId, UUID responseId, Pageable pageable);
+    Page<DecisionRecord> findPage(DecisionTrailQuery query, Pageable pageable);
+
+    /**
+     * Every service the trail covers, each with the name its latest ticket's or pull request's record copied, or null
+     * when only regulator memos covered it (a memo names no single service).
+     */
+    Map<UUID, String> servicesCovered();
 }

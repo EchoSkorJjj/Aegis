@@ -9,6 +9,9 @@ import type {
   ChangeSignal,
   ChangeSignalFacets,
   CreateOrgInput,
+  DecisionAction,
+  DecisionRecord,
+  DecisionSubject,
   ForgotPasswordInput,
   GitHubConnectResult,
   GitHubIntegration,
@@ -31,6 +34,7 @@ import type {
   RegisterInput,
   RegulatorMemo,
   RegulatorMemoStatus,
+  RemovedService,
   ResetPasswordInput,
   RiskTicket,
   RiskTicketStatus,
@@ -265,6 +269,19 @@ export const directoryApi = {
   listMembers(params: { search?: string; role?: Role; page?: number; size?: number } = {}) {
     return bffFetch<Page<DirectoryMember>>(`/api/users${qs(params)}`);
   },
+  /**
+   * Every member, page by page (500 at a time, by id so pages don't shift): for naming everyone who appears in a
+   * list, where one page would leave members past it looking like former ones.
+   */
+  async listAllMembers(): Promise<DirectoryMember[]> {
+    const members: DirectoryMember[] = [];
+    for (let page = 0; page < 200; page++) {
+      const batch = await bffFetch<Page<DirectoryMember>>(`/api/users${qs({ page, size: 500, sort: "id,asc" })}`);
+      members.push(...batch.content);
+      if (batch.content.length < 500) break;
+    }
+    return members;
+  },
 };
 
 /**
@@ -483,6 +500,85 @@ export const notificationApi = {
     return bffFetch<{ marked: number }>("/api/notifications/read-all", { method: "POST" });
   },
 };
+
+/**
+ * The decision trail (E10): every step a response took, searched by service, the person who took it, the step,
+ * what it was taken on and a period (`from` inclusive, `to` exclusive, ISO instants). Read-only; analysts and
+ * compliance admins only (403 otherwise). A listing leaves each record's `state` out; `get` has it.
+ */
+export const auditApi = {
+  search(
+    params: {
+      serviceId?: string;
+      changeSignalId?: string;
+      responseId?: string;
+      actorId?: string;
+      action?: DecisionAction[];
+      subject?: DecisionSubject[];
+      from?: string;
+      to?: string;
+      newestFirst?: boolean;
+      page?: number;
+      size?: number;
+    } = {},
+  ) {
+    const { action, subject, newestFirst, ...rest } = params;
+    return bffFetch<Page<DecisionRecord>>(
+      `/api/audit/decisions${qs({
+        ...rest,
+        action: action?.length ? action.join(",") : undefined,
+        subject: subject?.length ? subject.join(",") : undefined,
+        sort: newestFirst ? "sequence,desc" : undefined,
+      })}`,
+    );
+  },
+  get(id: string) {
+    return bffFetch<DecisionRecord>(`/api/audit/decisions/${id}`);
+  },
+  /** Services the trail covers that are no longer in the inventory: still searchable and exportable. */
+  removedServices() {
+    return bffFetch<RemovedService[]>("/api/audit/decisions/removed-services");
+  },
+  /**
+   * A service's evidence for a period (E10 story 3), as the file to save: every decision record covering the
+   * service taken in [from, to), as a PDF (times shown in `zone`) or CSV. Both name the CSV's SHA-256.
+   */
+  async exportEvidence(params: {
+    serviceId: string;
+    from: string;
+    to: string;
+    format: "pdf" | "csv";
+    zone?: string;
+  }): Promise<EvidenceFile> {
+    const response = await fetch(`/api/audit/evidence${qs(params)}`);
+    if (!response.ok) {
+      let message = response.statusText;
+      try {
+        const body = (await response.json()) as { message?: string };
+        if (body?.message) message = body.message;
+      } catch {
+        // Non-JSON body — fall back to the status text.
+      }
+      throw new ApiError(response.status, message);
+    }
+    const disposition = response.headers.get("content-disposition") ?? "";
+    return {
+      blob: await response.blob(),
+      fileName: /filename="([^"]+)"/.exec(disposition)?.[1] ?? `aegis-evidence.${params.format}`,
+      csvSha256: response.headers.get("x-evidence-csv-sha256") ?? "",
+      records: Number(response.headers.get("x-evidence-records") ?? "0"),
+    };
+  },
+};
+
+/** An exported evidence file and what it holds. */
+export interface EvidenceFile {
+  blob: Blob;
+  fileName: string;
+  /** The SHA-256 of the CSV of the same records, which the PDF prints too. */
+  csvSha256: string;
+  records: number;
+}
 
 /** aegis-core impact scoring (Epic 7) — read-only, recomputed per request. */
 export const scoringApi = {

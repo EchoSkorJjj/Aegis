@@ -16,9 +16,10 @@ import com.fasterxml.jackson.annotation.JsonRawValue;
  * <p>{@code responseId} groups a response's records: a risk ticket and its upgrade pull requests share the ticket's
  * id, a pull request drafted on its own and a memo use their own. {@code serviceIds} are the services the step
  * covers: a ticket's or pull request's one service (also {@code serviceId}, with its name), or every service a
- * regulator memo covers, so a memo is in each of their trails though it names no single service. The service's name,
- * the change's title, the score and the tier are copies, as they were then; a memo's are its most affected
- * service's. {@code state} is left out of listings ({@link #withoutState}) and read one record at a time.
+ * regulator memo covers, so a memo is in each of their trails though it names no single service (its
+ * {@code serviceId} and {@code serviceName} are null). The service's name, the change's title, the score and the tier
+ * are copies, as they were then; a memo's score and tier are its most affected service's. {@code state} is left out of
+ * listings ({@link #withoutState}) and read one record at a time.
  */
 public record DecisionRecord(
         UUID id,

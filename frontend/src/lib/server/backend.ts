@@ -116,3 +116,38 @@ export async function backendFetch(
 
   return { ok: response.ok, status: response.status, data };
 }
+
+/** A file from the backend: its bytes as a stream and its headers when it answered 2xx, else its error as `data`. */
+export interface BackendDownload extends BackendResult {
+  body: ReadableStream<Uint8Array> | null;
+  headers: Headers | null;
+}
+
+/**
+ * Fetches a file (a PDF, a CSV) from the backend as the given user: its bytes streamed as they come, never held here
+ * whole nor parsed as text like `backendFetch` does. A non-2xx answer is read as the usual JSON error, so route
+ * handlers can pass it on.
+ */
+export async function backendDownload(path: string, token: string): Promise<BackendDownload> {
+  const forwarded = await forwardedFor();
+  let response: Response;
+  try {
+    response = await fetch(`${BACKEND_URL}${path}`, {
+      headers: { ...forwarded, Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+  } catch {
+    return { ok: false, status: 503, data: { message: "Service unavailable" }, body: null, headers: null };
+  }
+  if (response.ok) {
+    return { ok: true, status: response.status, data: null, body: response.body, headers: response.headers };
+  }
+  let data: unknown = null;
+  const text = await response.text();
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { message: text };
+  }
+  return { ok: false, status: response.status, data, body: null, headers: null };
+}

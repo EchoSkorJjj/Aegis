@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { backendFetch, type BackendResult } from "@/lib/server/backend";
+import {
+  backendDownload,
+  backendFetch,
+  type BackendDownload,
+  type BackendResult,
+} from "@/lib/server/backend";
 import {
   clearSession,
   readAccessToken,
@@ -20,9 +25,33 @@ export async function authedBackendFetch(
   path: string,
   init: RequestInit = {},
 ): Promise<BackendResult> {
+  return asSignedInUser(
+    (token) => backendFetch(path, { ...init, token }),
+    (message) => ({ ok: false, status: 401, data: { message } }),
+  );
+}
+
+/**
+ * As `authedBackendFetch`, for a file (the evidence PDF or CSV): its bytes and headers as the backend sent them.
+ */
+export async function authedBackendDownload(path: string): Promise<BackendDownload> {
+  return asSignedInUser(
+    (token) => backendDownload(path, token),
+    (message) => ({ ok: false, status: 401, data: { message }, body: null, headers: null }),
+  );
+}
+
+/**
+ * Makes `call` with the user's access token, and once more with a fresh one if the backend answers 401 (the token
+ * expired). `signedOut` is the answer when there's no session, or it can't be renewed (the cookies are then cleared).
+ */
+async function asSignedInUser<T extends { status: number }>(
+  call: (token: string) => Promise<T>,
+  signedOut: (message: string) => T,
+): Promise<T> {
   const accessToken = await readAccessToken();
   if (accessToken) {
-    const first = await backendFetch(path, { ...init, token: accessToken });
+    const first = await call(accessToken);
     if (first.status !== 401) {
       return first;
     }
@@ -31,7 +60,7 @@ export async function authedBackendFetch(
 
   const refreshToken = await readRefreshToken();
   if (!refreshToken) {
-    return { ok: false, status: 401, data: { message: "Not authenticated" } };
+    return signedOut("Not authenticated");
   }
 
   const refreshed = await backendFetch("/auth/refresh", {
@@ -40,12 +69,12 @@ export async function authedBackendFetch(
   });
   if (!refreshed.ok) {
     await clearSession();
-    return { ok: false, status: 401, data: { message: "Session expired" } };
+    return signedOut("Session expired");
   }
 
   const tokens = refreshed.data as TokenResponse;
   await writeSession(tokens);
-  return backendFetch(path, { ...init, token: tokens.accessToken });
+  return call(tokens.accessToken);
 }
 
 /** The route context of a `[[...path]]` catch-all BFF route. */

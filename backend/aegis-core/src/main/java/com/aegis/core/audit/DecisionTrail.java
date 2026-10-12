@@ -1,9 +1,14 @@
 package com.aegis.core.audit;
 
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.platform.common.ApiExceptions;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -26,9 +31,11 @@ public class DecisionTrail {
     private static final ThreadLocal<Integer> RECORDING = ThreadLocal.withInitial(() -> 0);
 
     private final DecisionRecordStore store;
+    private final InventoryStore inventory;
 
-    public DecisionTrail(DecisionRecordStore store) {
+    public DecisionTrail(DecisionRecordStore store, InventoryStore inventory) {
         this.store = store;
+        this.inventory = inventory;
     }
 
     /**
@@ -72,9 +79,36 @@ public class DecisionTrail {
         }
     }
 
-    /** The trail of one item, response or service, oldest first, each record without its snapshot. */
-    public Page<DecisionRecord> list(UUID serviceId, UUID changeSignalId, UUID responseId, Pageable pageable) {
-        return store.findPage(serviceId, changeSignalId, responseId, pageable).map(DecisionRecord::withoutState);
+    /**
+     * The records matching {@code query} (one item, response or service; a person's decisions; a period), each without
+     * its snapshot.
+     */
+    public Page<DecisionRecord> list(DecisionTrailQuery query, Pageable pageable) {
+        return store.findPage(query, pageable).map(DecisionRecord::withoutState);
+    }
+
+    /**
+     * A service the trail covers that the inventory no longer has, with the name its latest ticket's or pull request's
+     * record copied (null when only regulator memos covered it). Its trail outlives it, so it can still be searched and
+     * exported.
+     */
+    public record RemovedService(UUID id, String name) {
+    }
+
+    /** The services the trail covers that have since been removed from the inventory, by name. */
+    public List<RemovedService> removedServices() {
+        Map<UUID, String> covered = store.servicesCovered();
+        if (covered.isEmpty()) {
+            return List.of();
+        }
+        Set<UUID> current = inventory.findBusinessServicesByIds(covered.keySet()).keySet();
+        return covered.entrySet().stream()
+                .filter(service -> !current.contains(service.getKey()))
+                .map(service -> new RemovedService(service.getKey(), service.getValue()))
+                .sorted(Comparator.comparing((RemovedService service) -> service.name() == null)
+                        .thenComparing(service -> service.name() == null ? "" : service.name())
+                        .thenComparing(RemovedService::id))
+                .toList();
     }
 
     /** One record with the response as it stood then. */

@@ -11,6 +11,7 @@ const ESCAPES = [
   "/api/change-signals/..%2F..%2Fusers",
   "/api/findings/..%2Finventory%2Fservices",
   "/api/notifications/..%2Finventory%2Fservices",
+  "/api/audit/..%2Finventory%2Fservices",
 ];
 
 for (const path of ESCAPES) {
@@ -23,6 +24,12 @@ for (const path of ESCAPES) {
 
 test("a path inside the prefix is forwarded as the signed-in user", async ({ request }) => {
   const response = await request.get("/api/actions/upgrade-proposals?status=PROPOSED,FAILED");
+  expect(response.status()).toBe(401);
+  expect(await response.json()).toEqual({ message: "Not authenticated" });
+});
+
+test("the evidence export is fetched as the signed-in user, its errors passed on as JSON", async ({ request }) => {
+  const response = await request.get("/api/audit/evidence?format=pdf");
   expect(response.status()).toBe(401);
   expect(await response.json()).toEqual({ message: "Not authenticated" });
 });

@@ -1,5 +1,6 @@
 package com.aegis.core.platform.identity;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -21,4 +22,13 @@ public interface IdentityDirectory {
      *     be reached or answered with an error
      */
     Optional<DirectoryUser> findMember(UUID userId);
+
+    /**
+     * Every member of the caller's active organization, as the caller's own member directory lists them: for naming
+     * many people at once (an evidence export) in a few requests rather than one each.
+     *
+     * @throws com.aegis.core.platform.common.ApiExceptions.UpstreamUnavailable identity-service could not
+     *     be reached or answered with an error
+     */
+    List<DirectoryUser> members();
 }

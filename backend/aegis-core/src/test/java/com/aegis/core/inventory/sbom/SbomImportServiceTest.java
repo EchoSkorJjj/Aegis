@@ -24,6 +24,7 @@ import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.sbom.CycloneDxBom.Component;
 import com.aegis.core.inventory.sbom.CycloneDxBom.Dependency;
 import com.aegis.core.platform.common.ApiExceptions;
+import com.aegis.core.platform.identity.IdentityDirectory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
@@ -49,7 +50,7 @@ class SbomImportServiceTest {
 
     private final InventoryStore store = mock(InventoryStore.class);
     private final SbomImportService importer =
-            new SbomImportService(new InventoryService(store, userId -> Optional.empty()), store);
+            new SbomImportService(new InventoryService(store, mock(IdentityDirectory.class)), store);
     private final UUID serviceId = UUID.randomUUID();
 
     private final Map<String, SoftwareComponent> componentsByCoordinates = new HashMap<>();

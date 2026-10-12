@@ -1,14 +1,9 @@
 import type { Metadata } from "next";
 
-import { PlaceholderPage } from "@/components/app/placeholder-page";
+import { DecisionTrail } from "@/components/app/reports/decision-trail";
 
 export const metadata: Metadata = { title: "Audit log" };
 
 export default function AuditLogPage() {
-  return (
-    <PlaceholderPage
-      title="Audit log"
-      description="The append-only record of every finding, decision, and action."
-    />
-  );
+  return <DecisionTrail />;
 }

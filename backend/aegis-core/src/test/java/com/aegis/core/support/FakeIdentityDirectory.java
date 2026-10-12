@@ -1,11 +1,13 @@
 package com.aegis.core.support;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
+import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.platform.identity.DirectoryUser;
 import com.aegis.core.platform.identity.IdentityDirectory;
 
@@ -19,6 +21,7 @@ import com.aegis.core.platform.identity.IdentityDirectory;
 public class FakeIdentityDirectory implements IdentityDirectory {
 
     private final Map<UUID, DirectoryUser> members = new ConcurrentHashMap<>();
+    private volatile boolean unavailable;
 
     public DirectoryUser register(DirectoryUser member) {
         members.put(member.id(), member);
@@ -32,8 +35,27 @@ public class FakeIdentityDirectory implements IdentityDirectory {
         return register(new DirectoryUser(id, email, displayName, Set.of(roles), true));
     }
 
+    /** Make every lookup fail as an unreachable identity-service would, until set back; a test resets it. */
+    public void unavailable(boolean unavailable) {
+        this.unavailable = unavailable;
+    }
+
     @Override
     public Optional<DirectoryUser> findMember(UUID userId) {
+        reachable();
         return Optional.ofNullable(members.get(userId));
+    }
+
+    /** Every registered member: the fake knows no orgs, so a test names only the members it registered. */
+    @Override
+    public List<DirectoryUser> members() {
+        reachable();
+        return List.copyOf(members.values());
+    }
+
+    private void reachable() {
+        if (unavailable) {
+            throw new ApiExceptions.UpstreamUnavailable("identity-service is unavailable (test)");
+        }
     }
 }
