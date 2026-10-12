@@ -100,6 +100,22 @@ class EvidenceWritersTest {
     }
 
     @Test
+    void aMemoCoveringSeveralServicesSaysSoWithoutNamingOne() throws IOException {
+        UUID other = UUID.fromString("00000000-0000-0000-0000-0000000000c3");
+        UUID memo = UUID.fromString("00000000-0000-0000-0000-0000000000d4");
+        // As the trail records a memo: no single service, every one it covers.
+        DecisionRecord approved = new DecisionRecord(memo, 7, FROM.plusSeconds(60), Subject.REGULATOR_MEMO, memo, memo,
+                null, null, List.of(SERVICE, other), memo, "CVE-2097-0001 in payments-lib", Action.APPROVED, ACTOR,
+                null, 88.0, ImpactTier.CRITICAL, "{\"status\":\"APPROVED\"}");
+
+        String text = text(EvidencePdf.write(evidence(List.of(approved)), new EvidencePdf.Cover("Casey", FROM,
+                ZoneId.of("UTC"), "0".repeat(64)), JsonMapper.builder().build()));
+
+        assertThat(text).contains("Approved - Regulator memo", "Covers 2 services, this one among them")
+                .doesNotContain("null");
+    }
+
+    @Test
     void aPeriodWithNoDecisionsSaysSo() throws IOException {
         byte[] pdf = EvidencePdf.write(evidence(List.of()), new EvidencePdf.Cover("Casey", FROM, ZoneId.of("UTC"),
                 "0".repeat(64)), JsonMapper.builder().build());

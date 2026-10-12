@@ -904,8 +904,8 @@ export type DecisionAction =
 /**
  * One step in the decision trail: who took it on which response, when and why. The service's name, the change's
  * title, the score and the tier are copies as they were then. `serviceIds` are every service the step covers (a
- * regulator memo's several; `serviceId` is null for a memo). `state`, the response as it stood then, is only on a
- * record read on its own.
+ * regulator memo's several). A memo names no single service: its `serviceId` and `serviceName` are null. `state`,
+ * the response as it stood then, is only on a record read on its own.
  */
 export interface DecisionRecord {
   id: string;

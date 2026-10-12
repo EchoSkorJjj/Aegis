@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 import { DataPagination } from "@/components/app/data-pagination";
@@ -113,7 +113,10 @@ function TrailSearch({ userId }: { userId: string | undefined }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<"forbidden" | "invalid" | "error" | null>(null);
   const [refresh, setRefresh] = useState(0);
-  const [services, setServices] = useState<BusinessService[]>([]);
+  const [services, setServices] = useState<BusinessService[] | null>(null);
+  // Each service's name by id; null once the inventory says it's gone (its records outlive it).
+  const [serviceNames, setServiceNames] = useState<Map<string, string | null>>(new Map());
+  const lookedUp = useRef(new Set<string>());
   const [people, setPeople] = useState<Map<string, string>>(new Map());
   const [open, setOpen] = useState<DecisionRecord | null>(null);
   const filterId = useId();
@@ -124,9 +127,13 @@ function TrailSearch({ userId }: { userId: string | undefined }) {
     inventoryApi
       .listServices({ size: 100, sort: "name,asc" })
       .then((page) => {
-        if (!cancelled) setServices(page.content);
+        if (cancelled) return;
+        setServices(page.content);
+        setServiceNames((known) => new Map([...known, ...page.content.map((s) => [s.id, s.name] as const)]));
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setServices([]);
+      });
     directoryApi
       .listMembers({ size: 100 })
       .then((page) => {
@@ -172,6 +179,25 @@ function TrailSearch({ userId }: { userId: string | undefined }) {
     };
   }, [filters, refresh]);
 
+  // A regulator memo names no single service, only the ids it covers: name the ones the service list didn't
+  // (it holds the first 100), asking the inventory once for each; a 404 means the service has since been removed.
+  useEffect(() => {
+    if (services === null || !data) return;
+    const missing = [...new Set(data.content.filter((record) => !record.serviceName).flatMap((r) => r.serviceIds))]
+      .filter((id) => !serviceNames.has(id) && !lookedUp.current.has(id));
+    for (const id of missing) {
+      lookedUp.current.add(id);
+      inventoryApi
+        .getService(id)
+        .then((service) => setServiceNames((known) => new Map(known).set(id, service.name)))
+        .catch((err) => {
+          if (err instanceof ApiError && err.status === 404) {
+            setServiceNames((known) => new Map(known).set(id, null));
+          }
+        });
+    }
+  }, [data, services, serviceNames]);
+
   const nameOf = useMemo(
     () => (id: string) => {
       const name = people.get(id);
@@ -180,6 +206,13 @@ function TrailSearch({ userId }: { userId: string | undefined }) {
     },
     [people, userId],
   );
+
+  const serviceNameOf = (record: DecisionRecord, id: string): string => {
+    if (id === record.serviceId && record.serviceName) return record.serviceName;
+    const known = serviceNames.get(id);
+    if (known) return known;
+    return known === null ? "A removed service" : "…";
+  };
 
   const filtering =
     filters.serviceId !== "" || filters.actorId !== "" || filters.action !== "" || filters.subject !== "" ||
@@ -199,7 +232,7 @@ function TrailSearch({ userId }: { userId: string | undefined }) {
           allLabel="All services"
           onChange={(serviceId) => filter({ serviceId })}
         >
-          {services.map((service) => (
+          {services?.map((service) => (
             <option key={service.id} value={service.id}>
               {service.name}
             </option>
@@ -273,7 +306,7 @@ function TrailSearch({ userId }: { userId: string | undefined }) {
         {!loading && !error && data && (
           <p className="text-sm text-muted-foreground" aria-live="polite">
             {data.totalElements === 1 ? "1 decision record" : `${data.totalElements} decision records`}
-            {filtering ? " match" : " in total"}
+            {filtering ? (data.totalElements === 1 ? " matches" : " match") : " in total"}
           </p>
         )}
         <div className="rounded-lg border">
@@ -316,6 +349,7 @@ function TrailSearch({ userId }: { userId: string | undefined }) {
                     key={record.id}
                     record={record}
                     nameOf={nameOf}
+                    serviceNameOf={serviceNameOf}
                     onPerson={(actorId) => filter({ actorId })}
                     onService={(serviceId) => filter({ serviceId })}
                     onOpen={() => setOpen(record)}
@@ -350,26 +384,33 @@ function TrailSearch({ userId }: { userId: string | undefined }) {
         }}
       >
         <DialogContent className="sm:max-w-2xl">
-          {open && <RecordDetail key={open.id} listed={open} nameOf={nameOf} />}
+          {open && <RecordDetail key={open.id} listed={open} nameOf={nameOf} serviceNameOf={serviceNameOf} />}
         </DialogContent>
       </Dialog>
     </div>
   );
 }
 
+/** A service's name on a record: the copy a ticket's record keeps, else the inventory's (a memo names none). */
+type ServiceNameOf = (record: DecisionRecord, serviceId: string) => string;
+
 function TrailRow({
   record,
   nameOf,
+  serviceNameOf,
   onPerson,
   onService,
   onOpen,
 }: {
   record: DecisionRecord;
   nameOf: (id: string) => string;
+  serviceNameOf: ServiceNameOf;
   onPerson: (actorId: string) => void;
   onService: (serviceId: string) => void;
   onOpen: () => void;
 }) {
+  // A ticket's or pull request's one service; a memo's first, then how many more it covers.
+  const first = record.serviceId ?? record.serviceIds[0];
   const others = record.serviceIds.length - 1;
   return (
     <TableRow>
@@ -389,17 +430,15 @@ function TrailRow({
         </button>
       </TableCell>
       <TableCell className="max-w-48 align-top whitespace-normal">
-        {record.serviceIds.length === 1 ? (
+        {first && (
           <button
             type="button"
             className="text-left underline-offset-4 hover:underline"
             title="Show only this service's decisions"
-            onClick={() => onService(record.serviceIds[0])}
+            onClick={() => onService(first)}
           >
-            {record.serviceName ?? "A removed service"}
+            {serviceNameOf(record, first)}
           </button>
-        ) : (
-          <span>{record.serviceName ?? "Several services"}</span>
         )}
         {others > 0 && (
           <span className="mt-0.5 block text-xs text-muted-foreground">
@@ -430,7 +469,15 @@ function TrailRow({
 }
 
 /** One record in full: what the listing shows, then the response as it stood at that moment. */
-function RecordDetail({ listed, nameOf }: { listed: DecisionRecord; nameOf: (id: string) => string }) {
+function RecordDetail({
+  listed,
+  nameOf,
+  serviceNameOf,
+}: {
+  listed: DecisionRecord;
+  nameOf: (id: string) => string;
+  serviceNameOf: ServiceNameOf;
+}) {
   const [record, setRecord] = useState<DecisionRecord | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -467,10 +514,14 @@ function RecordDetail({ listed, nameOf }: { listed: DecisionRecord; nameOf: (id:
             {shown.changeTitle}
           </Link>
         </dd>
-        <dt className="text-muted-foreground">Service</dt>
+        <dt className="text-muted-foreground">{shown.serviceIds.length > 1 ? "Services" : "Service"}</dt>
         <dd>
-          {shown.serviceName ?? "—"}
-          {shown.serviceIds.length > 1 && ` and ${shown.serviceIds.length - 1} more (a memo covers each)`}
+          {shown.serviceIds.map((id) => serviceNameOf(shown, id)).join(", ") || "—"}
+          {shown.subject === "REGULATOR_MEMO" && (
+            <span className="block text-xs text-muted-foreground">
+              A regulator memo covers every service the change affects; it&apos;s in each one&apos;s log.
+            </span>
+          )}
         </dd>
         <dt className="text-muted-foreground">Impact then</dt>
         <dd>{shown.score !== null && shown.tier ? <ImpactBadge score={shown.score} tier={shown.tier} /> : "—"}</dd>

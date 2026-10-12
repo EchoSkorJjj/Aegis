@@ -8,6 +8,8 @@ const ALICE = { id: "user-alice", email: "alice@example.test", displayName: "Ali
 const BOB = { id: "user-bob", email: "bob@example.test", displayName: "Bob Reviewer" };
 const PAYMENTS = { id: "service-payments", name: "Payments API" };
 const LEDGER = { id: "service-ledger", name: "Ledger" };
+// Past the first 100 services the page lists: named by looking it up on its own.
+const RENAMED = { id: "service-billing", name: "Billing" };
 
 function record(overrides: Partial<DecisionRecord> = {}): DecisionRecord {
   return {
@@ -19,8 +21,9 @@ function record(overrides: Partial<DecisionRecord> = {}): DecisionRecord {
 }
 
 const RECORDS: DecisionRecord[] = [
+  // As the trail records a memo: no single service (no id, no name), every one it covers.
   record({ id: "record-3", sequence: 103, action: "DISMISSED", subject: "REGULATOR_MEMO", subjectId: "memo-1",
-    responseId: "memo-1", serviceId: null, serviceIds: [PAYMENTS.id, LEDGER.id], actorId: BOB.id,
+    responseId: "memo-1", serviceId: null, serviceName: null, serviceIds: [PAYMENTS.id, LEDGER.id], actorId: BOB.id,
     reason: "Not a significant threat", occurredAt: "2026-10-10T03:00:00Z" }),
   record({ id: "record-2", sequence: 102, action: "OVERRIDDEN", actorId: BOB.id, reason: "Behind the WAF" }),
   record({ id: "record-1", sequence: 101, action: "DRAFTED", actorId: ALICE.id, occurredAt: "2026-10-08T01:00:00Z" }),
@@ -28,8 +31,9 @@ const RECORDS: DecisionRecord[] = [
     serviceName: LEDGER.name, serviceIds: [LEDGER.id], score: null, tier: null }),
 ];
 
-async function fakeBff(page: Page, role: Role) {
+async function fakeBff(page: Page, role: Role, records: DecisionRecord[] = RECORDS) {
   const searches: URLSearchParams[] = [];
+  const lookups: string[] = [];
   await page.context().addCookies([{ name: "um_refresh", value: "browser-fixture", url: "http://localhost:3000" }]);
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -50,13 +54,21 @@ async function fakeBff(page: Page, role: Role) {
     if (path === "/api/inventory/services") {
       return route.fulfill({ json: { content: [LEDGER, PAYMENTS], totalElements: 2, totalPages: 1, number: 0, size: 100 } });
     }
+    const service = path.match(/^\/api\/inventory\/services\/([^/]+)$/);
+    if (service) {
+      lookups.push(service[1]);
+      const found = [LEDGER, PAYMENTS, RENAMED].find((item) => item.id === service[1]);
+      return found
+        ? route.fulfill({ json: found })
+        : route.fulfill({ status: 404, json: { message: `Business service not found: ${service[1]}` } });
+    }
     if (path === "/api/audit/decisions") {
       if (role === "SERVICE_OWNER") return route.fulfill({ status: 403, json: { message: "Forbidden" } });
       searches.push(url.searchParams);
       const actorId = url.searchParams.get("actorId");
       const action = url.searchParams.get("action");
       const serviceId = url.searchParams.get("serviceId");
-      const matching = RECORDS.filter((item) =>
+      const matching = records.filter((item) =>
         (!actorId || item.actorId === actorId) &&
         (!action || action.split(",").includes(item.action)) &&
         (!serviceId || item.serviceIds.includes(serviceId)));
@@ -65,12 +77,12 @@ async function fakeBff(page: Page, role: Role) {
     }
     const one = path.match(/^\/api\/audit\/decisions\/([^/]+)$/);
     if (one) {
-      const found = RECORDS.find((item) => item.id === one[1]);
+      const found = records.find((item) => item.id === one[1]);
       return route.fulfill({ json: { ...found, state: { status: "DISMISSED", body: "The memo as it stood." } } });
     }
     return route.fulfill({ json: { content: [], totalElements: 0, totalPages: 1, number: 0, size: 20 } });
   });
-  return { searches };
+  return { searches, lookups };
 }
 
 test("a compliance admin searches the trail by person, decision and service, newest first", async ({ page }) => {
@@ -88,7 +100,10 @@ test("a compliance admin searches the trail by person, decision and service, new
   await expect(memo).toContainText("Dismissed");
   await expect(memo).toContainText("Regulator memo");
   await expect(memo).toContainText("Bob Reviewer");
+  // A memo names no single service: its first is named from the inventory, the rest counted.
+  await expect(memo.getByRole("button", { name: PAYMENTS.name })).toBeVisible();
   await expect(memo).toContainText("and 1 other service");
+  await expect(memo).not.toContainText("removed");
   await expect(memo).toContainText("Why: Not a significant threat");
   // Someone the directory no longer lists is still shown, by id; a record without a score shows none.
   await expect(rows.last()).toContainText("Former or unknown member (user-gon)");
@@ -102,6 +117,7 @@ test("a compliance admin searches the trail by person, decision and service, new
   await expect(rows).toHaveCount(1);
   expect(searches.at(-1)?.get("action")).toBe("OVERRIDDEN");
   await expect(rows.first()).toContainText("Why: Behind the WAF");
+  await expect(log).toContainText("1 decision record matches");
 
   await page.getByRole("button", { name: "Clear", exact: true }).click();
   await expect(rows).toHaveCount(4);
@@ -130,8 +146,27 @@ test("a record opens to the response as it stood then", async ({ page }) => {
   await expect(dialog).toContainText("Record #103");
   await expect(dialog).toContainText("by Bob Reviewer");
   await expect(dialog).toContainText("The memo as it stood.");
+  await expect(dialog).toContainText(`Services${PAYMENTS.name}, ${LEDGER.name}`);
+  await expect(dialog).toContainText("A regulator memo covers every service the change affects");
   await expect(dialog.getByRole("link", { name: "Open the response as it is now" })).toHaveAttribute("href", "/responses/memos/memo-1");
   await expect(dialog.getByRole("link", { name: "CVE-2021-44228 in log4j-core 2.14.1" })).toHaveAttribute("href", "/findings/signal-1");
+});
+
+test("a memo's services past the listed ones are looked up, and one since removed says so", async ({ page }) => {
+  const memo = (id: string, serviceIds: string[]) => record({ id, sequence: id === "memo-a" ? 201 : 200,
+    subject: "REGULATOR_MEMO", subjectId: id, responseId: id, serviceId: null, serviceName: null, serviceIds });
+  const { lookups } = await fakeBff(page, "COMPLIANCE_ADMIN", [
+    memo("memo-a", [RENAMED.id]),
+    memo("memo-b", ["service-gone", PAYMENTS.id]),
+  ]);
+  await page.goto("/reports/audit");
+  const rows = page.getByRole("region", { name: "Decision records" }).getByRole("row").filter({ has: page.getByRole("cell") });
+
+  await expect(rows.first().getByRole("button", { name: RENAMED.name })).toBeVisible();
+  await expect(rows.last().getByRole("button", { name: "A removed service" })).toBeVisible();
+  await expect(rows.last()).toContainText("and 1 other service");
+  // Only what the service list didn't name is looked up, each once.
+  expect([...lookups].sort()).toEqual([RENAMED.id, "service-gone"]);
 });
 
 test("a service owner has no audit log", async ({ page }) => {

@@ -119,6 +119,8 @@ class EvidenceExportIntegrationTest extends AbstractInventoryIntegrationTest {
         assertThat(rows.get(1).get("actor_name")).isEqualTo("Unknown member " + formerMember);
         assertThat(rows.get(1).get("reason")).isEqualTo("'=HYPERLINK(\"https://evil.example\",\"WAF\")");
         assertThat(rows.get(2).get("service_ids").split(" ")).hasSize(2);
+        // A memo names no single service, as the trail records it.
+        assertThat(rows.get(2).get("service_name")).isEmpty();
         assertThat(rows.get(0).get("service_name")).isEqualTo(f.serviceName());
     }
 
@@ -146,7 +148,8 @@ class EvidenceExportIntegrationTest extends AbstractInventoryIntegrationTest {
             assertThat(text).contains("record " + row.get("record_id"));
         }
         assertThat(text).contains("By Alice Analyst - impact then 72.5 (HIGH)", "Why: Accepted for this quarter",
-                "Covers 2 services", "The responses as they stood", "\"note\" : \"step 2\"");
+                "Covers 2 services, this one among them", "The responses as they stood", "\"note\" : \"step 2\"");
+        assertThat(text).doesNotContain("null");
     }
 
     @Test
@@ -218,7 +221,7 @@ class EvidenceExportIntegrationTest extends AbstractInventoryIntegrationTest {
                 "=HYPERLINK(\"https://evil.example\",\"WAF\")");
         record(other, "Elsewhere", Subject.RISK_TICKET, Action.DISMISSED, alice.id(), "Not this service");
         trail.recorded(UUID::randomUUID, memo -> new DecisionRecord.Entry(Subject.REGULATOR_MEMO, memo, memo, null,
-                name, List.of(id, other), UUID.randomUUID(), "CVE-2097-0003 in evidence-lib", Action.DISMISSED,
+                null, List.of(id, other), UUID.randomUUID(), "CVE-2097-0003 in evidence-lib", Action.DISMISSED,
                 alice.id(), "Accepted for this quarter", 88.0, ImpactTier.CRITICAL, Map.of("note", "memo")));
         record(id, name, Subject.UPGRADE_PULL_REQUEST, Action.APPROVED, alice.id(), null);
         return new Fixture(id, name, first.occurredAt().toString());

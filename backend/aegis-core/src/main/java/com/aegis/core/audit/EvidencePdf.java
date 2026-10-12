@@ -80,9 +80,10 @@ public final class EvidencePdf {
                         + label(record.action()) + " - " + label(record.subject()), layout.bold, 10, 0);
                 layout.text("By " + evidence.nameOf(record.actorId()) + impact(record), layout.regular, 9, 12);
                 layout.text("Change: " + record.changeTitle(), layout.regular, 9, 12);
+                // A memo names no single service: it covers this one, and maybe others.
                 if (record.serviceIds().size() > 1) {
-                    layout.text("Covers " + record.serviceIds().size() + " services; most affected: "
-                            + record.serviceName(), layout.regular, 9, 12);
+                    layout.text("Covers " + record.serviceIds().size() + " services, this one among them",
+                            layout.regular, 9, 12);
                 }
                 if (record.reason() != null) {
                     layout.text("Why: " + record.reason(), layout.regular, 9, 12);
