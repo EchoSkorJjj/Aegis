@@ -54,7 +54,7 @@ interface Filters {
 const NO_FILTERS: Filters = { serviceId: "", actorId: "", action: "", subject: "", newestFirst: true, page: 0 };
 
 /** The start of a "yyyy-MM-dd" day in the reader's time zone, `days` later, as an ISO instant. */
-function startOfDay(day: string, days = 0): string {
+export function startOfDay(day: string, days = 0): string {
   const [year, month, date] = day.split("-").map(Number);
   return new Date(year, month - 1, date + days).toISOString();
 }

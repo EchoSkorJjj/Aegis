@@ -521,7 +521,46 @@ export const auditApi = {
   get(id: string) {
     return bffFetch<DecisionRecord>(`/api/audit/decisions/${id}`);
   },
+  /**
+   * A service's evidence for a period (E10 story 3), as the file to save: every decision record covering the
+   * service taken in [from, to), as a PDF (times shown in `zone`) or CSV. Both name the CSV's SHA-256.
+   */
+  async exportEvidence(params: {
+    serviceId: string;
+    from: string;
+    to: string;
+    format: "pdf" | "csv";
+    zone?: string;
+  }): Promise<EvidenceFile> {
+    const response = await fetch(`/api/audit/evidence${qs(params)}`);
+    if (!response.ok) {
+      let message = response.statusText;
+      try {
+        const body = (await response.json()) as { message?: string };
+        if (body?.message) message = body.message;
+      } catch {
+        // Non-JSON body — fall back to the status text.
+      }
+      throw new ApiError(response.status, message);
+    }
+    const disposition = response.headers.get("content-disposition") ?? "";
+    return {
+      blob: await response.blob(),
+      fileName: /filename="([^"]+)"/.exec(disposition)?.[1] ?? `aegis-evidence.${params.format}`,
+      csvSha256: response.headers.get("x-evidence-csv-sha256") ?? "",
+      records: Number(response.headers.get("x-evidence-records") ?? "0"),
+    };
+  },
 };
+
+/** An exported evidence file and what it holds. */
+export interface EvidenceFile {
+  blob: Blob;
+  fileName: string;
+  /** The SHA-256 of the CSV of the same records, which the PDF prints too. */
+  csvSha256: string;
+  records: number;
+}
 
 /** aegis-core impact scoring (Epic 7) — read-only, recomputed per request. */
 export const scoringApi = {

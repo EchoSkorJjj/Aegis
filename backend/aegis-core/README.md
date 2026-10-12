@@ -163,13 +163,35 @@ arithmetic, the decision and its result).
 |---|---|---|---|
 | GET | `/api/audit/decisions?serviceId=&changeSignalId=&responseId=&actorId=&action=&subject=&from=&to=&page=&size=&sort=` | `ANALYST`, `COMPLIANCE_ADMIN` | The trail, oldest first (50 a page by default; `sort=sequence,desc` for newest first), each record without its `state`. `serviceId` with `changeSignalId` is one item's chain; `responseId` one response's (a ticket and its pull requests share the ticket's id). Search (E10 Story 2): `actorId` the person who took the step; `action` and `subject` any of several (comma-separated or repeated); `from`/`to` a period as ISO-8601 instants, `from` inclusive and `to` exclusive. Filters combine. A period that doesn't end after it starts, an unknown value, or any sort but `sequence` (or `occurredAt`, the same order) is a 400 |
 | GET | `/api/audit/decisions/{id}` | `ANALYST`, `COMPLIANCE_ADMIN` | One record, with `state` |
+| GET | `/api/audit/evidence?serviceId=&from=&to=&format=csv\|pdf&zone=` | `ANALYST`, `COMPLIANCE_ADMIN` | A service's evidence for `[from, to)` as a file (`Content-Disposition: attachment`): CSV by default, or PDF with times in `zone` (IANA, default UTC). Headers `X-Evidence-Records` and `X-Evidence-Csv-Sha256`. `serviceId`, `from` and `to` are required; more than 5,000 records, an unknown format or zone, or a period that doesn't end after it starts is a 400 |
 
 **Searching the trail (E10 Story 2).** A compliance admin answers an auditor's question from **Reports → Audit log**
 (`/reports/audit`): the trail filtered by service, by the person who took each step (named from the organization's
 member directory), by the step and what it was taken on, and by a period of whole days in the reader's time zone
 (sent as `from` = the first day's start and `to` = the start of the day after the last), newest first by default.
 Each record opens to the response as it stood then. A person's search is indexed (V37, `org_id, actor_id, seq`); a
-period uses V36's `org_id, occurred_at`. Evidence export for a service and period is CS203-126.
+period uses V36's `org_id, occurred_at`.
+
+**Exporting a service's evidence (E10 Story 3).** From **Reports → Evidence** (`/reports/evidence`), a service and a
+period (whole local days, the last 90 by default) export everything the trail holds for that service in that period —
+its risk tickets' and upgrade pull requests' steps and those of every regulator memo covering it — oldest first, after
+a preview of how many records there are and the latest few (`EvidenceExport`, `EvidenceController`).
+
+- **CSV** (`EvidenceCsv`): one row per record with every field, the people's names beside their ids, and `state` (the
+  response as it stood) as JSON. RFC 4180, every field quoted, UTF-8 with a byte-order mark, times in UTC. A field a
+  spreadsheet would run as a formula (`=`, `+`, `-`, `@`, a tab or carriage return first: change titles come from
+  feeds) is written with a `'` before it. The bytes depend only on the records and names, so the same evidence always
+  has the same SHA-256.
+- **PDF** (`EvidencePdf`, Apache PDFBox): what was exported, by whom and when, the record count and the CSV's SHA-256;
+  each record (when, the step, who, the impact then, the change, why); then each record's snapshot. Times in the
+  reader's time zone. The standard fonts print Latin-1 only; other characters print as `?` (the CSV keeps them).
+- **The same records.** Both formats come from one read of the trail, with the trail search's filters (`serviceId`,
+  `from`, `to`), so they hold exactly the records the Audit log shows for that service and period
+  (`EvidenceExportIntegrationTest` checks it field by field, snapshots included). The PDF printing the CSV's digest
+  lets whoever holds both check they agree (`sha256sum`).
+- **Names**: the service as `inventory` names it now (a removed service's records keep it exportable under the name
+  they gave it); people from the member directory as the exporter sees it, a former member by id. If the directory is
+  unreachable, the export goes ahead with ids.
 
 ## Service repositories and draft PR providers (E8 Story 2)
 

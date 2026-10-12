@@ -56,8 +56,8 @@ export const domainNav: NavItem[] = [
     title: "Reports",
     icon: FileText,
     items: [
-      { title: "Evidence", href: "/reports/evidence" },
-      // The decision trail is governance's: aegis-core refuses it to anyone else.
+      // The decision trail is governance's: aegis-core refuses it, and its evidence, to anyone else.
+      { title: "Evidence", href: "/reports/evidence", roles: ["ANALYST", "COMPLIANCE_ADMIN"] },
       { title: "Audit log", href: "/reports/audit", roles: ["ANALYST", "COMPLIANCE_ADMIN"] },
     ],
   },
@@ -70,13 +70,15 @@ export const adminNav: NavLink[] = [{ title: "Users", href: "/admin/users", icon
 // The organization's own settings, which only its admin (ORG_ADMIN) may change.
 export const orgAdminNav: NavLink[] = [{ title: "Integrations", href: "/admin/integrations", icon: Plug }];
 
-/** The navigation as these roles see it: a group's pages meant for other roles left out. */
+/** The navigation as these roles see it: a group's pages meant for other roles left out, and a group left empty. */
 export function visibleTo(items: NavItem[], roles: readonly Role[]): NavItem[] {
-  return items.map((item) =>
-    "items" in item
-      ? { ...item, items: item.items.filter((sub) => !sub.roles || sub.roles.some((role) => roles.includes(role))) }
-      : item,
-  );
+  return items
+    .map((item) =>
+      "items" in item
+        ? { ...item, items: item.items.filter((sub) => !sub.roles || sub.roles.some((role) => roles.includes(role))) }
+        : item,
+    )
+    .filter((item) => !("items" in item) || item.items.length > 0);
 }
 
 /** Pages reached from inside a section rather than from the sidebar. */

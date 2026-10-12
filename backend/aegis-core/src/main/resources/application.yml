@@ -355,3 +355,10 @@ management:
     export:
       zipkin:
         endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+
+logging:
+  level:
+    # PDFBox (evidence export) warns on every standard font that no system font backs it: that only matters for
+    # drawing glyphs, which Aegis never does (the PDF names Helvetica and the reader's viewer supplies it).
+    org.apache.pdfbox.pdmodel.font.PDType1Font: error
+    org.apache.pdfbox.pdmodel.font.FileSystemFontProvider: warn

@@ -138,8 +138,8 @@ test("a service owner has no audit log", async ({ page }) => {
   await fakeBff(page, "SERVICE_OWNER");
   await page.goto("/reports/audit");
   await expect(page.getByText("You don't have access to the audit log", { exact: false })).toBeVisible();
-  // In the Reports group, Evidence is there and the audit log isn't.
-  await page.getByRole("button", { name: "Reports" }).click();
-  await expect(page.getByRole("link", { name: "Evidence" })).toBeVisible();
+  // Both reports are governance's, so the owner has no Reports group at all.
+  await expect(page.getByRole("button", { name: "Findings" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reports" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Audit log" })).toHaveCount(0);
 });

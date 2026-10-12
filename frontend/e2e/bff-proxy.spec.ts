@@ -27,3 +27,9 @@ test("a path inside the prefix is forwarded as the signed-in user", async ({ req
   expect(response.status()).toBe(401);
   expect(await response.json()).toEqual({ message: "Not authenticated" });
 });
+
+test("the evidence export is fetched as the signed-in user, its errors passed on as JSON", async ({ request }) => {
+  const response = await request.get("/api/audit/evidence?format=pdf");
+  expect(response.status()).toBe(401);
+  expect(await response.json()).toEqual({ message: "Not authenticated" });
+});
