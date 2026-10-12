@@ -189,6 +189,12 @@ a preview of how many records there are and the latest few (`EvidenceExport`, `E
   `from`, `to`), so they hold exactly the records the Audit log shows for that service and period
   (`EvidenceExportIntegrationTest` checks it field by field, snapshots included). The PDF printing the CSV's digest
   lets whoever holds both check they agree (`sha256sum`).
+- **Tested from real decisions (CS203-144).** `EvidenceExportCorrectnessIntegrationTest` drafts, overrides, approves,
+  files and dismisses a service's responses through the API at three moments, then exports the three back-to-back
+  periods between them as CSV and as PDF. Each export holds every decision recorded for the service in its period and
+  nothing outside it, checked against the service's whole trail filtered by time in the test (not against the export's
+  own query); the PDF names no record from outside its period; and the periods together hold every record exactly
+  once, so a period's end is excluded and its start included.
 - **Names**: the service as `inventory` names it now (a removed service's records keep it exportable under the name
   they gave it); people from the member directory as the exporter sees it, a former member by id. If the directory is
   unreachable, the export goes ahead with ids.
