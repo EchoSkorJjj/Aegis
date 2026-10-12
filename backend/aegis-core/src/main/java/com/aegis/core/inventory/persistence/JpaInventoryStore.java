@@ -326,12 +326,21 @@ public class JpaInventoryStore implements InventoryStore {
 
     @Override
     public void linkRepositoryComponent(UUID serviceId, UUID componentId, List<String> manifestPaths) {
+        linkRepositoryComponent(serviceId, componentId, manifestPaths, List.of());
+    }
+
+    @Override
+    public void linkRepositoryComponent(UUID serviceId, UUID componentId, List<String> manifestPaths,
+            List<String> lockfilePaths) {
         UUID org = scope();
         ServiceComponentEntity link = serviceComponents.findById(new ServiceComponentEntity.Key(serviceId, componentId))
                 .orElseGet(() -> new ServiceComponentEntity(serviceId, componentId, org));
-        if (manifestPaths != null && !manifestPaths.isEmpty()) {
-            link.setManifestPaths(manifestPaths);
+        List<String> manifests = manifestPaths == null ? List.of() : manifestPaths;
+        List<String> lockfiles = lockfilePaths == null ? List.of() : lockfilePaths;
+        if (!manifests.isEmpty() || !lockfiles.isEmpty()) {
+            link.setManifestPaths(manifests);
         }
+        link.setLockfilePaths(lockfiles);
         link.markFromRepository();
         serviceComponents.save(link);
     }
@@ -489,16 +498,16 @@ public class JpaInventoryStore implements InventoryStore {
     @Override
     public List<ServiceComponentLink> findServiceComponentLinks(Collection<UUID> componentIds) {
         return serviceComponents.findByComponentIdInAndOrgId(componentIds, scope()).stream()
-                .map(link -> new ServiceComponentLink(
-                        link.getBusinessServiceId(), link.getComponentId(), link.getManifestPaths()))
+                .map(link -> new ServiceComponentLink(link.getBusinessServiceId(), link.getComponentId(),
+                        link.getManifestPaths(), link.getLockfilePaths()))
                 .toList();
     }
 
     @Override
     public List<ServiceComponentLink> findServiceComponentLinksForServices(Collection<UUID> serviceIds) {
         return serviceComponents.findByBusinessServiceIdInAndOrgId(serviceIds, scope()).stream()
-                .map(link -> new ServiceComponentLink(
-                        link.getBusinessServiceId(), link.getComponentId(), link.getManifestPaths()))
+                .map(link -> new ServiceComponentLink(link.getBusinessServiceId(), link.getComponentId(),
+                        link.getManifestPaths(), link.getLockfilePaths()))
                 .toList();
     }
 

@@ -1,5 +1,6 @@
 package com.aegis.core.actions.upgrade;
 
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -16,19 +17,111 @@ import tools.jackson.databind.json.JsonMapper;
  * Raises a direct dependency in a {@code package.json} to the fixed version, keeping its range operator:
  * {@code "^0.21.1"} becomes {@code "^0.21.2"}, so the manifest can no longer resolve a vulnerable
  * release. Only a plain version, or one behind {@code ^}, {@code ~}, {@code >=} or {@code =}, is edited;
- * a transitive package, or a tag, URL, wildcard or compound range, is refused.
+ * a tag, URL, wildcard or compound range is refused.
+ *
+ * <p>A package the project doesn't declare — one a dependency pulls in — is overridden instead: npm's
+ * {@code overrides} ({@link #NpmPackageJsonEditor()}) or yarn's {@code resolutions} ({@link #yarn()}) in the
+ * package.json of the project that the lockfile belongs to, the only one either reads. The override names the package
+ * alone, so every copy of it in the tree moves to the fixed version, at {@code ^} that version so later fixes still
+ * arrive. (pnpm reads its overrides from pnpm-workspace.yaml: {@link PnpmWorkspaceEditor}.)
  */
 final class NpmPackageJsonEditor implements ManifestEditor {
 
     private static final List<String> SECTIONS =
             List.of("dependencies", "devDependencies", "optionalDependencies", "peerDependencies");
     private static final Pattern SIMPLE_SPEC = Pattern.compile("(\\^|~|>=|=)?v?\\d[0-9A-Za-z.+-]*");
+    private static final Pattern PLAIN_VERSION = Pattern.compile("\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?");
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final TypeReference<Map<String, Object>> OBJECT = new TypeReference<>() { };
+
+    /** The field an override is written to, and the tool that installs the project. */
+    private final String overrides;
+    private final String tool;
+
+    /** npm's: an override goes to {@code overrides}. */
+    NpmPackageJsonEditor() {
+        this("overrides", "npm");
+    }
+
+    private NpmPackageJsonEditor(String overrides, String tool) {
+        this.overrides = overrides;
+        this.tool = tool;
+    }
+
+    /** Yarn's, classic and berry: an override goes to {@code resolutions}. */
+    static NpmPackageJsonEditor yarn() {
+        return new NpmPackageJsonEditor("resolutions", "yarn");
+    }
 
     @Override
     public String fileName() {
         return "package.json";
+    }
+
+    /** The version an override asks for: {@code ^} the fixed one, so later fixes in its line still arrive. */
+    static String overrideRange(String toVersion) {
+        return PLAIN_VERSION.matcher(toVersion).matches() ? "^" + toVersion : toVersion;
+    }
+
+    @Override
+    public String override(String manifest, String packageName, String fromVersion, String toVersion, String via) {
+        Map<String, Object> root = parse(manifest);
+        for (String section : SECTIONS) {
+            if (root.get(section) instanceof Map<?, ?> dependencies && dependencies.containsKey(packageName)) {
+                throw new ApiExceptions.Conflict("package.json declares " + packageName + " itself, so its declaration "
+                        + "is what to raise; re-import the service's SBOM and Aegis bumps it instead");
+            }
+        }
+        String range = overrideRange(toVersion);
+        Object existing = root.get(overrides);
+        if (existing != null && !(existing instanceof Map<?, ?>)) {
+            throw new ApiExceptions.Conflict("package.json's \"" + overrides + "\" is not an object; add the "
+                    + packageName + " override by hand");
+        }
+        JsonText.ObjectSpan top = JsonText.root(manifest);
+        String unit = JsonText.unit(manifest, top);
+        String member = JsonText.string(packageName) + ": " + JsonText.string(range);
+        String result;
+        if (existing instanceof Map<?, ?> current) {
+            JsonText.ObjectSpan block = JsonText.object(manifest, top.member(overrides).valueStart());
+            if (current.containsKey(packageName)) {
+                Object value = current.get(packageName);
+                if (!(value instanceof String spec)) {
+                    throw new ApiExceptions.Conflict("package.json already overrides " + packageName
+                            + " with nested rules; raise it to " + toVersion + " there by hand");
+                }
+                if (spec.equals(range)) {
+                    throw new ApiExceptions.Conflict("package.json already overrides " + packageName + " to " + range
+                            + "; only the lockfile is stale, so run `" + tool + " install` instead");
+                }
+                JsonText.Member entry = block.member(packageName);
+                result = manifest.substring(0, entry.valueStart()) + JsonText.string(range)
+                        + manifest.substring(entry.valueEnd());
+            } else {
+                result = JsonText.append(manifest, block, member, unit);
+            }
+        } else {
+            String indent = top.members().isEmpty() ? "" : JsonText.indentOf(manifest, top.members().getFirst().keyStart());
+            String newline = manifest.contains("\r\n") ? "\r\n" : "\n";
+            boolean oneLine = manifest.substring(top.open(), top.close()).indexOf('\n') < 0;
+            String block = oneLine ? "{" + member + "}"
+                    : "{" + newline + indent + unit + member + newline + indent + "}";
+            result = JsonText.append(manifest, top, JsonText.string(overrides) + ": " + block, unit);
+        }
+        // The text edit must read back as exactly the override asked for, and nothing else moved.
+        Map<String, Object> written = parse(result);
+        Map<String, Object> expected = new LinkedHashMap<>(root);
+        Map<String, Object> merged = new LinkedHashMap<>();
+        if (existing instanceof Map<?, ?> current) {
+            current.forEach((key, value) -> merged.put(String.valueOf(key), value));
+        }
+        merged.put(packageName, range);
+        expected.put(overrides, merged);
+        if (!written.equals(expected)) {
+            throw new ApiExceptions.Conflict("package.json is laid out in a way Aegis can't edit safely; override "
+                    + packageName + " to " + range + " by hand");
+        }
+        return result;
     }
 
     /**
@@ -98,12 +191,19 @@ final class NpmPackageJsonEditor implements ManifestEditor {
     }
 
     private static List<Object> sections(String manifest) {
-        Map<String, Object> root;
+        Map<String, Object> root = parse(manifest);
+        return SECTIONS.stream().map(root::get).toList();
+    }
+
+    private static Map<String, Object> parse(String manifest) {
         try {
-            root = JSON.readValue(manifest, OBJECT);
+            Map<String, Object> root = JSON.readValue(manifest, OBJECT);
+            if (root == null) {
+                throw new ApiExceptions.Conflict("package.json is not a JSON object");
+            }
+            return root;
         } catch (JacksonException notJson) {
             throw new ApiExceptions.Conflict("package.json is not valid JSON");
         }
-        return SECTIONS.stream().map(root::get).toList();
     }
 }

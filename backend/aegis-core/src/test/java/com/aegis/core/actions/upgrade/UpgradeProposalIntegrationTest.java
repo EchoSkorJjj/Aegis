@@ -399,21 +399,161 @@ class UpgradeProposalIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value(containsString("already has an upgrade pull request")));
 
-        SoftwareComponent framework = inventory.createSoftwareComponent("maven", "com.acme:framework-" + f.tag(), "3.0.0");
-        inventory.addComponentDependency(framework.getId(), f.component().getId());
-        BusinessService indirect = inventory.createBusinessService(
-                "Indirect " + f.tag(), BusinessCriticality.HIGH, ServiceExposure.INTERNAL);
-        inventory.linkServiceRepository(indirect.getId(), hosted("acme/indirect-" + f.tag()), null);
-        inventory.addServiceComponent(indirect.getId(), framework.getId());
-        draft(f.advisory().id(), indirect.getId(), analyst)
-                .andExpect(jsonPath("$.pullRequests").isEmpty())
-                .andExpect(jsonPath("$.evidence").value(hasItem("Not automated: " + f.component().getName()
-                        + " 1.0.0 comes in through com.acme:framework-" + f.tag() + "; upgrade com.acme:framework-"
-                        + f.tag() + ", or pin " + f.component().getName() + " by hand")));
-
         mvc.perform(post(RESPONSES).with(as("ANALYST", analyst)).contentType(MediaType.APPLICATION_JSON)
                         .content(request(UUID.randomUUID(), f.service().getId())))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void aDependencyAnotherPullsInIsOverriddenInDependencyManagementAndOpened() throws Exception {
+        Fixture f = fixture();
+        String framework = "com.acme:framework-" + f.tag();
+        SoftwareComponent frameworkComponent = inventory.createSoftwareComponent("maven", framework, "3.0.0");
+        inventory.addComponentDependency(frameworkComponent.getId(), f.component().getId());
+        BusinessService indirect = inventory.createBusinessService(
+                "Indirect " + f.tag(), BusinessCriticality.HIGH, ServiceExposure.INTERNAL);
+        String repository = "acme/indirect-" + f.tag();
+        inventory.linkServiceRepository(indirect.getId(), hosted(repository), null);
+        inventoryStore.linkRepositoryComponent(indirect.getId(), frameworkComponent.getId(), List.of("svc/pom.xml"));
+        host.put(repository, "svc/pom.xml", pom(framework, "3.0.0"));
+
+        String created = draft(f.advisory().id(), indirect.getId(), analyst)
+                .andExpect(jsonPath("$.pullRequests[0].edits.length()").value(1))
+                .andExpect(jsonPath("$.pullRequests[0].edits[0].packageName").value(f.component().getName()))
+                .andExpect(jsonPath("$.pullRequests[0].edits[0].manifestPath").value("svc/pom.xml"))
+                .andExpect(jsonPath("$.pullRequests[0].edits[0].toVersion").value("1.3.0"))
+                .andExpect(jsonPath("$.pullRequests[0].edits[0].override.via").value(framework))
+                .andExpect(jsonPath("$.pullRequests[0].edits[0].override.packageManager").value(nullValue()))
+                .andExpect(jsonPath("$.pullRequests[0].body").value(containsString("Overrides `" + f.component().getName()
+                        + "` from **1.0.0** to **1.3.0** in `svc/pom.xml`")))
+                .andExpect(jsonPath("$.pullRequests[0].body").value(containsString("`dependencyManagement` in `pom.xml`")))
+                .andReturn().getResponse().getContentAsString();
+
+        mvc.perform(post(RESPONSES + "/{id}/approve", JsonPath.<String>read(created, "$.id")).with(as("ANALYST", approver)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.pullRequests[0].status").value("OPENED"));
+        String[] coordinates = f.component().getName().split(":");
+        assertThat(host.opened(repository)).singleElement().satisfies(opened -> assertThat(opened.changes())
+                .singleElement().satisfies(change -> {
+                    assertThat(change.path()).isEqualTo("svc/pom.xml");
+                    assertThat(change.content()).isEqualTo(pom(framework, "3.0.0").replace("  <dependencies>\n", """
+                              <dependencyManagement>
+                                <dependencies>
+                                  <dependency>
+                                    <groupId>%s</groupId>
+                                    <artifactId>%s</artifactId>
+                                    <version>1.3.0</version>
+                                  </dependency>
+                                </dependencies>
+                              </dependencyManagement>
+                              <dependencies>
+                            """.formatted(coordinates[0], coordinates[1])));
+                }));
+    }
+
+    @Test
+    void aPackageAnotherPullsInIsOverriddenWhereItsLockfileSaysInThatPackageManagersSyntax() throws Exception {
+        String tag = tag();
+        String repository = "acme/pnpm-" + tag;
+        BusinessService service = inventory.createBusinessService(
+                "Pnpm " + tag, BusinessCriticality.CRITICAL, ServiceExposure.INTERNET_FACING);
+        inventory.linkServiceRepository(service.getId(), hosted(repository), null);
+        // As an import from the repository now records them: shadcn is declared, and two lockfiles resolve it.
+        SoftwareComponent shadcn = inventory.createSoftwareComponent("npm", "shadcn-" + tag, "4.0.5");
+        SoftwareComponent hono = inventory.createSoftwareComponent("npm", "hono-" + tag, "4.12.7");
+        inventory.addComponentDependency(shadcn.getId(), hono.getId());
+        inventoryStore.linkRepositoryComponent(service.getId(), shadcn.getId(),
+                List.of("client/package.json", "server/package.json"),
+                List.of("client/pnpm-lock.yaml", "server/package-lock.json"));
+        Advisory advisory = advisories.upsert(new Advisory(null, "osv", "GHSA-hono-" + tag, "CVE-2098-" + tag,
+                "A flaw in hono.", Instant.now(), Instant.now(), new Advisory.Cvss("3.1", null, new BigDecimal("7.5"), "HIGH"),
+                List.of(AffectedProduct.ofPackage("npm", "hono-" + tag, null, "4.0.0", null, null, "4.13.7"))));
+        host.put(repository, "server/package.json", packageJson("shadcn-" + tag, "^4.0.5"));
+
+        String created = draft(advisory.id(), service.getId(), analyst)
+                .andExpect(jsonPath("$.pullRequests[0].edits.length()").value(2))
+                .andExpect(jsonPath("$.pullRequests[0].edits[0].manifestPath").value("client/pnpm-workspace.yaml"))
+                .andExpect(jsonPath("$.pullRequests[0].edits[0].override.packageManager").value("pnpm"))
+                .andExpect(jsonPath("$.pullRequests[0].edits[0].override.via").value("shadcn-" + tag))
+                .andExpect(jsonPath("$.pullRequests[0].edits[1].manifestPath").value("server/package.json"))
+                .andExpect(jsonPath("$.pullRequests[0].edits[1].override.packageManager").value("npm"))
+                .andExpect(jsonPath("$.pullRequests[0].body").value(containsString("Run `pnpm install` in `client/`")))
+                .andExpect(jsonPath("$.pullRequests[0].body").value(containsString("Refresh the lockfile in `server/`")))
+                .andExpect(jsonPath("$.pullRequests[0].body").value(containsString("pnpm's `overrides` in "
+                        + "`pnpm-workspace.yaml` and npm's `overrides` in `package.json`")))
+                .andReturn().getResponse().getContentAsString();
+
+        mvc.perform(post(RESPONSES + "/{id}/approve", JsonPath.<String>read(created, "$.id")).with(as("ANALYST", approver)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.pullRequests[0].status").value("OPENED"));
+        assertThat(host.opened(repository)).singleElement().satisfies(opened -> assertThat(opened.changes())
+                .extracting(FileChange::path, FileChange::content, FileChange::expectedRevision)
+                .containsExactly(
+                        // pnpm-workspace.yaml didn't exist: the pull request creates it.
+                        org.assertj.core.groups.Tuple.tuple("client/pnpm-workspace.yaml",
+                                "overrides:\n  hono-" + tag + ": ^4.13.7\n", null),
+                        org.assertj.core.groups.Tuple.tuple("server/package.json", """
+                                {
+                                  "name": "app",
+                                  "dependencies": {
+                                    "shadcn-%s": "^4.0.5"
+                                  },
+                                  "overrides": {
+                                    "hono-%s": "^4.13.7"
+                                  }
+                                }
+                                """.formatted(tag, tag), host.revision(repository, "server/package.json"))));
+    }
+
+    @Test
+    void aPackageReachedTwoWaysIsOverriddenWhereItCanBeAndTheTicketNamesTheOtherWay() throws Exception {
+        String tag = tag();
+        BusinessService service = inventory.createBusinessService(
+                "Two ways " + tag, BusinessCriticality.HIGH, ServiceExposure.INTERNAL);
+        inventory.linkServiceRepository(service.getId(), hosted("acme/two-ways-" + tag), null);
+        SoftwareComponent shadcn = inventory.createSoftwareComponent("npm", "shadcn-" + tag, "4.0.5");
+        SoftwareComponent legacy = inventory.createSoftwareComponent("npm", "legacy-" + tag, "1.0.0");
+        SoftwareComponent hono = inventory.createSoftwareComponent("npm", "hono-" + tag, "4.12.7");
+        inventory.addComponentDependency(shadcn.getId(), hono.getId());
+        inventory.addComponentDependency(legacy.getId(), hono.getId());
+        inventoryStore.linkRepositoryComponent(service.getId(), shadcn.getId(), List.of("client/package.json"),
+                List.of("client/yarn.lock"));
+        inventoryStore.linkRepositoryComponent(service.getId(), legacy.getId(), List.of("server/package.json"));
+        Advisory advisory = advisories.upsert(new Advisory(null, "osv", "GHSA-two-" + tag, "CVE-2096-" + tag,
+                "A flaw in hono.", Instant.now(), Instant.now(), new Advisory.Cvss("3.1", null, new BigDecimal("7.5"), "HIGH"),
+                List.of(AffectedProduct.ofPackage("npm", "hono-" + tag, null, "4.0.0", null, null, "4.13.7"))));
+
+        draft(advisory.id(), service.getId(), analyst)
+                .andExpect(jsonPath("$.pullRequests[0].edits.length()").value(1))
+                .andExpect(jsonPath("$.pullRequests[0].edits[0].manifestPath").value("client/package.json"))
+                .andExpect(jsonPath("$.pullRequests[0].edits[0].override.packageManager").value("yarn"))
+                .andExpect(jsonPath("$.evidence").value(hasItem("Not automated: Also: hono-" + tag + " 4.12.7 comes in "
+                        + "through legacy-" + tag + "; re-import the service's SBOM from its repository so Aegis can tell "
+                        + "which lockfile resolves it and override it there, or upgrade legacy-" + tag + " or pin hono-"
+                        + tag + " by hand")));
+    }
+
+    @Test
+    void aPackageAnotherPullsInWithNoLockfileRecordedAsksForAReImport() throws Exception {
+        String tag = tag();
+        BusinessService service = inventory.createBusinessService(
+                "Old import " + tag, BusinessCriticality.HIGH, ServiceExposure.INTERNAL);
+        inventory.linkServiceRepository(service.getId(), hosted("acme/old-import-" + tag), null);
+        SoftwareComponent shadcn = inventory.createSoftwareComponent("npm", "shadcn-" + tag, "4.0.5");
+        SoftwareComponent hono = inventory.createSoftwareComponent("npm", "hono-" + tag, "4.12.7");
+        inventory.addComponentDependency(shadcn.getId(), hono.getId());
+        // Imported before lockfiles were recorded.
+        inventoryStore.linkRepositoryComponent(service.getId(), shadcn.getId(), List.of("client/package.json"));
+        Advisory advisory = advisories.upsert(new Advisory(null, "osv", "GHSA-old-" + tag, "CVE-2097-" + tag,
+                "A flaw in hono.", Instant.now(), Instant.now(), new Advisory.Cvss("3.1", null, new BigDecimal("7.5"), "HIGH"),
+                List.of(AffectedProduct.ofPackage("npm", "hono-" + tag, null, "4.0.0", null, null, "4.13.7"))));
+
+        draft(advisory.id(), service.getId(), analyst)
+                .andExpect(jsonPath("$.pullRequests").isEmpty())
+                .andExpect(jsonPath("$.evidence").value(hasItem("Not automated: hono-" + tag + " 4.12.7 comes in through "
+                        + "shadcn-" + tag + "; re-import the service's SBOM from its repository so Aegis can tell which "
+                        + "lockfile resolves it and override it there, or upgrade shadcn-" + tag + " or pin hono-" + tag
+                        + " by hand")));
     }
 
     @Test

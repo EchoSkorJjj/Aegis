@@ -380,6 +380,23 @@ test("a response whose pull request was left out can draft one again", async ({ 
   expect(writes).toEqual([{ path: "/api/actions/risk-tickets/ticket-1/pull-requests", body: null }]);
 });
 
+test("a response Aegis couldn't automate a pull request for says why where the pull request would be", async ({ page }) => {
+  const reason = "hono 4.12.7 comes in through shadcn; re-import the service's SBOM from its repository so Aegis can "
+    + "tell which lockfile resolves it and override it there, or upgrade shadcn or pin hono by hand";
+  const { writes } = await fakeBff(page, "ANALYST", {
+    tickets: [ticket({ pullRequests: [], evidence: ["Impact score 91.0 (CRITICAL)", `Not automated: ${reason}`] })],
+  });
+  await page.goto("/responses/tickets/ticket-1");
+  const upgrade = page.getByRole("region", { name: "Upgrade pull request" });
+
+  await expect(upgrade.getByText("None: Aegis couldn't automate one when the response was drafted, because:")).toBeVisible();
+  await expect(upgrade.getByRole("listitem")).toHaveText([reason]);
+  // Once the cause is fixed, asking again drafts it.
+  await upgrade.getByRole("button", { name: "Check again" }).click();
+  await expect(upgrade.getByText("Awaiting decision")).toBeVisible();
+  expect(writes).toEqual([{ path: "/api/actions/risk-tickets/ticket-1/pull-requests", body: null }]);
+});
+
 test("until Jira is connected with a project, approving isn't offered and the page says what is missing", async ({ page }) => {
   await fakeBff(page, "ANALYST", {
     tickets: [ticket()],

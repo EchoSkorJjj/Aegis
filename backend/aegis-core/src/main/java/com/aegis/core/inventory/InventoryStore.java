@@ -77,6 +77,13 @@ public interface InventoryStore {
     void linkRepositoryComponent(UUID serviceId, UUID componentId, List<String> manifestPaths);
 
     /**
+     * As {@link #linkRepositoryComponent(UUID, UUID, List)}, also recording the JavaScript lockfiles that resolve it
+     * (replacing those recorded before). With lockfiles, the manifests are exactly those given: a package a lockfile
+     * resolves that no manifest declares is linked with none.
+     */
+    void linkRepositoryComponent(UUID serviceId, UUID componentId, List<String> manifestPaths, List<String> lockfilePaths);
+
+    /**
      * Unlink the service's components that an import from its repository linked, except {@code declared} — what
      * the repository declares now. A component linked by hand or by an uploaded SBOM stays. Returns how many
      * were unlinked.
@@ -117,16 +124,22 @@ public interface InventoryStore {
 
     /**
      * A service's direct edge to a component it uses — the traversal unit for component impact.
-     * {@code manifestPaths} are the repository files declaring it, where known (empty otherwise).
+     * {@code manifestPaths} are the repository files declaring it, where known (empty otherwise);
+     * {@code lockfilePaths} the JavaScript lockfiles resolving it, where an import from the repository read them.
      */
-    record ServiceComponentLink(UUID serviceId, UUID componentId, List<String> manifestPaths) {
+    record ServiceComponentLink(UUID serviceId, UUID componentId, List<String> manifestPaths, List<String> lockfilePaths) {
 
         public ServiceComponentLink {
             manifestPaths = manifestPaths == null ? List.of() : List.copyOf(manifestPaths);
+            lockfilePaths = lockfilePaths == null ? List.of() : List.copyOf(lockfilePaths);
+        }
+
+        public ServiceComponentLink(UUID serviceId, UUID componentId, List<String> manifestPaths) {
+            this(serviceId, componentId, manifestPaths, List.of());
         }
 
         public ServiceComponentLink(UUID serviceId, UUID componentId) {
-            this(serviceId, componentId, List.of());
+            this(serviceId, componentId, List.of(), List.of());
         }
     }
 

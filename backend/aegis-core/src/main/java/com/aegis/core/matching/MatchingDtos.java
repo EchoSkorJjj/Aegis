@@ -133,19 +133,30 @@ public final class MatchingDtos {
 
     /**
      * A vulnerable component one service uses: directly ({@code via} null), or through the direct
-     * dependency {@code via}. {@code manifestPath} is the manifest declaring that direct dependency, where
-     * the SBOM import recorded one. {@code confidence} is CONFIRMED when any one vulnerability is.
+     * dependency {@code via}. {@code manifestPaths} are the manifests declaring that direct dependency, and
+     * {@code lockfilePaths} the JavaScript lockfiles resolving it, where the SBOM import recorded them.
+     * {@code confidence} is CONFIRMED when any one vulnerability is.
      */
     public record VulnerableDependency(
             UUID serviceId,
             ComponentRef component,
             ComponentRef via,
             List<String> manifestPaths,
+            List<String> lockfilePaths,
             MatchConfidence confidence,
             List<VulnerabilityRef> vulnerabilities) {
 
         public VulnerableDependency {
             manifestPaths = manifestPaths == null ? List.of() : List.copyOf(manifestPaths);
+            lockfilePaths = lockfilePaths == null ? List.of() : List.copyOf(lockfilePaths);
+        }
+
+        /**
+         * A package a lockfile resolves that none of the repository's manifests declares: linked directly, but
+         * with lockfiles and no manifest. Like a transitive one, it is overridden rather than bumped.
+         */
+        public boolean undeclared() {
+            return via == null && manifestPaths.isEmpty() && !lockfilePaths.isEmpty();
         }
     }
 

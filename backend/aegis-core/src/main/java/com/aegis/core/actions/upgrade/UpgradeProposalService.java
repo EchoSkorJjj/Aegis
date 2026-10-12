@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -26,6 +27,7 @@ import com.aegis.core.actions.pr.PullRequestRef;
 import com.aegis.core.actions.pr.RepositoryFile;
 import com.aegis.core.actions.pr.RepositoryRef;
 import com.aegis.core.actions.upgrade.UpgradeProposal.Edit;
+import com.aegis.core.actions.upgrade.UpgradeProposal.VersionOverride;
 import com.aegis.core.actions.upgrade.UpgradePullRequestText.Facts;
 import com.aegis.core.actions.upgrade.UpgradePullRequestText.Rationale;
 import com.aegis.core.ai.AiDrafter;
@@ -36,6 +38,7 @@ import com.aegis.core.audit.DecisionRecord.Subject;
 import com.aegis.core.audit.DecisionTrail;
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
+import com.aegis.core.inventory.InventoryStore.ServiceComponentLink;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.RepositoryUrl;
 import com.aegis.core.inventory.sbom.SbomGenerationProperties;
@@ -64,7 +67,8 @@ import org.springframework.stereotype.Service;
  * service, and approved with it.
  *
  * <p><b>Plan</b> and <b>draft</b> turn "this CVE reaches this service" into one reviewed pull request: every
- * direct dependency it matches, in every manifest that declares it, moved to the safe version (deterministic,
+ * direct dependency it matches, in every manifest that declares it, and every one another package pulls in,
+ * overridden in each project that resolves it, moved to the safe version (deterministic,
  * {@link UpgradeTargets}), with the exact PR title and body and an AI-drafted rationale when the ai-service can
  * supply one. Nothing is written outside Aegis. <b>Approve</b> is the trust boundary: a second person's
  * decision — never the drafter's own — and the only thing that opens a pull request, always a draft, from an
@@ -125,15 +129,16 @@ public class UpgradeProposalService {
     }
 
     /**
-     * What the upgrade pull request of a response to this change in this service would edit: every direct
-     * dependency the change matches, in every manifest the SBOM import found it declared in (the ecosystem's
-     * manifest at the repository root when it recorded none, and none at all when it recorded only files Aegis
-     * doesn't edit), each moved to the lowest version that clears every
-     * advisory with a fix for its package ({@link UpgradeTargets}). A dependency another current pull request
-     * already upgrades is left to that one. What can't be automated — pulled in by another package, an
-     * ecosystem or a manifest Aegis doesn't edit, no fixed version, no linked repository, a repository host no
-     * pull-request provider serves — is listed with why.
-     * Deterministic, and writes nothing.
+     * What the upgrade pull request of a response to this change in this service would edit. A dependency the change
+     * matches that the service declares is bumped in every manifest the SBOM import found it declared in (the
+     * ecosystem's manifest at the repository root when it recorded none, and none at all when it recorded only files
+     * Aegis doesn't edit). One another package pulls in — or one a lockfile resolves that nothing declares — is
+     * overridden instead, in every project that resolves it ({@link Overrides}): every copy of it in that project's
+     * tree moves. Each moves to the lowest version that clears every advisory with a fix for its package
+     * ({@link UpgradeTargets}); overrides of one package in one file take the highest of their targets. A dependency
+     * another current pull request already upgrades there is left to that one. What can't be automated — an ecosystem
+     * or a manifest Aegis doesn't edit, no lockfile recorded to override in, no fixed version, no linked repository, a
+     * repository host no pull-request provider serves — is listed with why. Deterministic, and writes nothing.
      */
     public UpgradePlan plan(UUID changeSignalId, UUID serviceId) {
         BusinessService service = inventory.getBusinessService(serviceId);
@@ -146,18 +151,18 @@ public class UpgradeProposalService {
                 .findFirst()
                 .orElseThrow(() -> new ApiExceptions.Conflict("This change does not reach the service"));
 
-        // Each component this change matched for the service, once; a direct use wins over a transitive one.
-        Map<UUID, EvidenceChain> byComponent = new LinkedHashMap<>();
+        // Each component this change matched for the service, with every way the service reaches it, shortest first.
+        Map<UUID, List<EvidenceChain>> byComponent = new LinkedHashMap<>();
         for (EvidenceChain chain : scored.evidence()) {
             if (chain.componentPath() == null || chain.componentPath().isEmpty()) {
                 continue;
             }
-            byComponent.merge(chain.componentPath().getFirst().id(), chain,
-                    (kept, other) -> other.componentPath().size() < kept.componentPath().size() ? other : kept);
+            byComponent.computeIfAbsent(chain.componentPath().getFirst().id(), id -> new ArrayList<>()).add(chain);
         }
-        Map<UUID, List<String>> declaredIn = new HashMap<>();
+        byComponent.values().forEach(chains -> chains.sort(Comparator.comparingInt(chain -> chain.componentPath().size())));
+        Map<UUID, ServiceComponentLink> links = new HashMap<>();
         inventoryStore.findServiceComponentLinksForServices(List.of(serviceId))
-                .forEach(link -> declaredIn.put(link.componentId(), link.manifestPaths()));
+                .forEach(link -> links.put(link.componentId(), link));
         Set<String> claimed = new HashSet<>();
         store.findCurrent(serviceId).forEach(current -> current.edits()
                 .forEach(edit -> claimed.add(claim(edit.componentId(), edit.manifestPath()))));
@@ -173,62 +178,58 @@ public class UpgradeProposalService {
         // The same source the response's ticket records, so the two never disagree on it.
         evidence.addAll(DraftEvidence.source(impact.change(), signals.findById(changeSignalId).orElse(null)));
         MatchConfidence confidence = MatchConfidence.CONFIRMED;
-        for (EvidenceChain chain : byComponent.values()) {
-            ComponentRef component = chain.componentPath().getFirst();
-            if (chain.componentPath().size() > 1) {
-                String direct = chain.componentPath().getLast().name();
-                notAutomated.add(component.name() + " " + component.version() + " comes in through " + direct
-                        + "; upgrade " + direct + ", or pin " + component.name() + " by hand");
-                continue;
-            }
-            Optional<ManifestEditor> editor = ManifestEditor.forEcosystem(component.ecosystem());
-            if (editor.isEmpty()) {
+        for (List<EvidenceChain> chains : byComponent.values()) {
+            EvidenceChain shortest = chains.getFirst();
+            ComponentRef component = shortest.componentPath().getFirst();
+            String described = component.name() + " " + component.version();
+            if (ManifestEditor.forEcosystem(component.ecosystem()).isEmpty()) {
                 notAutomated.add("Aegis drafts upgrades for Maven, npm and PyPI manifests; upgrade " + component.name()
                         + " (" + component.ecosystem() + ") by hand");
                 continue;
             }
-            List<String> recorded = declaredIn.getOrDefault(component.id(), List.of());
-            List<String> manifests = editor.get().manifestsFor(recorded);
-            if (manifests.isEmpty()) {
-                notAutomated.add(component.name() + " " + component.version() + " is found in "
-                        + String.join(", ", recorded) + ", which Aegis doesn't edit; upgrade it by hand");
+            Placements placements = shortest.componentPath().size() == 1 && declared(links.get(component.id()))
+                    ? declaredIn(component, links.get(component.id()))
+                    : overriddenIn(component, chains, links);
+            if (placements.files().isEmpty()) {
+                notAutomated.add(placements.unavailable());
                 continue;
             }
             UpgradeTarget target;
             try {
                 target = targets.resolve(changeSignalId, component);
             } catch (ApiExceptions.Conflict unresolved) {
-                notAutomated.add(component.name() + " " + component.version() + ": " + unresolved.getMessage());
+                notAutomated.add(described + ": " + unresolved.getMessage());
                 continue;
             }
             vulnerabilityId = target.vulnerabilityId();
             boolean added = false;
-            for (String manifest : manifests) {
+            for (Map.Entry<String, Pinning> placement : placements.files().entrySet()) {
+                String manifest = placement.getKey();
                 if (claimed.contains(claim(component.id(), manifest))) {
                     notAutomated.add(component.name() + " in " + manifest
                             + " is already being upgraded by another upgrade pull request");
                     continue;
                 }
-                edits.add(new Edit(component.id(), component.ecosystem(), component.name(), component.version(),
-                        target.toVersion(), manifest));
-                editors.putIfAbsent(editor.get().fileName(), editor.get());
-                edited.computeIfAbsent(editor.get().fileName(), file -> new LinkedHashSet<>()).add(manifest);
+                Edit edit = new Edit(component.id(), component.ecosystem(), component.name(), component.version(),
+                        target.toVersion(), manifest, placement.getValue().override());
+                ManifestEditor editor = ManifestEditor.forEdit(edit);
+                edits.add(edit);
+                editors.putIfAbsent(editor.fileName(), editor);
+                edited.computeIfAbsent(editor.fileName(), file -> new LinkedHashSet<>()).add(manifest);
                 added = true;
             }
             if (added) {
                 checked.addAll(target.checked());
                 notCleared.addAll(target.notCleared());
-                List<String> elsewhere = recorded.stream().map(String::strip)
-                        .filter(path -> !manifests.contains(path)).distinct().toList();
-                if (!elsewhere.isEmpty()) {
-                    notAutomated.add(component.name() + " " + component.version() + " is also found in "
-                            + String.join(", ", elsewhere) + ", which Aegis doesn't edit; upgrade it there by hand");
+                if (placements.elsewhere() != null) {
+                    notAutomated.add(placements.elsewhere());
                 }
-                if (chain.confidence() != MatchConfidence.CONFIRMED) {
+                if (chains.stream().anyMatch(chain -> chain.confidence() != MatchConfidence.CONFIRMED)) {
                     confidence = MatchConfidence.POSSIBLE;
                 }
             }
         }
+        edits = overridesAtTheirHighestTarget(edits);
         List<String> followUps = new ArrayList<>();
         edited.forEach((file, manifests) -> followUps.addAll(editors.get(file).followUps(List.copyOf(manifests))));
         if (!edits.isEmpty() && service.getRepositoryUrl() == null) {
@@ -249,6 +250,104 @@ public class UpgradeProposalService {
                         service.getExposure().name(), scored.score(), scored.tier().name(), service.getRepositoryUrl(),
                         service.getRepositoryBranch(), confidence, List.copyOf(checked), List.copyOf(notCleared),
                         List.copyOf(evidence), List.copyOf(followUps)));
+    }
+
+    /**
+     * Where a component goes in the pull request: each file, with how it is pinned there (null: its declaration
+     * bumped); or, when nowhere, why — and, when some of the files it was found in aren't edited, which.
+     */
+    private record Placements(Map<String, Pinning> files, String unavailable, String elsewhere) {
+    }
+
+    /** How a component is pinned in one file: its override, or none — its declaration bumped ({@link #BUMP}). */
+    private record Pinning(VersionOverride override) {
+        static final Pinning BUMP = new Pinning(null);
+    }
+
+    /**
+     * Whether the service declares a component it links: the import recorded a manifest for it, or nothing at all (an
+     * uploaded SBOM, a component linked by hand) — not a package a lockfile resolves that no manifest declares.
+     */
+    private static boolean declared(ServiceComponentLink link) {
+        return link == null || !link.manifestPaths().isEmpty() || link.lockfilePaths().isEmpty();
+    }
+
+    /** A declared component: bumped in every manifest that declares it which Aegis edits. */
+    private static Placements declaredIn(ComponentRef component, ServiceComponentLink link) {
+        ManifestEditor editor = ManifestEditor.forEcosystem(component.ecosystem()).orElseThrow();
+        List<String> recorded = link == null ? List.of() : link.manifestPaths();
+        List<String> manifests = editor.manifestsFor(recorded);
+        String described = component.name() + " " + component.version();
+        if (manifests.isEmpty()) {
+            return new Placements(Map.of(), described + " is found in " + String.join(", ", recorded)
+                    + ", which Aegis doesn't edit; upgrade it by hand", null);
+        }
+        Map<String, Pinning> files = new LinkedHashMap<>();
+        manifests.forEach(manifest -> files.put(manifest, Pinning.BUMP));
+        List<String> elsewhere = recorded.stream().map(String::strip)
+                .filter(path -> !manifests.contains(path)).distinct().toList();
+        return new Placements(files, null, elsewhere.isEmpty() ? null : described + " is also found in "
+                + String.join(", ", elsewhere) + ", which Aegis doesn't edit; upgrade it there by hand");
+    }
+
+    /**
+     * A component another package pulls in, or one a lockfile resolves that nothing declares: overridden in every
+     * project that resolves it, reached through each of the service's direct dependencies that leads to it.
+     */
+    private static Placements overriddenIn(ComponentRef component, List<EvidenceChain> chains,
+            Map<UUID, ServiceComponentLink> links) {
+        Map<String, Set<String>> viaByFile = new LinkedHashMap<>();
+        Map<String, String> managerByFile = new LinkedHashMap<>();
+        // What pulls it in where it can't be overridden, and why: the first such route, said once.
+        String blockedVia = null;
+        String unavailable = null;
+        for (EvidenceChain chain : chains) {
+            ComponentRef linked = chain.componentPath().getLast();
+            String via = chain.componentPath().size() > 1 ? linked.name() : null;
+            ServiceComponentLink link = links.get(linked.id());
+            Overrides.Found found = Overrides.find(component.ecosystem(),
+                    link == null ? List.of() : link.manifestPaths(), link == null ? List.of() : link.lockfilePaths());
+            if (found.targets().isEmpty() && unavailable == null) {
+                blockedVia = via;
+                unavailable = found.unavailable();
+            }
+            for (Overrides.Target target : found.targets()) {
+                Set<String> vias = viaByFile.computeIfAbsent(target.manifestPath(), file -> new LinkedHashSet<>());
+                if (via != null) {
+                    vias.add(via);
+                }
+                managerByFile.putIfAbsent(target.manifestPath(), target.packageManager());
+            }
+        }
+        String blocked = unavailable == null ? null
+                : Overrides.notOverridden(component.name(), component.version(), blockedVia, unavailable, null);
+        if (viaByFile.isEmpty()) {
+            return new Placements(Map.of(), blocked, null);
+        }
+        Map<String, Pinning> files = new LinkedHashMap<>();
+        viaByFile.forEach((file, vias) -> files.put(file, new Pinning(new VersionOverride(
+                vias.isEmpty() ? null : String.join(", ", vias), managerByFile.get(file)))));
+        // Overridden where it can be; another route to it that can't is left to a person, by name.
+        return new Placements(files, null, blocked == null ? null : "Also: " + blocked);
+    }
+
+    /**
+     * One override per package and file: when several versions of a package are overridden in one file (each copy in
+     * the tree it pulls in), they all take the highest of their targets, the version the file ends up asking for.
+     */
+    private static List<Edit> overridesAtTheirHighestTarget(List<Edit> edits) {
+        Map<String, String> highest = new HashMap<>();
+        for (Edit edit : edits) {
+            if (edit.override() != null) {
+                highest.merge(edit.manifestPath() + " " + edit.packageName(), edit.toVersion(),
+                        (kept, other) -> UpgradeTargets.higher(edit.ecosystem(), kept, other));
+            }
+        }
+        List<Edit> merged = new ArrayList<>();
+        for (Edit edit : edits) {
+            merged.add(edit.override() == null ? edit : edit.to(highest.get(edit.manifestPath() + " " + edit.packageName())));
+        }
+        return merged;
     }
 
     /**
@@ -409,7 +508,8 @@ public class UpgradeProposalService {
 
     /**
      * Re-read every manifest the proposal edits, apply its edits to each (several in one file in turn), and open
-     * the draft pull request with each write pinned to the revision just read.
+     * the draft pull request with each write pinned to the revision just read. A file an override creates is written
+     * as new.
      */
     private PullRequestRef openDraftPullRequest(UpgradeProposal proposal, String issueKey) {
         RepositoryUrl url = RepositoryUrl.parse(proposal.repositoryUrl(), repositoryHosts.allowedHosts());
@@ -420,22 +520,30 @@ public class UpgradeProposalService {
                 .add(edit));
         List<FileChange> changes = new ArrayList<>();
         for (Map.Entry<String, List<Edit>> manifest : byManifest.entrySet()) {
-            RepositoryFile file = provider.readFile(repository, proposal.baseBranch(), manifest.getKey());
+            RepositoryFile file;
+            try {
+                file = provider.readFile(repository, proposal.baseBranch(), manifest.getKey());
+            } catch (ApiExceptions.NotFound missing) {
+                // An override can be a file's first setting (pnpm-workspace.yaml): the pull request creates it.
+                if (!ManifestEditor.forEdit(manifest.getValue().getFirst()).createsMissing()) {
+                    throw missing;
+                }
+                file = new RepositoryFile(manifest.getKey(), "", null);
+            }
             String content = file.content();
             boolean edited = false;
             Set<String> moved = new HashSet<>();
             for (Edit edit : manifest.getValue()) {
-                ManifestEditor editor = ManifestEditor.forEcosystem(edit.ecosystem())
-                        .orElseThrow(() -> new ApiExceptions.Conflict("No manifest editor for " + edit.ecosystem()));
+                ManifestEditor editor = ManifestEditor.forEdit(edit);
                 if (!moved.add(edit.packageName() + " " + edit.toVersion())) {
                     continue; // two versions of one package in one file: the first edit moved every declaration
                 }
                 try {
-                    content = editor.upgrade(content, edit.packageName(), edit.fromVersion(), edit.toVersion());
+                    content = editor.apply(content, edit);
                     edited = true;
                 } catch (ApiExceptions.Conflict refused) {
                     // Two packages sharing one version property: the first edit already moved it.
-                    if (!edited || !alreadyAt(editor, content, edit)) {
+                    if (!edited || edit.override() != null || !alreadyAt(editor, content, edit)) {
                         throw refused;
                     }
                 }
@@ -472,7 +580,9 @@ public class UpgradeProposalService {
     private static String context(Facts facts) {
         String upgrades = facts.edits().stream()
                 .map(edit -> edit.packageName() + " " + edit.fromVersion() + " to " + edit.toVersion() + " in "
-                        + edit.manifestPath())
+                        + edit.manifestPath() + (edit.override() == null ? "" : " (an override: "
+                        + (edit.override().via() == null ? "no manifest declares it"
+                                : "it comes in through " + edit.override().via()) + ")"))
                 .collect(Collectors.joining("; "));
         return """
                 Vulnerability %s

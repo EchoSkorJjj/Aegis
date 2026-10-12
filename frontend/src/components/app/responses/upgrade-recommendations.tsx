@@ -275,8 +275,9 @@ export function FilterSelect({
 }
 
 /**
- * What to upgrade and to which version, the vulnerabilities that clears, where it is declared, and why the pull
- * request can't be automated when it can't. `changeHref` is where a vulnerability links: its change's impact page
+ * What to upgrade and to which version, the vulnerabilities that clears, what pulls it in and where that is declared,
+ * where the pull request overrides it when no manifest declares it, and why the pull request can't be automated when
+ * it can't. `changeHref` is where a vulnerability links: its change's impact page
  * here, the item detail in the triage queue.
  */
 export function UpgradeSummary({
@@ -318,6 +319,12 @@ export function UpgradeSummary({
           </>
         )}
         {item.component.ecosystem}
+        {item.via && (
+          <>
+            {" · through "}
+            <span className="font-mono">{item.via.name}</span>
+          </>
+        )}
         {item.manifestPaths.length > 0 && (
           <>
             {" · "}
@@ -325,7 +332,12 @@ export function UpgradeSummary({
           </>
         )}
       </span>
-      {item.readiness === "NO_REPOSITORY" ? (
+      {item.readiness === "READY" && item.overrideIn.length > 0 ? (
+        <span className="mt-1 block text-xs text-muted-foreground">
+          {item.via ? "Not declared, so " : "No manifest declares it, so "}Aegis overrides it in{" "}
+          <span className="font-mono">{item.overrideIn.join(", ")}</span>.
+        </span>
+      ) : item.readiness === "NO_REPOSITORY" ? (
         <span className="mt-1 block text-xs text-muted-foreground">
           Ticket only until the service&apos;s repository is linked.{" "}
           <Link

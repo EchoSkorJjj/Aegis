@@ -18,7 +18,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * refused; the generated SBOM holds one npm component named after the repository ({@code <repo>-lib}).
  * A repository whose name contains {@code monorepo} gets syft's real shape instead: an npm project
  * ({@code web/package-lock.json}) and a Maven module ({@code svc/pom.xml}) as components, each declaring
- * libraries — see {@link RepositoryLayout}. A test can change what a repository holds ({@link #willScan}).
+ * libraries — see {@link RepositoryLayout}. One whose name contains {@code pnpmapp} has a pnpm lockfile in its
+ * checkout, which syft's graph of it misreads ({@link #pnpmApp}). A test can change what a repository holds
+ * ({@link #willScan}).
  */
 public class FakeGitAndSyft implements CommandRunner {
 
@@ -58,6 +60,10 @@ public class FakeGitAndSyft implements CommandRunner {
             Files.createDirectories(checkout);
             String name = url.substring(url.lastIndexOf('/') + 1).replace(".git", "");
             Files.writeString(checkout.resolve("repository-name"), name);
+            if (name.contains("pnpmapp")) {
+                Files.createDirectories(checkout.resolve("client"));
+                Files.writeString(checkout.resolve("client/pnpm-lock.yaml"), pnpmLockfile(name));
+            }
             return new CommandResult(0, "", "", false);
         }
         String name = Files.readString(workingDir.resolve("repo").resolve("repository-name"));
@@ -66,6 +72,7 @@ public class FakeGitAndSyft implements CommandRunner {
         Files.writeString(Path.of(target), scans.containsKey(name) ? scans.get(name)
                 : name.contains("monorepo") ? monorepo(name)
                 : name.contains("twolocks") ? twoLockfiles(name)
+                : name.contains("pnpmapp") ? pnpmApp(name)
                 : "{\"bomFormat\":\"CycloneDX\",\"specVersion\":\"1.5\",\"components\":["
                         + "{\"type\":\"library\",\"name\":\"" + name + "-lib\",\"version\":\"1.0.0\","
                         + "\"purl\":\"pkg:npm/" + name + "-lib@1.0.0\"}]}");
@@ -96,6 +103,57 @@ public class FakeGitAndSyft implements CommandRunner {
                 component("core", "pkg:maven/com.acme/" + name + "-core@3.0.0", "java-pom-cataloger", "/svc/pom.xml"),
                 component("managed", "pkg:maven/com.acme/" + name + "-managed", "java-pom-cataloger", "/svc/pom.xml")
                         .replace("\"purl\"", "\"version\":\"UNKNOWN\",\"purl\""));
+    }
+
+    /**
+     * syft's shape for a pnpm project in {@code client/}: its packages, with no project and no root edges, and
+     * {@code <name>-next}'s optional {@code <name>-sharp} left out of the graph — what {@link #pnpmLockfile} says.
+     */
+    static String pnpmApp(String name) {
+        return """
+                {"bomFormat":"CycloneDX","specVersion":"1.6",
+                 "metadata":{"component":{"bom-ref":"dir","type":"file","name":"/scan/repo"}},
+                 "components":[%s, %s, %s],
+                 "dependencies":[{"ref":"next","dependsOn":["react"]}]}
+                """.formatted(
+                versioned("next", name + "-next", "16.1.6", "/client/pnpm-lock.yaml"),
+                versioned("react", name + "-react", "19.2.3", "/client/pnpm-lock.yaml"),
+                versioned("sharp", name + "-sharp", "0.34.5", "/client/pnpm-lock.yaml"));
+    }
+
+    /** The lockfile behind {@link #pnpmApp}: the project declares next and react; next pulls sharp in, optionally. */
+    static String pnpmLockfile(String name) {
+        return """
+                lockfileVersion: '9.0'
+
+                importers:
+
+                  .:
+                    dependencies:
+                      %1$s-next:
+                        specifier: 16.1.6
+                        version: 16.1.6(%1$s-react@19.2.3)
+                      %1$s-react:
+                        specifier: 19.2.3
+                        version: 19.2.3
+
+                snapshots:
+
+                  %1$s-next@16.1.6(%1$s-react@19.2.3):
+                    dependencies:
+                      %1$s-react: 19.2.3
+                    optionalDependencies:
+                      %1$s-sharp: 0.34.5
+
+                  %1$s-react@19.2.3: {}
+
+                  %1$s-sharp@0.34.5: {}
+                """.formatted(name);
+    }
+
+    private static String versioned(String ref, String name, String version, String location) {
+        return component(ref, "pkg:npm/" + name + "@" + version, "javascript-lock-cataloger", location)
+                .replace("\"name\":\"" + ref + "\"", "\"name\":\"" + name + "\",\"version\":\"" + version + "\"");
     }
 
     /**

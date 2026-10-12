@@ -71,15 +71,16 @@ class UpgradeRecommendationIntegrationTest extends AbstractInventoryIntegrationT
         assertThat(lib).containsEntry("readiness", "READY").containsEntry("toVersion", "1.2.0")
                 .containsEntry("changeSignalId", estate.advisory().id().toString())
                 .containsEntry("manifestPaths", List.of("svc/pom.xml")).containsEntry("canDraft", true)
-                .containsEntry("serviceName", estate.service().getName()).containsEntry("reason", null);
+                .containsEntry("serviceName", estate.service().getName()).containsEntry("reason", null)
+                .containsEntry("overrideIn", List.of());
         assertThat(JsonPath.<String>read(lib, "$.vulnerabilities[0].id")).isEqualTo("CVE-2099-" + estate.tag() + "1");
         assertThat(JsonPath.<Double>read(lib, "$.score")).isPositive();
 
+        // Pulled in by the library the pom declares: the pom overrides it.
         Map<String, Object> deep = items.get(1);
-        assertThat(deep).containsEntry("readiness", "TRANSITIVE").containsEntry("toVersion", "2.1.0");
+        assertThat(deep).containsEntry("readiness", "READY").containsEntry("toVersion", "2.1.0")
+                .containsEntry("overrideIn", List.of("svc/pom.xml")).containsEntry("reason", null);
         assertThat(JsonPath.<String>read(deep, "$.via.name")).isEqualTo(estate.lib());
-        assertThat((String) deep.get("reason")).isEqualTo(estate.deep() + " comes in through " + estate.lib()
-                + "; upgrade " + estate.lib() + ", or pin " + estate.deep() + " to 2.1.0 by hand");
         assertThat(items.get(2)).containsEntry("readiness", "UNSUPPORTED");
         assertThat(items.get(3)).containsEntry("readiness", "NO_FIX");
         assertThat((String) items.get(3).get("reason")).contains("publishes no fixed version");
@@ -218,6 +219,47 @@ class UpgradeRecommendationIntegrationTest extends AbstractInventoryIntegrationT
                 .andExpect(jsonPath("$.pullRequests[0].edits[*].manifestPath", contains("svc/pom.xml")))
                 .andExpect(jsonPath("$.evidence").value(hasItem("Not automated: " + mixedLib + " 1.0.0 is also found in "
                         + "app/gradle.lockfile, which Aegis doesn't edit; upgrade it there by hand")));
+    }
+
+    /**
+     * An npm package another one pulls in is overridden in the project of each lockfile resolving what pulls it in; one
+     * a lockfile resolves for no declared package is overridden there too. Without a recorded lockfile, Aegis can't tell
+     * where, and says to re-import.
+     */
+    @Test
+    void anNpmPackageAnotherPullsInIsOverriddenWhereItsLockfileSays() throws Exception {
+        String tag = Long.toHexString(Math.abs(UUID.randomUUID().getMostSignificantBits()));
+        BusinessService service = inventory.createBusinessService(
+                "Lockfiles " + tag, BusinessCriticality.CRITICAL, ServiceExposure.INTERNET_FACING);
+        inventory.linkServiceRepository(service.getId(),
+                RepositoryUrl.parse("https://gitlab.com/acme/lockfiles-" + tag, List.of("gitlab.com")), null);
+        SoftwareComponent shadcn = inventory.createSoftwareComponent("npm", "shadcn-" + tag, "4.0.5");
+        SoftwareComponent hono = inventory.createSoftwareComponent("npm", "hono-" + tag, "4.12.7");
+        SoftwareComponent old = inventory.createSoftwareComponent("npm", "old-" + tag, "1.0.0");
+        SoftwareComponent oldDep = inventory.createSoftwareComponent("npm", "old-dep-" + tag, "1.0.0");
+        SoftwareComponent stray = inventory.createSoftwareComponent("npm", "stray-" + tag, "1.0.0");
+        inventory.addComponentDependency(shadcn.getId(), hono.getId());
+        inventory.addComponentDependency(old.getId(), oldDep.getId());
+        store.linkRepositoryComponent(service.getId(), shadcn.getId(), List.of("client/package.json"),
+                List.of("client/pnpm-lock.yaml"));
+        store.linkRepositoryComponent(service.getId(), old.getId(), List.of("legacy/package.json"));
+        store.linkRepositoryComponent(service.getId(), stray.getId(), List.of(), List.of("web/yarn.lock"));
+        advisory("CVE-2099-" + tag + "1", "9.1", AffectedProduct.ofPackage("npm", "hono-" + tag, null, "4.0.0", null, null, "4.13.7"));
+        advisory("CVE-2099-" + tag + "2", "8.1", AffectedProduct.ofPackage("npm", "old-dep-" + tag, null, "1.0.0", null, null, "1.1.0"));
+        advisory("CVE-2099-" + tag + "3", "7.1", AffectedProduct.ofPackage("npm", "stray-" + tag, null, "1.0.0", null, null, "1.1.0"));
+
+        Map<String, Map<String, Object>> byName = recommendations(service.getId(), as("ANALYST", UUID.randomUUID()))
+                .stream().collect(Collectors.toMap(item -> JsonPath.read(item, "$.component.name"), item -> item));
+
+        assertThat(byName.get("hono-" + tag)).containsEntry("readiness", "READY").containsEntry("toVersion", "4.13.7")
+                .containsEntry("overrideIn", List.of("client/pnpm-workspace.yaml"));
+        assertThat(byName.get("stray-" + tag)).containsEntry("readiness", "READY")
+                .containsEntry("overrideIn", List.of("web/package.json"));
+        assertThat(JsonPath.<Object>read(byName.get("stray-" + tag), "$.via")).isNull();
+        assertThat(byName.get("old-dep-" + tag)).containsEntry("readiness", "TRANSITIVE")
+                .containsEntry("reason", "old-dep-" + tag + " comes in through old-" + tag + "; re-import the service's "
+                        + "SBOM from its repository so Aegis can tell which lockfile resolves it and override it there, or "
+                        + "upgrade old-" + tag + " or pin old-dep-" + tag + " to 1.1.0 by hand");
     }
 
     /** A repository on a host no pull-request provider serves gets a ticket saying so, not a PR that fails later. */

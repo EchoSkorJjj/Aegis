@@ -16,7 +16,7 @@ function recommendation(overrides: Partial<UpgradeRecommendation>): UpgradeRecom
       { id: "CVE-2023-45857", changeSignalId: "signal-other", confidence: "CONFIRMED", cvssVersion: "3.1", cvssBaseScore: 6.5, severity: "MEDIUM" },
     ],
     score: 67.5, tier: "HIGH", material: true, toVersion: "1.15.0", changeSignalId: "signal-axios",
-    readiness: "READY", reason: null, proposal: null, response: null, canDraft: true,
+    readiness: "READY", reason: null, overrideIn: [], proposal: null, response: null, canDraft: true,
     ...overrides,
   };
 }
@@ -41,9 +41,15 @@ const RECOMMENDATIONS: UpgradeRecommendation[] = [
   recommendation({
     serviceId: EDU, serviceName: "EduHelper", component: { id: "follow-redirects", ecosystem: "npm", name: "follow-redirects", version: "1.15.4" },
     via: { id: "axios-165", ecosystem: "npm", name: "axios", version: "1.6.5" }, toVersion: "1.15.6", score: 9.0, tier: "LOW",
-    readiness: "TRANSITIVE", reason: "follow-redirects comes in through axios; upgrade axios, or pin follow-redirects to 1.15.6 by hand",
+    readiness: "TRANSITIVE", reason: "follow-redirects comes in through axios; re-import the service's SBOM from its "
+      + "repository so Aegis can tell which lockfile resolves it and override it there, or upgrade axios or pin "
+      + "follow-redirects to 1.15.6 by hand",
   }),
 ];
+
+const TRANSITIVE_REASON = "follow-redirects comes in through axios; re-import the service's SBOM from its repository so "
+  + "Aegis can tell which lockfile resolves it and override it there, or upgrade axios or pin follow-redirects to "
+  + "1.15.6 by hand";
 
 async function fakeBff(page: Page, role: Role, recommendations: UpgradeRecommendation[] = RECOMMENDATIONS) {
   const drafts: unknown[] = [];
@@ -138,11 +144,34 @@ test("a service's page lists its vulnerable dependencies, including those anothe
   await expect(vulnerable.getByRole("row")).toHaveCount(1 + 3);
   await expect(vulnerable.getByRole("columnheader", { name: "Service" })).toHaveCount(0);
   const transitive = vulnerable.getByRole("row").filter({ hasText: "follow-redirects" });
-  await expect(transitive).toContainText(
-    "Ticket only: follow-redirects comes in through axios; upgrade axios, or pin follow-redirects to 1.15.6 by hand");
+  await expect(transitive).toContainText(`Ticket only: ${TRANSITIVE_REASON}`);
   // Nothing to upgrade automatically still gets a response: its ticket alone.
   await expect(transitive.getByRole("button", { name: "Draft response" })).toBeVisible();
   expect([...new Set(listed)]).toEqual([EDU]);
+});
+
+test("a package another one pulls in is overridden where Aegis says, and one it can't override yet says why", async ({ page }) => {
+  await fakeBff(page, "ANALYST", [
+    recommendation({
+      serviceId: EDU, serviceName: "EduHelper", component: { id: "hono", ecosystem: "npm", name: "hono", version: "4.12.7" },
+      via: { id: "shadcn", ecosystem: "npm", name: "shadcn", version: "4.0.5" }, manifestPaths: ["client/package.json"],
+      toVersion: "4.13.7", score: 50.0, tier: "MEDIUM", overrideIn: ["client/pnpm-workspace.yaml"],
+    }),
+    RECOMMENDATIONS.find((item) => item.readiness === "TRANSITIVE")!,
+  ]);
+  await page.goto(`/inventory/services/${EDU}`);
+  const vulnerable = page.getByRole("region", { name: "Vulnerable dependencies" });
+
+  const hono = vulnerable.getByRole("row").filter({ hasText: "hono" });
+  await expect(hono).toContainText("4.12.7 → 4.13.7");
+  await expect(hono).toContainText("npm · through shadcn · client/package.json");
+  await expect(hono).toContainText("Not declared, so Aegis overrides it in client/pnpm-workspace.yaml.");
+  await expect(hono).not.toContainText("Ticket only");
+  await expect(hono.getByRole("button", { name: "Draft response" })).toBeVisible();
+
+  const followRedirects = vulnerable.getByRole("row").filter({ hasText: "follow-redirects" });
+  await expect(followRedirects).toContainText("npm · through axios");
+  await expect(followRedirects).toContainText(`Ticket only: ${TRANSITIVE_REASON}`);
 });
 
 test("the header names where you are, as the sidebar does", async ({ page }) => {

@@ -37,7 +37,8 @@ import org.springframework.stereotype.Service;
 /**
  * The upgrades Aegis recommends without anyone asking: every vulnerable dependency of the services the
  * caller can see, with the version that fixes it, how much it matters, whether Aegis can automate the pull
- * request, and the response already drafted for it, if any — highest impact first. Nobody has to know a CVE to find them; this is E9's queue of material
+ * request — bumping the declaration, or overriding a dependency another one pulls in — and the response already
+ * drafted for it, if any — highest impact first. Nobody has to know a CVE to find them; this is E9's queue of material
  * items, for dependency vulnerabilities. Recomputed per request from matching ({@link VulnerableDependencies},
  * {@link UpgradeTargets}) and scoring ({@link ImpactScorer}); a proposal is only drafted when a person asks.
  *
@@ -75,11 +76,17 @@ public class UpgradeRecommendations {
 
     /** Whether Aegis can draft the pull request now and, if not, what stands in the way. */
     public enum Readiness {
-        /** A direct dependency with a fixed version, a supported manifest and a linked repository. */
+        /**
+         * A fixed version, a linked repository, and a manifest Aegis edits: the one declaring the dependency, or — for
+         * one another dependency pulls in — the one its override goes to ({@code overrideIn}).
+         */
         READY,
         /** Everything but the repository: link it and the pull request can be drafted. */
         NO_REPOSITORY,
-        /** Pulled in by another dependency; upgrading that one, or pinning this one, is a person's call. */
+        /**
+         * Pulled in by another dependency, and Aegis can't tell where to override it — the import recorded no lockfile
+         * for an npm package, or what pulls it in is declared only in a file Aegis doesn't edit. The reason says which.
+         */
         TRANSITIVE,
         /**
          * Aegis can't open this pull request: an ecosystem it doesn't edit, a dependency found only in files it
@@ -99,8 +106,10 @@ public class UpgradeRecommendations {
     /**
      * One recommended upgrade. {@code changeSignalId} is the vulnerability a response answers — the most severe
      * one a fixed version clears, else the most severe one — and {@code toVersion} clears every other advisory
-     * with a fix too. {@code response} is the response already drafted for it: the one whose pull request
-     * upgrades this dependency, else the one for {@code changeSignalId} in this service.
+     * with a fix too. {@code overrideIn} is where the pull request overrides a dependency no manifest declares
+     * (client/pnpm-workspace.yaml, pom.xml), empty when it bumps a declaration instead. {@code response} is the
+     * response already drafted for it: the one whose pull request upgrades this dependency, else the one for
+     * {@code changeSignalId} in this service.
      */
     public record Recommendation(
             UUID serviceId,
@@ -117,6 +126,7 @@ public class UpgradeRecommendations {
             UUID changeSignalId,
             Readiness readiness,
             String reason,
+            List<String> overrideIn,
             ProposalRef proposal,
             ResponseDirectory.ResponseRef response) {
     }
@@ -189,18 +199,20 @@ public class UpgradeRecommendations {
 
         Readiness readiness;
         String reason;
+        List<String> overrideIn = List.of();
         Optional<ManifestEditor> editor = ManifestEditor.forEcosystem(component.ecosystem());
         String unsupportedHost;
-        if (dependency.via() != null) {
-            readiness = Readiness.TRANSITIVE;
-            reason = component.name() + " comes in through " + dependency.via().name() + "; upgrade "
-                    + dependency.via().name() + ", or pin " + component.name()
-                    + (toVersion == null ? "" : " to " + toVersion) + " by hand";
-        } else if (editor.isEmpty()) {
+        Overrides.Found overrides = editor.isPresent() && (dependency.via() != null || dependency.undeclared())
+                ? Overrides.find(component.ecosystem(), dependency.manifestPaths(), dependency.lockfilePaths()) : null;
+        if (editor.isEmpty()) {
             readiness = Readiness.UNSUPPORTED;
             reason = "Aegis drafts upgrades for Maven, npm and PyPI manifests; upgrade this "
                     + component.ecosystem() + " package by hand";
-        } else if (editor.get().manifestsFor(dependency.manifestPaths()).isEmpty()) {
+        } else if (overrides != null && overrides.targets().isEmpty()) {
+            readiness = Readiness.TRANSITIVE;
+            reason = Overrides.notOverridden(component.name(), null,
+                    dependency.via() == null ? null : dependency.via().name(), overrides.unavailable(), toVersion);
+        } else if (overrides == null && editor.get().manifestsFor(dependency.manifestPaths()).isEmpty()) {
             readiness = Readiness.UNSUPPORTED;
             reason = "Found in " + String.join(", ", dependency.manifestPaths())
                     + ", which Aegis doesn't edit; upgrade it by hand";
@@ -216,6 +228,9 @@ public class UpgradeRecommendations {
         } else {
             readiness = Readiness.READY;
             reason = null;
+            if (overrides != null) {
+                overrideIn = overrides.targets().stream().map(Overrides.Target::manifestPath).toList();
+            }
         }
         // Nothing to upgrade to still gets a response (a ticket alone): for the most severe vulnerability.
         UUID answered = remediated != null ? remediated : dependency.vulnerabilities().stream()
@@ -228,7 +243,8 @@ public class UpgradeRecommendations {
         }
         return new Recommendation(service.getId(), service.getName(), component, dependency.via(),
                 dependency.manifestPaths(), dependency.confidence(), dependency.vulnerabilities(), score,
-                scorer.tier(score), scorer.material(score), toVersion, answered, readiness, reason, proposal, response);
+                scorer.tier(score), scorer.material(score), toVersion, answered, readiness, reason, overrideIn, proposal,
+                response);
     }
 
     /** The severity term of the most severe vulnerability: its CVSS score, else its feed's severity word. */

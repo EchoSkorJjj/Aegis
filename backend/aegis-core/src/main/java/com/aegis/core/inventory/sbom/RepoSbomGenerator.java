@@ -98,6 +98,14 @@ class RepoSbomGenerator {
      * syft, and return the CycloneDX BOM.
      */
     CycloneDxBom generate(RepositoryUrl repo, String ref, CloneAccess access) {
+        return layout(repo, ref, access).bom();
+    }
+
+    /**
+     * Clone {@code repo} as {@link #generate} does, scan it with syft, and lay out what it holds: syft's BOM, with what
+     * the JavaScript lockfiles in the same checkout say about the packages syft found in them ({@link JsLockfiles}).
+     */
+    RepositoryLayout layout(RepositoryUrl repo, String ref, CloneAccess access) {
         String branch = RepositoryUrl.normalizeRef(ref);
         Path work;
         try {
@@ -111,7 +119,7 @@ class RepoSbomGenerator {
             enforceSizeCap(checkout);
             Path sbom = work.resolve("sbom.cdx.json");
             scan(checkout, sbom, work);
-            return parse(sbom);
+            return RepositoryLayout.of(parse(sbom), JsLockfiles.read(checkout));
         } finally {
             deleteRecursively(work);
         }

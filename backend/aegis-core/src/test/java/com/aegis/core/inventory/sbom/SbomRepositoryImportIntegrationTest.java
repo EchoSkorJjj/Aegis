@@ -176,6 +176,30 @@ class SbomRepositoryImportIntegrationTest extends AbstractInventoryIntegrationTe
     }
 
     @Test
+    void aPnpmProjectsLockfileSaysWhatItDeclaresAndWhatAnOptionalDependencyHangsBelow() throws Exception {
+        String name = "pnpmapp-" + UUID.randomUUID();
+        BusinessService service = linked("https://github.com/acme/" + name, null);
+        // What an import before this fix left behind: sharp, which nothing in syft's graph depended on, as declared.
+        SoftwareComponent sharp = inventory.createSoftwareComponent("npm", name + "-sharp", "0.34.5");
+        store.linkRepositoryComponent(service.getId(), sharp.getId(), List.of("client/package.json"));
+
+        mvc.perform(post(IMPORT, service.getId()).with(role("ANALYST"))).andExpect(status().isOk());
+
+        // react is declared though next depends on it; sharp is next's, not the project's.
+        assertThat(linksOf(service)).containsOnly(
+                Map.entry(name + "-next@16.1.6", "client/package.json"),
+                Map.entry(name + "-react@19.2.3", "client/package.json"));
+        assertThat(store.findServiceComponentLinksForServices(List.of(service.getId())))
+                .allSatisfy(link -> assertThat(link.lockfilePaths()).containsExactly("client/pnpm-lock.yaml"));
+        UUID next = store.findServiceComponentLinksForServices(List.of(service.getId())).stream()
+                .map(InventoryStore.ServiceComponentLink::componentId)
+                .filter(id -> inventory.getSoftwareComponent(id).getName().equals(name + "-next"))
+                .findFirst().orElseThrow();
+        assertThat(store.findDependenciesOf(List.of(next), List.of(service.getId())))
+                .extracting(InventoryStore.ComponentDependencyLink::dependencyId).contains(sharp.getId());
+    }
+
+    @Test
     void theSameVersionDeclaredInTwoManifestsIsLinkedWithBoth() throws Exception {
         String name = "twolocks-" + UUID.randomUUID();
         BusinessService service = linked("https://github.com/acme/" + name, null);
