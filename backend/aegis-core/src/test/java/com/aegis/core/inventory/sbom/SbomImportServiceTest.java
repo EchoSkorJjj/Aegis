@@ -84,7 +84,7 @@ class SbomImportServiceTest {
                 .thenAnswer(call -> serviceComponents.contains((UUID) call.getArgument(1)));
         doAnswer(call -> serviceComponents.add(call.getArgument(1))).when(store).addServiceComponent(any(), any());
         doAnswer(call -> serviceComponents.add(call.getArgument(1)))
-                .when(store).linkRepositoryComponent(any(), any(), any());
+                .when(store).linkRepositoryComponent(any(), any(), any(), any());
     }
 
     @Test

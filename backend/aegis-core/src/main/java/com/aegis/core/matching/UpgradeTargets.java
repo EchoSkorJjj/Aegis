@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.UUID;
 
@@ -67,6 +68,15 @@ public class UpgradeTargets {
             checked = List.copyOf(checked);
             notCleared = List.copyOf(notCleared);
         }
+    }
+
+    /**
+     * The higher of two versions of a package in {@code ecosystem}, by that ecosystem's ordering; {@code left} when
+     * they can't be compared.
+     */
+    public static String higher(String ecosystem, String left, String right) {
+        OptionalInt order = Ecosystems.versionScheme(ecosystem).compare(left, right);
+        return order.isPresent() && order.getAsInt() < 0 ? right : left;
     }
 
     @Transactional(readOnly = true)

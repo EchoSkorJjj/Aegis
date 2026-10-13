@@ -502,15 +502,36 @@ export interface ChangeImpactResponse {
  */
 export type UpgradeProposalStatus = "PROPOSED" | "OPENING" | "OPENED" | "FAILED" | "DISMISSED";
 
-/** One package moved from one version to another in one manifest of the service's repository. */
+/**
+ * How an edit pins a package no manifest declares — one another package pulls in. `via` names what pulls it in
+ * (null: a lockfile resolves it for nothing the project declares); `packageManager` is whose syntax an npm package's
+ * override takes — npm (`overrides` in package.json), pnpm (`overrides` in pnpm-workspace.yaml) or yarn
+ * (`resolutions` in package.json) — and null for Maven (`dependencyManagement`) and PyPI (a requirement of its own).
+ */
+export interface VersionOverride {
+  via: string | null;
+  packageManager: "npm" | "pnpm" | "yarn" | null;
+  /**
+   * Only follows a bump elsewhere in the pull request: an override the file already has of the declared package is
+   * raised with it, and a file without one is left alone.
+   */
+  ifPresent?: boolean;
+}
+
+/**
+ * One package moved from one version to another in one manifest of the service's repository: its declaration bumped,
+ * or — when `override` is set — its version overridden for the whole project, since no manifest declares it.
+ */
 export interface UpgradeEdit {
   componentId: string;
   ecosystem: string;
   packageName: string;
   fromVersion: string;
   toVersion: string;
-  /** Repository-relative: client/package.json, pom.xml. */
+  /** Repository-relative: client/package.json, pom.xml, client/pnpm-workspace.yaml. */
   manifestPath: string;
+  /** Null (or absent, on a pull request drafted before overrides) when the manifest's declaration is bumped. */
+  override?: VersionOverride | null;
 }
 
 /**
@@ -549,9 +570,11 @@ export interface UpgradeProposal {
 }
 
 /**
- * Whether Aegis can draft an upgrade's pull request now: READY, or what stands in the way — the service's
- * repository isn't linked, the package comes in through another dependency, its ecosystem's manifest isn't
- * one Aegis edits, or no advisory publishes a version that fixes it.
+ * Whether Aegis can draft an upgrade's pull request now: READY — bumping the declaration, or overriding a package
+ * another one pulls in (`overrideIn`) — or what stands in the way: the service's repository isn't linked, a package
+ * another one pulls in can't be overridden yet (TRANSITIVE: no lockfile recorded, or what pulls it in is declared only
+ * in a file Aegis doesn't edit), its ecosystem's manifest isn't one Aegis edits, or no advisory publishes a version
+ * that fixes it.
  */
 export type UpgradeReadiness = "READY" | "NO_REPOSITORY" | "TRANSITIVE" | "UNSUPPORTED" | "NO_FIX";
 
@@ -594,6 +617,11 @@ export interface UpgradeRecommendation {
   readiness: UpgradeReadiness;
   /** Why it isn't READY. */
   reason: string | null;
+  /**
+   * Where the pull request overrides it (client/pnpm-workspace.yaml, svc/pom.xml) when no manifest declares it;
+   * empty when it bumps a declaration.
+   */
+  overrideIn: string[];
   /** The current pull request that upgrades it, if any, and the response it belongs to (null: drafted on its own). */
   proposal: {
     id: string;

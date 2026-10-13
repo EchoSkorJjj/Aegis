@@ -72,7 +72,7 @@ public class SbomImportService {
 
     /**
      * An SBOM generated from the service's repository ({@link RepositoryLayout}): each direct dependency
-     * is linked with every manifest that declares it; what an earlier import from the repository linked and the
+     * is linked with every manifest that declares it and every JavaScript lockfile that resolves it; what an earlier import from the repository linked and the
      * repository no longer declares is unlinked, and so are the repository's own packages, which an earlier
      * import may have linked as components.
      */
@@ -165,11 +165,18 @@ public class SbomImportService {
         idsByCoordinates.values().stream().filter(id -> !dependedOn.contains(id)).forEach(topLevel::add);
         // Several bom-refs can be one component (the same version in two lockfiles): every manifest counts.
         Map<UUID, Set<String>> manifests = new HashMap<>();
+        Map<UUID, Set<String>> lockfiles = new HashMap<>();
         if (repository != null) {
             repository.manifestsByRef().forEach((ref, paths) -> {
                 UUID id = idsByRef.get(ref);
                 if (id != null) {
                     manifests.computeIfAbsent(id, component -> new LinkedHashSet<>()).addAll(paths);
+                }
+            });
+            repository.lockfilesByRef().forEach((ref, paths) -> {
+                UUID id = idsByRef.get(ref);
+                if (id != null) {
+                    lockfiles.computeIfAbsent(id, component -> new LinkedHashSet<>()).addAll(paths);
                 }
             });
         }
@@ -178,7 +185,8 @@ public class SbomImportService {
             boolean existing = store.serviceComponentExists(serviceId, componentId);
             if (repository != null) {
                 store.linkRepositoryComponent(serviceId, componentId,
-                        List.copyOf(manifests.getOrDefault(componentId, Set.of())));
+                        List.copyOf(manifests.getOrDefault(componentId, Set.of())),
+                        List.copyOf(lockfiles.getOrDefault(componentId, Set.of())));
             } else if (!existing) {
                 store.addServiceComponent(serviceId, componentId);
             }

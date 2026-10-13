@@ -171,6 +171,26 @@ test("a response's pull request shows every edit, and is decided on its response
   await expect(decision.getByRole("button")).toHaveCount(0);
 });
 
+test("an override that only follows a bump is a note under the changes, not a change of its own", async ({ page }) => {
+  const hono: UpgradeEdit = {
+    componentId: "hono", ecosystem: "npm", packageName: "hono", fromVersion: "4.12.7", toVersion: "4.13.7",
+    manifestPath: "packages/web/package.json", override: null,
+  };
+  await fakeBff(page, "ANALYST", {
+    proposals: [proposal({
+      riskTicketId: "ticket-1", title: "Upgrade hono from 4.12.7 to 4.13.7 (CVE-2026-39407)",
+      edits: [hono, { ...hono, manifestPath: "pnpm-workspace.yaml", override: { via: null, packageManager: "pnpm", ifPresent: true } }],
+    })],
+  });
+  await page.goto("/responses/upgrades/proposal-1");
+  const changes = page.getByRole("table", { name: "What the pull request changes" });
+  await expect(changes.getByRole("row")).toHaveCount(1 + 1);
+  await expect(changes).toContainText("packages/web/package.json");
+  await expect(changes).not.toContainText("pnpm-workspace.yaml");
+  await expect(page.getByText("already overrides hono, the override is raised to the new version too", { exact: false }))
+    .toContainText("Where pnpm-workspace.yaml already overrides hono");
+});
+
 test("one drafted on its own: approving opens a draft pull request, and the body is shown as text", async ({ page }) => {
   const { writes } = await fakeBff(page, "ANALYST", { proposals: [proposal()] });
   await page.goto("/responses/upgrades/proposal-1");

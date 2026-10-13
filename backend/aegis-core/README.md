@@ -287,9 +287,11 @@ Each item carries the fixed version (`UpgradeTargets`, clearing every advisory w
 score (`ImpactScorer`: severity x exposure x criticality), every manifest declaring it (`manifestPaths`),
 the vulnerability a response would answer (`changeSignalId`), the response already drafted for it
 (`response`, through the ticket module's `ResponseDirectory`) and the pull request upgrading it
-(`proposal`), and a readiness: `READY`, `NO_REPOSITORY` (link it), `TRANSITIVE` (another package pulls it
-in — upgrade that one or pin this), `UNSUPPORTED` (an ecosystem Aegis does not edit) or `NO_FIX`, with the
-reason, plus `canDraft` for the caller. Recomputed per request, in a fixed number of batched lookups however
+(`proposal`), and a readiness: `READY` — bumping its declaration, or, for a package another one pulls in,
+overriding it in the files `overrideIn` names (below) — `NO_REPOSITORY` (link it), `TRANSITIVE` (another
+package pulls it in and Aegis can't tell where to override it: no lockfile recorded for an npm package, or what
+pulls it in is declared only in a file Aegis doesn't edit), `UNSUPPORTED` (an ecosystem or file Aegis does not
+edit) or `NO_FIX`, with the reason, plus `canDraft` for the caller. Recomputed per request, in a fixed number of batched lookups however
 many services there are: `VulnerableDependencies.find` loads every advisory naming the packages, and each
 target is worked out in memory from them (`UpgradeTargets.resolve(vulnerability, component, known)` — the
 same answer drafting gets, which a test pins). Nothing is drafted until a person clicks **Draft response**:
@@ -329,8 +331,10 @@ that fixes it, drafted and approved together. Nothing leaves Aegis without an ap
 - **One pull request per vulnerability per repository** (`UpgradeProposalService.plan`): every direct
   dependency the vulnerability matches for the service, in **every manifest** the SBOM import found it
   declared in (V26: `business_service_components.manifest_paths`; the ecosystem's manifest at the root only
-  when nothing was recorded — an uploaded SBOM, a component linked by hand). A dependency another current PR
-  already upgrades is left to it; what can't be automated — transitive, an unsupported ecosystem, no fix, no
+  when nothing was recorded — an uploaded SBOM, a component linked by hand), and **every package another one
+  pulls in, overridden** in each project that resolves it (below). A dependency another current PR
+  already upgrades is left to it; what can't be automated — an override with no recorded lockfile to place it
+  by, an unsupported ecosystem, no fix, no
   linked repository, **found only in files Aegis doesn't edit** (a Gradle lockfile, `poetry.lock`,
   `requirements-dev.txt`, a jar), or **a repository host no pull-request provider serves** (only the GitHub App
   opens PRs, so GitLab and Bitbucket get tickets) — is recorded on the ticket as `Not automated: …` evidence
@@ -343,12 +347,30 @@ that fixes it, drafted and approved together. Nothing leaves Aegis without an ap
   vulnerable). A remediated range with no published fix, or a version that cannot be compared, is not
   automated; another advisory without a fix is reported in the PR body rather than blocking.
 - **The edits are deterministic and minimal**: Maven `pom.xml` (the dependency's `<version>` or the
-  property it reads), npm `package.json` (keeping `^`/`~`/`>=`) and PyPI `requirements.txt` (`==` pins). A
-  parent-managed version or an unfamiliar spec is refused with the reason, never approximated. Aegis runs no
+  property it reads — set in the pom itself when only a parent defines it; a version a parent POM or BOM manages
+  is pinned in the pom's own `<dependencyManagement>`), npm `package.json` (keeping `^`/`~`/`>=`) and PyPI
+  `requirements.txt` (`==` pins; a bare requirement or a lone lower bound gets the fix as its lower bound). An
+  unfamiliar spec is refused with the reason, never approximated. Aegis runs no
   package manager, so an npm PR leaves the lockfile beside each `package.json` to the reviewer: it opens with
   **Finish it before merging**, and its first checklist item names every folder whose lockfile to refresh and
   commit to the branch. Until that is done the lockfile still pins the old version — `npm ci` refuses the
   mismatch, and the next SBOM import still finds the vulnerable version.
+- **A package another one pulls in is overridden** (`Overrides`, `ManifestEditor.override`): the project pins its
+  version, so every copy of it in the tree moves to the fixed one, even where what pulls it in asks for an older
+  range. Where the override goes is the project that resolves it. For npm, that is the project of each lockfile the
+  import recorded for the dependency that pulls it in (V39): npm's `overrides` in that `package.json`, yarn's
+  `resolutions` there, pnpm's `overrides` in its `pnpm-workspace.yaml` (pnpm 10 reads it there, pnpm 11 only
+  there; the file is created when missing). For Maven, an entry in the `<dependencyManagement>` of each pom
+  declaring what pulls it in; for PyPI, a requirement of its own in each `requirements.txt` that does (`==` when
+  the file pins everything that way, else `>=`). An npm override asks for `^` the fixed version; several versions of
+  one package overridden in one file take the highest target. The PR marks each override with what pulls it in and
+  explains the mechanism; a package a lockfile resolves that no manifest declares is overridden the same way.
+  Without a recorded lockfile (an import before V39) an npm one is `TRANSITIVE` until the service is re-imported.
+  An override stays until a person removes it, and the next fix raises it in place. When a package the project
+  overrides is (or becomes) declared, its bump takes the override along: in the same `package.json` it is set to the
+  new declaration (npm refuses an override of a direct dependency at any other spec), and an override in the
+  project's root `package.json` or `pnpm-workspace.yaml` is raised by an edit that only follows the bump
+  (`VersionOverride.ifPresent`) — left alone, and the file untouched, when there is none.
 - **The ticket is filed first, then the PR opens under its key** (`SEC-12: Upgrade axios to 1.8.2 in 2
   manifests (CVE-…)`, and in the body), so the tracker links them — with the GitHub for Jira app, the issue
   shows its PR, and a Jira Automation rule can close the issue when the PR merges ([JIRA.md](JIRA.md)); Aegis
@@ -712,7 +734,19 @@ manifest_paths`, **V26**, replacing V20's single path: `client/package.json`, `b
 `package.json` beside a pnpm/yarn lockfile; and a file Aegis doesn't edit as itself — `app/gradle.lockfile`,
 `poetry.lock` — so an upgrade never guesses a manifest instead). The same version declared in two projects is one component that syft
 reports with a location for each, so its link lists both, and a response's upgrade pull request edits every
-one of them. Services imported before V26 keep the one manifest V20 recorded; re-import them. A version syft could
+one of them. Services imported before V26 keep the one manifest V20 recorded; re-import them.
+
+**A JavaScript lockfile says what is declared (V39).** syft reports every package a lockfile pins, but not which
+ones the project itself declares, and it drops optional dependencies from the graph (npm and pnpm): taken
+literally, any package nothing depended on looked declared — `sharp` and every platform binary next pulls in
+optionally among them, whose upgrades then failed when the PR opened — and a declared package that another one
+also depends on (react, under next) looked transitive. So the import reads each lockfile in the same checkout
+(`inventory.sbom.JsLockfiles`: npm lockfile versions 1–3, pnpm 5–9 with workspaces, yarn classic and berry): a
+package is direct when one of the lockfile's projects declares it, recorded with that project's `package.json`,
+and the lockfile's own edges, optional ones included, hang the rest below what pulls them in. Each direct
+dependency also records the lockfiles resolving it (`business_service_components.lockfile_paths`), which is where an
+override of what it pulls in belongs. A lockfile that can't be read leaves its packages as syft's graph says.
+Services imported before V39 keep their old links until re-imported. A version syft could
 not resolve (`UNKNOWN`, a parent-managed Maven version) is skipped rather than imported.
 
 **A re-import follows the repository (V28).** An import from the repository reads everything it declares, so it

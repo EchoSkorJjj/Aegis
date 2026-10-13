@@ -133,6 +133,62 @@ class RepositoryLayoutTest {
     }
 
     @Test
+    void aLockfileAegisReadSaysWhatIsDeclaredAndHangsOptionalDependenciesBelowWhatPullsThemIn() {
+        // syft's shape for a pnpm project: no project package, no root edges, and next's optional sharp left out.
+        String lockfile = "/client/pnpm-lock.yaml";
+        Component next = syft("pkg:npm/next@16.1.6", "next", "16.1.6", "javascript-lock-cataloger", lockfile);
+        Component react = syft("pkg:npm/react@19.2.3", "react", "19.2.3", "javascript-lock-cataloger", lockfile);
+        Component sharp = syft("pkg:npm/sharp@0.34.5", "sharp", "0.34.5", "javascript-lock-cataloger", lockfile);
+        Component shadcn = syft("pkg:npm/shadcn@4.0.5", "shadcn", "4.0.5", "javascript-lock-cataloger", lockfile);
+        Component hono = syft("pkg:npm/hono@4.12.7", "hono", "4.12.7", "javascript-lock-cataloger", lockfile);
+        Component stray = syft("pkg:npm/stray@1.0.0", "stray", "1.0.0", "javascript-lock-cataloger", lockfile);
+        Component pom = syft("pkg:maven/org.acme/lib@2.0.0", "lib", "2.0.0", "java-pom-cataloger", "/svc/pom.xml");
+        CycloneDxBom bom = new CycloneDxBom("CycloneDX", "1.6", new Metadata(directory()),
+                List.of(next, react, sharp, shadcn, hono, stray, pom),
+                List.of(new Dependency(next.ref(), List.of(react.ref())), new Dependency(shadcn.ref(), List.of(hono.ref()))));
+        JsLockfiles.Lockfile read = new JsLockfiles.Lockfile("client/pnpm-lock.yaml", JsLockfiles.Manager.PNPM,
+                List.of(new JsLockfiles.Project("client/package.json", null, Set.of(new JsLockfiles.Pkg("next", "16.1.6"),
+                        new JsLockfiles.Pkg("react", "19.2.3"), new JsLockfiles.Pkg("shadcn", "4.0.5")))),
+                Set.of(new JsLockfiles.Edge(new JsLockfiles.Pkg("next", "16.1.6"), new JsLockfiles.Pkg("sharp", "0.34.5"))));
+
+        RepositoryLayout layout = RepositoryLayout.of(bom, List.of(read));
+
+        // react is declared though next depends on it; sharp is next's, not the project's; the pom still counts by
+        // syft's graph, since no lockfile says otherwise.
+        assertThat(names(layout, dependsOn(layout, "dir-root"))).containsExactlyInAnyOrder("next", "react", "shadcn");
+        assertThat(dependsOn(layout, next.ref())).containsExactlyInAnyOrder(react.ref(), sharp.ref());
+        assertThat(layout.manifestsByRef()).containsEntry(next.ref(), List.of("client/package.json"))
+                .containsEntry(react.ref(), List.of("client/package.json"))
+                .containsEntry(pom.ref(), List.of("svc/pom.xml"))
+                .doesNotContainKeys(sharp.ref(), hono.ref(), stray.ref());
+        assertThat(layout.lockfilesByRef()).containsEntry(next.ref(), List.of("client/pnpm-lock.yaml"))
+                .containsEntry(shadcn.ref(), List.of("client/pnpm-lock.yaml"))
+                // Resolved for no declared package: kept with its lockfile, so an upgrade overrides it.
+                .containsEntry(stray.ref(), List.of("client/pnpm-lock.yaml"))
+                .doesNotContainKeys(sharp.ref(), hono.ref(), pom.ref());
+    }
+
+    @Test
+    void aYarnBerryWorkspaceIsTheRepositoryNotAComponent() {
+        String lockfile = "/yarn.lock";
+        Component app = syft("pkg:npm/app@0.0.0-use.local", "app", "0.0.0-use.local", "javascript-lock-cataloger", lockfile);
+        Component next = syft("pkg:npm/next@16.1.6", "next", "16.1.6", "javascript-lock-cataloger", lockfile);
+        CycloneDxBom bom = new CycloneDxBom("CycloneDX", "1.6", new Metadata(directory()), List.of(app, next),
+                List.of(new Dependency(app.ref(), List.of(next.ref()))));
+        JsLockfiles.Pkg self = new JsLockfiles.Pkg("app", "0.0.0-use.local");
+        JsLockfiles.Lockfile read = new JsLockfiles.Lockfile("yarn.lock", JsLockfiles.Manager.YARN,
+                List.of(new JsLockfiles.Project("package.json", self, Set.of(new JsLockfiles.Pkg("next", "16.1.6")))),
+                Set.of());
+
+        RepositoryLayout layout = RepositoryLayout.of(bom, List.of(read));
+
+        assertThat(layout.projects()).extracting(Component::name).containsExactly("app");
+        assertThat(dependsOn(layout, "dir-root")).containsExactly(next.ref());
+        assertThat(layout.manifestsByRef()).containsExactly(Map.entry(next.ref(), List.of("package.json")));
+        assertThat(layout.lockfilesByRef()).containsExactly(Map.entry(next.ref(), List.of("yarn.lock")));
+    }
+
+    @Test
     void aPackageRemembersTheFileDeclaringItEvenOneAegisDoesNotEdit() {
         assertThat(RepositoryLayout.manifestOf(located("/requirements.txt"))).isEqualTo("requirements.txt");
         assertThat(RepositoryLayout.manifestOf(located("/web/yarn.lock"))).isEqualTo("web/package.json");

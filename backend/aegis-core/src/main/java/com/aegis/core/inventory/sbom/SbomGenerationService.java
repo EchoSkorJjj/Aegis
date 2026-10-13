@@ -52,7 +52,7 @@ public class SbomGenerationService {
         // Re-validated against the current allow-list: a host removed since the link was saved is refused.
         RepositoryUrl repository = RepositoryUrl.parse(service.getRepositoryUrl(), properties.allowedHosts());
         CloneAccess access = access(repository, token, username);
-        RepositoryLayout layout = RepositoryLayout.of(generator.generate(repository, service.getRepositoryBranch(), access));
+        RepositoryLayout layout = generator.layout(repository, service.getRepositoryBranch(), access);
         return importer.importRepository(serviceId, layout, switch (access.source()) {
             case TOKEN -> SbomImportSource.TOKEN;
             case INTEGRATION -> SbomImportSource.INTEGRATION;

@@ -29,6 +29,8 @@ class ServiceComponentEntity {
     @Column(name = "org_id", nullable = false) private UUID orgId;
     @JdbcTypeCode(SqlTypes.ARRAY)
     @Column(name = "manifest_paths", nullable = false, columnDefinition = "text[]") private String[] manifestPaths = new String[0];
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "lockfile_paths", nullable = false, columnDefinition = "text[]") private String[] lockfilePaths = new String[0];
     @Column(name = "from_repository", nullable = false) private boolean fromRepository;
     @CreationTimestamp(source = SourceType.DB)
     @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
@@ -56,6 +58,15 @@ class ServiceComponentEntity {
 
     void setManifestPaths(List<String> manifestPaths) {
         this.manifestPaths = manifestPaths.toArray(String[]::new);
+    }
+
+    /** The JavaScript lockfiles resolving it, as the last import from the repository read them (V39). */
+    List<String> getLockfilePaths() {
+        return lockfilePaths == null ? List.of() : List.of(lockfilePaths);
+    }
+
+    void setLockfilePaths(List<String> lockfilePaths) {
+        this.lockfilePaths = lockfilePaths.toArray(String[]::new);
     }
 
     /** An import from the service's repository linked it, so a later one unlinks it once the repository drops it. */

@@ -764,22 +764,57 @@ function PullRequestSection({
         </div>
       ) : (
         <div className="space-y-3 p-4 text-sm">
-          <p className="text-muted-foreground">
-            {leftOut
-              ? `Left out by ${personName(leftOut.decidedBy)} on ${formatDateTime(leftOut.decidedAt)}${
-                  leftOut.dismissReason ? `: ${leftOut.dismissReason}` : "."
-                }`
-              : "None: Aegis couldn't automate one when the response was drafted. The evidence below says why."}
-          </p>
+          {leftOut ? (
+            <p className="text-muted-foreground">
+              {`Left out by ${personName(leftOut.decidedBy)} on ${formatDateTime(leftOut.decidedAt)}${
+                leftOut.dismissReason ? `: ${leftOut.dismissReason}` : "."
+              }`}
+            </p>
+          ) : (
+            <NotAutomated evidence={ticket.evidence} />
+          )}
           {canDecide && ticket.status !== "DISMISSED" && (
-            <Button variant="outline" size="sm" disabled={busy !== null} onClick={onDraft}>
-              <GitPullRequest />
-              {busy === "pr-draft" ? "Drafting…" : "Draft upgrade pull request"}
-            </Button>
+            <div className="space-y-1.5">
+              <Button variant="outline" size="sm" disabled={busy !== null} onClick={onDraft}>
+                <GitPullRequest />
+                {busy === "pr-draft" ? "Checking…" : leftOut ? "Draft upgrade pull request" : "Check again"}
+              </Button>
+              {!leftOut && (
+                <p className="text-xs text-muted-foreground">
+                  Once the cause is fixed (the repository linked, the SBOM re-imported, a fixed version published), Aegis
+                  drafts the pull request.
+                </p>
+              )}
+            </div>
           )}
         </div>
       )}
     </section>
+  );
+}
+
+/** The prefix the response's evidence gives each reason Aegis couldn't automate the pull request. */
+const NOT_AUTOMATED = "Not automated: ";
+
+/** Why there is no pull request, as recorded when the response was drafted: its "Not automated" evidence. */
+function NotAutomated({ evidence }: { evidence: string[] }) {
+  const reasons = evidence.filter((line) => line.startsWith(NOT_AUTOMATED)).map((line) => line.slice(NOT_AUTOMATED.length));
+  if (reasons.length === 0) {
+    return <p className="text-muted-foreground">None: Aegis couldn&apos;t automate one when the response was drafted.</p>;
+  }
+  return (
+    <div className="space-y-1.5">
+      <p className="text-muted-foreground">
+        None: Aegis couldn&apos;t automate one when the response was drafted, because:
+      </p>
+      <ul className="list-disc space-y-1 pl-5">
+        {reasons.map((reason, index) => (
+          <li key={index} className="break-words">
+            {reason}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

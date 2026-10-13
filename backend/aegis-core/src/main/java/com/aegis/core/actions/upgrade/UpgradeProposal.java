@@ -52,9 +52,57 @@ public record UpgradeProposal(
         edits = List.copyOf(edits);
     }
 
-    /** One package moved from one version to another in one manifest. */
+    /**
+     * One package moved from one version to another in one manifest. {@code override} is null when the manifest
+     * declares the package and that declaration is bumped. Otherwise no manifest declares it — another package pulls it
+     * in — and the manifest overrides its version for the whole project instead ({@link ManifestEditor#override}).
+     */
     public record Edit(UUID componentId, String ecosystem, String packageName, String fromVersion, String toVersion,
-                       String manifestPath) {
+                       String manifestPath, VersionOverride override) {
+
+        /** A declared package's version, bumped in the manifest that declares it. */
+        public Edit(UUID componentId, String ecosystem, String packageName, String fromVersion, String toVersion,
+                String manifestPath) {
+            this(componentId, ecosystem, packageName, fromVersion, toVersion, manifestPath, null);
+        }
+
+        Edit to(String version) {
+            return new Edit(componentId, ecosystem, packageName, fromVersion, version, manifestPath, override);
+        }
+
+        /** Only raises an override the file may already have, following a bump elsewhere in the pull request. */
+        public boolean follows() {
+            return override != null && override.ifPresent();
+        }
+
+        /** The edits a person reads as the pull request's changes: every bump and override, not what only follows. */
+        static List<Edit> shown(List<Edit> edits) {
+            return edits.stream().filter(edit -> !edit.follows()).toList();
+        }
+    }
+
+    /**
+     * How an edit pins a package no manifest declares. {@code via} names the declared dependencies that pull it in
+     * ({@code shadcn}), or is null for a package a lockfile resolves that no declared dependency leads to.
+     * {@code packageManager} is whose syntax an npm package's override takes — {@code npm} ({@code overrides} in
+     * package.json), {@code pnpm} ({@code overrides} in pnpm-workspace.yaml) or {@code yarn} ({@code resolutions} in
+     * package.json) — and null for Maven ({@code dependencyManagement}) and PyPI (a requirement of its own).
+     *
+     * <p>{@code ifPresent} marks an edit that only follows a bump: the package is declared and its declaration moves
+     * elsewhere in the pull request, and an override of it the project already has — in its workspace root or
+     * pnpm-workspace.yaml — is raised with it, or the override would keep the old version. Without one the file is
+     * left alone ({@link ManifestEditor#raiseOverride}).
+     */
+    public record VersionOverride(String via, String packageManager, boolean ifPresent) {
+
+        public VersionOverride(String via, String packageManager) {
+            this(via, packageManager, false);
+        }
+
+        /** An existing override of a declared package, raised with its declaration if the file has one. */
+        static VersionOverride following(String packageManager) {
+            return new VersionOverride(null, packageManager, true);
+        }
     }
 
     /** Approved by {@code approver}; the draft pull request is about to be opened under {@code title}. */

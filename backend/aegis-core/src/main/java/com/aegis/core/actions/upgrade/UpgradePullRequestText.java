@@ -113,27 +113,54 @@ final class UpgradePullRequestText {
     }
 
     static String body(Facts facts, Rationale rationale) {
-        List<Edit> edits = facts.edits();
+        List<Edit> edits = Edit.shown(facts.edits());
+        List<Edit> following = facts.edits().stream().filter(Edit::follows).toList();
         boolean single = edits.size() == 1;
         StringBuilder body = new StringBuilder();
         body.append("## Safe upgrade proposed by Aegis\n\n");
         if (single) {
             Edit edit = edits.getFirst();
-            body.append("Upgrades ").append(code(edit.packageName()))
+            body.append(edit.override() == null ? "Upgrades " : "Overrides ").append(code(edit.packageName()))
                     .append(" from **").append(inline(edit.fromVersion())).append("** to **")
                     .append(inline(edit.toVersion())).append("** in ").append(code(edit.manifestPath()))
                     .append(" to remediate **").append(inline(facts.vulnerabilityId())).append("** for the ")
-                    .append(inline(facts.serviceName())).append(" service.\n\n");
+                    .append(inline(facts.serviceName())).append(" service.")
+                    .append(edit.override() == null ? "" : " " + pulledIn(edit)).append("\n\n");
         } else {
             body.append("Remediates **").append(inline(facts.vulnerabilityId())).append("** for the ")
-                    .append(inline(facts.serviceName())).append(" service by upgrading every declaration below.\n\n")
+                    .append(inline(facts.serviceName())).append(" service by upgrading every declaration below")
+                    .append(edits.stream().anyMatch(edit -> edit.override() != null)
+                            ? ", and overriding what the project pulls in without declaring it" : "")
+                    .append(".\n\n")
                     .append("| Package | Manifest | From | To |\n|---|---|---|---|\n");
             for (Edit edit : edits) {
-                body.append("| ").append(cellCode(edit.packageName())).append(" | ").append(cellCode(edit.manifestPath()))
+                body.append("| ").append(cellCode(edit.packageName())).append(edit.override() == null ? ""
+                                : " (override" + (edit.override().via() == null ? ""
+                                        : ", through " + cellCode(edit.override().via())) + ")")
+                        .append(" | ").append(cellCode(edit.manifestPath()))
                         .append(" | ").append(cell(edit.fromVersion())).append(" | ").append(cell(edit.toVersion()))
                         .append(" |\n");
             }
             body.append('\n');
+        }
+        if (!following.isEmpty()) {
+            body.append("**Overrides move with it:** where ")
+                    .append(and(following.stream().map(Edit::manifestPath).distinct().map(UpgradePullRequestText::code)
+                            .toList()))
+                    .append(" already ").append(following.size() > 1 ? "override " : "overrides ")
+                    .append(and(following.stream().map(Edit::packageName).distinct().map(UpgradePullRequestText::code)
+                            .toList()))
+                    .append(", the override is raised to the new version too, so it doesn't keep the old one. A file ")
+                    .append("without one is left alone.\n\n");
+        }
+        List<String> mechanisms = edits.stream().filter(edit -> edit.override() != null)
+                .map(UpgradePullRequestText::mechanism).distinct().toList();
+        if (!mechanisms.isEmpty()) {
+            body.append("**How the override works:** no manifest declares the package, so Aegis pins its version for ")
+                    .append("the whole project with ").append(and(mechanisms)).append(". Every copy of it in the ")
+                    .append("dependency tree moves to the fixed version, even where what pulls it in asks for an older ")
+                    .append("range: check that those packages still work with it. Once they require a fixed version ")
+                    .append("themselves, the override can go.\n\n");
         }
 
         if (!facts.followUps().isEmpty()) {
@@ -212,6 +239,27 @@ final class UpgradePullRequestText {
                 .append("Opened as a **draft** by Aegis after a person approved proposal `")
                 .append(facts.proposalId()).append("` in Aegis. Aegis never merges: a maintainer reviews and merges.\n");
         return body.toString();
+    }
+
+    /** Why an override, not a bump: what pulls the package in, which is what the project declares. */
+    private static String pulledIn(Edit edit) {
+        return edit.override().via() == null
+                ? "No manifest declares " + code(edit.packageName()) + "; the lockfile resolves it for the project, so "
+                        + "Aegis pins it there."
+                : code(edit.packageName()) + " comes in through " + code(edit.override().via())
+                        + ", which is what the project declares, so Aegis pins it rather than editing a declaration.";
+    }
+
+    /** How an override is written, in the words of the tool that reads it. */
+    private static String mechanism(Edit edit) {
+        String manager = edit.override().packageManager();
+        return switch (edit.ecosystem().trim().toLowerCase(Locale.ROOT)) {
+            case "maven" -> "`dependencyManagement` in `pom.xml`";
+            case "pypi", "pip" -> "a requirement of its own in `requirements.txt`";
+            default -> "pnpm".equals(manager) ? "pnpm's `overrides` in `pnpm-workspace.yaml`"
+                    : "yarn".equals(manager) ? "yarn's `resolutions` in `package.json`"
+                    : "npm's `overrides` in `package.json`";
+        };
     }
 
     /** Text safe inside Markdown prose: nothing that notifies, cross-links, embeds or renders HTML. */

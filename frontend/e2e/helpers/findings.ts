@@ -67,7 +67,7 @@ function vulnerability(
     vulnerabilities: [{ id: `CVE-2026-${1000 + index}`, changeSignalId: `signal-${index + 1}`, confidence: "CONFIRMED",
       cvssVersion: "3.1", cvssBaseScore: 9.8, severity: "CRITICAL" }],
     score, tier: tierOf(score), material: true, toVersion: "1.0.1", changeSignalId: `signal-${index + 1}`,
-    readiness: "READY", reason: null, proposal: null, response: null,
+    readiness: "READY", reason: null, overrideIn: [], proposal: null, response: null,
     ...overrides,
   };
   return {

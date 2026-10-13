@@ -35,6 +35,12 @@ public class FakeRepositoryHost implements PrProvider {
         files.put(repositoryPath + ":" + path, new RepositoryFile(path, content, revision));
     }
 
+    /** The revision of a file on the default branch, as last put; null when there is none. */
+    public String revision(String repositoryPath, String path) {
+        RepositoryFile file = files.get(repositoryPath + ":" + path);
+        return file == null ? null : file.revision();
+    }
+
     /** Make the next draft pull request fail with {@code failure}, as a host outage would. */
     public void failNextOpen(RuntimeException failure) {
         nextFailure = failure;
