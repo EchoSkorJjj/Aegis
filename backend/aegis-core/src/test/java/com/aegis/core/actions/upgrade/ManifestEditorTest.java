@@ -315,6 +315,49 @@ class ManifestEditorTest {
         }
 
         @Test
+        void aBumpTakesTheProjectsOwnOverridesOfThePackageAlong() {
+            String manifest = """
+                    {
+                      "dependencies": {
+                        "hono": "^4.12.7"
+                      },
+                      "overrides": {
+                        "hono": "^4.12.7",
+                        "lodash": "$lodash"
+                      },
+                      "resolutions": {
+                        "hono": "4.12.0"
+                      },
+                      "pnpm": {
+                        "overrides": {
+                          "hono": "~4.12.0"
+                        }
+                      }
+                    }
+                    """;
+            // npm takes an override of a direct dependency only at its declaration's spec; a reference stays one.
+            assertThat(editor.upgrade(manifest, "hono", "4.12.7", "4.13.7")).isEqualTo(manifest
+                    .replace("\"^4.12.7\"", "\"^4.13.7\"").replace("\"4.12.0\"", "\"^4.13.7\"")
+                    .replace("\"~4.12.0\"", "\"^4.13.7\""));
+            // Declared at the fix already, held back by the override alone: the override moves.
+            assertThat(editor.upgrade("{\"dependencies\":{\"hono\":\"^4.13.7\"},\"overrides\":{\"hono\":\"^4.12.7\"}}",
+                    "hono", "4.12.7", "4.13.7"))
+                    .isEqualTo("{\"dependencies\":{\"hono\":\"^4.13.7\"},\"overrides\":{\"hono\":\"^4.13.7\"}}");
+        }
+
+        @Test
+        void aWorkspaceRootsOverrideFollowsABumpInAWorkspaceAndOnlyIfThereIsOne() {
+            String root = "{\n  \"private\": true,\n  \"overrides\": {\n    \"hono\": \"^4.12.7\"\n  }\n}\n";
+            assertThat(editor.raiseOverride(root, "hono", "4.13.7")).isEqualTo(root.replace("^4.12.7", "^4.13.7"));
+            // The root declares it too: its override takes the root's declaration.
+            String declaring = "{\"devDependencies\":{\"hono\":\"4.13.7\"},\"resolutions\":{\"hono\":\"4.12.7\"}}";
+            assertThat(editor.raiseOverride(declaring, "hono", "4.13.7"))
+                    .isEqualTo("{\"devDependencies\":{\"hono\":\"4.13.7\"},\"resolutions\":{\"hono\":\"4.13.7\"}}");
+            String without = "{\"private\":true,\"overrides\":{\"lodash\":\"4.17.21\"}}";
+            assertThat(editor.raiseOverride(without, "hono", "4.13.7")).isSameAs(without);
+        }
+
+        @Test
         void refusesAnOverrideItCannotWriteSafely() {
             assertThatThrownBy(() -> editor.override("{\"dependencies\":{\"hono\":\"^4.12.7\"}}", "hono", "4.12.7",
                     "4.13.7", null)).isInstanceOf(ApiExceptions.Conflict.class).hasMessageContaining("declares hono itself");
@@ -373,6 +416,16 @@ class ManifestEditorTest {
                     .isEqualTo(workspace.replace("    \"hono\": 4.12.0", "    hono: ^4.13.7"));
             assertThat(editor.override("overrides: {}\n", "hono", "4.12.7", "4.13.7", null))
                     .isEqualTo("overrides:\n  hono: ^4.13.7\n");
+        }
+
+        @Test
+        void anOverrideItAlreadyHasFollowsABumpAndOnlyThen() {
+            String workspace = "packages:\n  - 'packages/*'\noverrides:\n  hono: ^4.12.7\n";
+            assertThat(editor.raiseOverride(workspace, "hono", "4.13.7")).isEqualTo(workspace.replace("^4.12.7", "^4.13.7"));
+            assertThat(editor.raiseOverride(workspace, "lodash", "4.17.21")).isSameAs(workspace);
+            assertThat(editor.raiseOverride("", "hono", "4.13.7")).isEmpty();
+            String raised = workspace.replace("^4.12.7", "^4.13.7");
+            assertThat(editor.raiseOverride(raised, "hono", "4.13.7")).isSameAs(raised);
         }
 
         @Test

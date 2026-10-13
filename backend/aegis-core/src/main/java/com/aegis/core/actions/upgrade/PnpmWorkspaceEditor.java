@@ -139,6 +139,24 @@ final class PnpmWorkspaceEditor implements ManifestEditor {
     }
 
     /**
+     * An override this file already has of a package whose declaration moves elsewhere in the pull request, raised to
+     * {@code ^} the fixed version — pnpm applies overrides to declared dependencies too, so one left behind would keep
+     * the old version. A missing file, or one without that override, is left as it is.
+     */
+    @Override
+    public String raiseOverride(String manifest, String packageName, String toVersion) {
+        if (manifest.isBlank()) {
+            return manifest;
+        }
+        Object overrides = read(manifest).get("overrides");
+        if (!(overrides instanceof Map<?, ?> current) || !(current.get(packageName) instanceof String version)
+                || version.equals(NpmPackageJsonEditor.overrideRange(toVersion))) {
+            return manifest;
+        }
+        return override(manifest, packageName, null, toVersion, null);
+    }
+
+    /**
      * pnpm reads the override only once its lockfile follows: {@code pnpm install} in each folder. pnpm 9 and older
      * don't read pnpm-workspace.yaml's overrides at all.
      */

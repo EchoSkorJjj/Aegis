@@ -69,6 +69,16 @@ public record UpgradeProposal(
         Edit to(String version) {
             return new Edit(componentId, ecosystem, packageName, fromVersion, version, manifestPath, override);
         }
+
+        /** Only raises an override the file may already have, following a bump elsewhere in the pull request. */
+        public boolean follows() {
+            return override != null && override.ifPresent();
+        }
+
+        /** The edits a person reads as the pull request's changes: every bump and override, not what only follows. */
+        static List<Edit> shown(List<Edit> edits) {
+            return edits.stream().filter(edit -> !edit.follows()).toList();
+        }
     }
 
     /**
@@ -77,8 +87,22 @@ public record UpgradeProposal(
      * {@code packageManager} is whose syntax an npm package's override takes — {@code npm} ({@code overrides} in
      * package.json), {@code pnpm} ({@code overrides} in pnpm-workspace.yaml) or {@code yarn} ({@code resolutions} in
      * package.json) — and null for Maven ({@code dependencyManagement}) and PyPI (a requirement of its own).
+     *
+     * <p>{@code ifPresent} marks an edit that only follows a bump: the package is declared and its declaration moves
+     * elsewhere in the pull request, and an override of it the project already has — in its workspace root or
+     * pnpm-workspace.yaml — is raised with it, or the override would keep the old version. Without one the file is
+     * left alone ({@link ManifestEditor#raiseOverride}).
      */
-    public record VersionOverride(String via, String packageManager) {
+    public record VersionOverride(String via, String packageManager, boolean ifPresent) {
+
+        public VersionOverride(String via, String packageManager) {
+            this(via, packageManager, false);
+        }
+
+        /** An existing override of a declared package, raised with its declaration if the file has one. */
+        static VersionOverride following(String packageManager) {
+            return new VersionOverride(null, packageManager, true);
+        }
     }
 
     /** Approved by {@code approver}; the draft pull request is about to be opened under {@code title}. */

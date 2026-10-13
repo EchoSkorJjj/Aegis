@@ -56,15 +56,26 @@ interface ManifestEditor {
         throw new ApiExceptions.Conflict(fileName() + " cannot override " + packageName + "; upgrade it by hand");
     }
 
+    /**
+     * The manifest with an override of {@code packageName} it already has raised to {@code toVersion}, because the
+     * package's declaration moves there elsewhere in the pull request: an override left behind keeps the old version
+     * (and npm refuses one that differs from the project's own declaration). Unchanged when it has none.
+     */
+    default String raiseOverride(String manifest, String packageName, String toVersion) {
+        return manifest;
+    }
+
     /** Whether a missing manifest is created rather than refused: an override can be its first setting. */
     default boolean createsMissing() {
         return false;
     }
 
-    /** One edit, applied: its override when it has one, else its declaration bumped. */
+    /** One edit, applied: its override when it has one, an existing override raised when it only follows a bump, else its declaration bumped. */
     default String apply(String manifest, Edit edit) {
-        return edit.override() == null
-                ? upgrade(manifest, edit.packageName(), edit.fromVersion(), edit.toVersion())
+        if (edit.override() == null) {
+            return upgrade(manifest, edit.packageName(), edit.fromVersion(), edit.toVersion());
+        }
+        return edit.follows() ? raiseOverride(manifest, edit.packageName(), edit.toVersion())
                 : override(manifest, edit.packageName(), edit.fromVersion(), edit.toVersion(), edit.override().via());
     }
 

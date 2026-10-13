@@ -366,6 +366,11 @@ that fixes it, drafted and approved together. Nothing leaves Aegis without an ap
   one package overridden in one file take the highest target. The PR marks each override with what pulls it in and
   explains the mechanism; a package a lockfile resolves that no manifest declares is overridden the same way.
   Without a recorded lockfile (an import before V39) an npm one is `TRANSITIVE` until the service is re-imported.
+  An override stays until a person removes it, and the next fix raises it in place. When a package the project
+  overrides is (or becomes) declared, its bump takes the override along: in the same `package.json` it is set to the
+  new declaration (npm refuses an override of a direct dependency at any other spec), and an override in the
+  project's root `package.json` or `pnpm-workspace.yaml` is raised by an edit that only follows the bump
+  (`VersionOverride.ifPresent`) — left alone, and the file untouched, when there is none.
 - **The ticket is filed first, then the PR opens under its key** (`SEC-12: Upgrade axios to 1.8.2 in 2
   manifests (CVE-…)`, and in the body), so the tracker links them — with the GitHub for Jira app, the issue
   shows its PR, and a Jira Automation rule can close the issue when the PR merges ([JIRA.md](JIRA.md)); Aegis

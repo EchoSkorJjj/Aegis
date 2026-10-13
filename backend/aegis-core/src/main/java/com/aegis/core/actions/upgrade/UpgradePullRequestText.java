@@ -113,7 +113,8 @@ final class UpgradePullRequestText {
     }
 
     static String body(Facts facts, Rationale rationale) {
-        List<Edit> edits = facts.edits();
+        List<Edit> edits = Edit.shown(facts.edits());
+        List<Edit> following = facts.edits().stream().filter(Edit::follows).toList();
         boolean single = edits.size() == 1;
         StringBuilder body = new StringBuilder();
         body.append("## Safe upgrade proposed by Aegis\n\n");
@@ -141,6 +142,16 @@ final class UpgradePullRequestText {
                         .append(" |\n");
             }
             body.append('\n');
+        }
+        if (!following.isEmpty()) {
+            body.append("**Overrides move with it:** where ")
+                    .append(and(following.stream().map(Edit::manifestPath).distinct().map(UpgradePullRequestText::code)
+                            .toList()))
+                    .append(" already ").append(following.size() > 1 ? "override " : "overrides ")
+                    .append(and(following.stream().map(Edit::packageName).distinct().map(UpgradePullRequestText::code)
+                            .toList()))
+                    .append(", the override is raised to the new version too, so it doesn't keep the old one. A file ")
+                    .append("without one is left alone.\n\n");
         }
         List<String> mechanisms = edits.stream().filter(edit -> edit.override() != null)
                 .map(UpgradePullRequestText::mechanism).distinct().toList();

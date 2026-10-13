@@ -511,6 +511,11 @@ export type UpgradeProposalStatus = "PROPOSED" | "OPENING" | "OPENED" | "FAILED"
 export interface VersionOverride {
   via: string | null;
   packageManager: "npm" | "pnpm" | "yarn" | null;
+  /**
+   * Only follows a bump elsewhere in the pull request: an override the file already has of the declared package is
+   * raised with it, and a file without one is left alone.
+   */
+  ifPresent?: boolean;
 }
 
 /**

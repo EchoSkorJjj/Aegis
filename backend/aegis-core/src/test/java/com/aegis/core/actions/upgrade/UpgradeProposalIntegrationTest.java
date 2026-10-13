@@ -506,6 +506,55 @@ class UpgradeProposalIntegrationTest extends AbstractInventoryIntegrationTest {
     }
 
     @Test
+    void anOverrideTheProjectAlreadyHasOfADeclaredPackageIsRaisedWithItsBumpAndOnlyIfItHasOne() throws Exception {
+        String tag = tag();
+        String name = "hono-" + tag;
+        Advisory advisory = advisories.upsert(new Advisory(null, "osv", "GHSA-follow-" + tag, "CVE-2095-" + tag,
+                "A flaw in hono.", Instant.now(), Instant.now(), new Advisory.Cvss("3.1", null, new BigDecimal("7.5"), "HIGH"),
+                List.of(AffectedProduct.ofPackage("npm", name, null, "4.0.0", null, null, "4.13.7"))));
+        SoftwareComponent hono = inventory.createSoftwareComponent("npm", name, "4.12.7");
+        String workspace = "packages:\n  - 'packages/*'\noverrides:\n  " + name + ": ^4.12.7\n";
+        for (boolean overridden : List.of(true, false)) {
+            String repository = "acme/workspace-" + overridden + "-" + tag;
+            BusinessService service = inventory.createBusinessService(
+                    "Workspace " + overridden + " " + tag, BusinessCriticality.HIGH, ServiceExposure.INTERNAL);
+            inventory.linkServiceRepository(service.getId(), hosted(repository), null);
+            // Declared in a workspace; the workspace root's pnpm-workspace.yaml may override it.
+            inventoryStore.linkRepositoryComponent(service.getId(), hono.getId(), List.of("packages/web/package.json"),
+                    List.of("pnpm-lock.yaml"));
+            host.put(repository, "packages/web/package.json", packageJson(name, "^4.12.7"));
+            if (overridden) {
+                host.put(repository, "pnpm-workspace.yaml", workspace);
+            }
+
+            String created = draft(advisory.id(), service.getId(), analyst)
+                    .andExpect(jsonPath("$.pullRequests[0].edits.length()").value(2))
+                    .andExpect(jsonPath("$.pullRequests[0].edits[0].manifestPath").value("packages/web/package.json"))
+                    .andExpect(jsonPath("$.pullRequests[0].edits[0].override").value(nullValue()))
+                    .andExpect(jsonPath("$.pullRequests[0].edits[1].manifestPath").value("pnpm-workspace.yaml"))
+                    .andExpect(jsonPath("$.pullRequests[0].edits[1].override.ifPresent").value(true))
+                    // The pull request reads as the bump it is.
+                    .andExpect(jsonPath("$.pullRequests[0].title").value("Upgrade " + name + " from 4.12.7 to 4.13.7 (CVE-2095-"
+                            + tag + ")"))
+                    .andExpect(jsonPath("$.pullRequests[0].body").value(containsString("**Overrides move with it:** where "
+                            + "`pnpm-workspace.yaml` already overrides `" + name + "`")))
+                    .andReturn().getResponse().getContentAsString();
+            mvc.perform(post(RESPONSES + "/{id}/approve", JsonPath.<String>read(created, "$.id")).with(as("ANALYST", approver)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.pullRequests[0].status").value("OPENED"));
+
+            List<org.assertj.core.groups.Tuple> expected = new java.util.ArrayList<>(List.of(org.assertj.core.groups.Tuple
+                    .tuple("packages/web/package.json", packageJson(name, "^4.13.7"))));
+            if (overridden) {
+                expected.add(org.assertj.core.groups.Tuple.tuple("pnpm-workspace.yaml", workspace.replace("^4.12.7", "^4.13.7")));
+            }
+            assertThat(host.opened(repository)).singleElement().satisfies(opened -> assertThat(opened.changes())
+                    .extracting(FileChange::path, FileChange::content)
+                    .containsExactlyElementsOf(expected));
+        }
+    }
+
+    @Test
     void aPackageReachedTwoWaysIsOverriddenWhereItCanBeAndTheTicketNamesTheOtherWay() throws Exception {
         String tag = tag();
         BusinessService service = inventory.createBusinessService(

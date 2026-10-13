@@ -161,6 +161,7 @@ final class NpmPackageJsonEditor implements ManifestEditor {
         }
         String result = manifest;
         Set<String> changed = new LinkedHashSet<>();
+        String declared = null;
         for (String spec : specs) {
             Matcher simple = SIMPLE_SPEC.matcher(spec.trim());
             if (!simple.matches()) {
@@ -168,6 +169,9 @@ final class NpmPackageJsonEditor implements ManifestEditor {
                         + "plain version, or one behind ^, ~, >= or =, can be upgraded automatically");
             }
             String replacement = (simple.group(1) == null ? "" : simple.group(1)) + toVersion;
+            if (declared == null) {
+                declared = replacement;
+            }
             if (replacement.equals(spec)) {
                 continue;
             }
@@ -176,6 +180,11 @@ final class NpmPackageJsonEditor implements ManifestEditor {
             changed.add(spec);
         }
         if (changed.isEmpty()) {
+            // The declaration is there already; an override left at the old version may be what still holds it back.
+            String followed = followingOverrides(manifest, packageName, declared);
+            if (!followed.equals(manifest)) {
+                return followed;
+            }
             throw new ApiExceptions.Conflict("package.json already asks for " + packageName + " " + toVersion
                     + "; only the lockfile is stale, so run `npm install` instead");
         }
@@ -187,6 +196,58 @@ final class NpmPackageJsonEditor implements ManifestEditor {
                         + "rewritten safely; upgrade it by hand");
             }
         }
+        return followingOverrides(result, packageName, declared);
+    }
+
+    /**
+     * An override of a declared package in a project's root package.json — a workspace's, whose declaration moves in
+     * the workspace's own — raised with it: to the root's own declaration of it when it has one (npm takes an
+     * override of a direct dependency only at the same spec), else to {@code ^} the fixed version.
+     */
+    @Override
+    public String raiseOverride(String manifest, String packageName, String toVersion) {
+        String declared = null;
+        for (Object section : sections(manifest)) {
+            if (declared == null && section instanceof Map<?, ?> dependencies
+                    && dependencies.get(packageName) instanceof String spec) {
+                declared = spec;
+            }
+        }
+        return followingOverrides(manifest, packageName, declared != null ? declared : overrideRange(toVersion));
+    }
+
+    /**
+     * The package.json with every override of {@code packageName} it holds — npm's {@code overrides}, yarn's
+     * {@code resolutions}, {@code pnpm.overrides} before pnpm 10 — set to {@code spec}, so none keeps the old version
+     * (npm refuses an override of a direct dependency that differs from its declaration). An override written as a
+     * reference ({@code "$hono"}) or with nested rules is left as it is; the text around it is untouched.
+     */
+    private static String followingOverrides(String manifest, String packageName, String spec) {
+        String result = manifest;
+        for (List<String> path : List.of(List.of("overrides"), List.of("resolutions"), List.of("pnpm", "overrides"))) {
+            JsonText.ObjectSpan object = JsonText.root(result);
+            JsonText.Member entry = null;
+            for (String key : path) {
+                JsonText.Member member = object.member(key);
+                if (member == null || result.charAt(member.valueStart()) != '{') {
+                    object = null;
+                    break;
+                }
+                object = JsonText.object(result, member.valueStart());
+            }
+            if (object != null) {
+                entry = object.member(packageName);
+            }
+            if (entry == null || result.charAt(entry.valueStart()) != '"') {
+                continue;
+            }
+            String current = JSON.readValue(result.substring(entry.valueStart(), entry.valueEnd()), String.class);
+            if (current.startsWith("$") || current.equals(spec)) {
+                continue;
+            }
+            result = result.substring(0, entry.valueStart()) + JsonText.string(spec) + result.substring(entry.valueEnd());
+        }
+        parse(result); // still JSON, or nothing is written
         return result;
     }
 

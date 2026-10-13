@@ -205,18 +205,26 @@ public class UpgradeProposalService {
             boolean added = false;
             for (Map.Entry<String, Pinning> placement : placements.files().entrySet()) {
                 String manifest = placement.getKey();
-                if (claimed.contains(claim(component.id(), manifest))) {
-                    notAutomated.add(component.name() + " in " + manifest
-                            + " is already being upgraded by another upgrade pull request");
-                    continue;
-                }
                 Edit edit = new Edit(component.id(), component.ecosystem(), component.name(), component.version(),
                         target.toVersion(), manifest, placement.getValue().override());
-                ManifestEditor editor = ManifestEditor.forEdit(edit);
+                if (claimed.contains(claim(component.id(), manifest))) {
+                    if (!edit.follows()) {
+                        notAutomated.add(component.name() + " in " + manifest
+                                + " is already being upgraded by another upgrade pull request");
+                    }
+                    continue;
+                }
+                if (edit.follows() && !added) {
+                    continue; // follows a bump, and there is none
+                }
                 edits.add(edit);
-                editors.putIfAbsent(editor.fileName(), editor);
-                edited.computeIfAbsent(editor.fileName(), file -> new LinkedHashSet<>()).add(manifest);
-                added = true;
+                if (!edit.follows()) {
+                    // What follows a bump leaves no step of its own: the bump's lockfile refresh covers it.
+                    ManifestEditor editor = ManifestEditor.forEdit(edit);
+                    editors.putIfAbsent(editor.fileName(), editor);
+                    edited.computeIfAbsent(editor.fileName(), file -> new LinkedHashSet<>()).add(manifest);
+                    added = true;
+                }
             }
             if (added) {
                 checked.addAll(target.checked());
@@ -272,7 +280,12 @@ public class UpgradeProposalService {
         return link == null || !link.manifestPaths().isEmpty() || link.lockfilePaths().isEmpty();
     }
 
-    /** A declared component: bumped in every manifest that declares it which Aegis edits. */
+    /**
+     * A declared component: bumped in every manifest that declares it which Aegis edits. For an npm package, any
+     * override the project already has of it in another file — its workspace root's package.json, its
+     * pnpm-workspace.yaml — follows the bump, if there is one ({@link VersionOverride#following}): left behind, it
+     * would keep the old version. (One in a bumped package.json moves with the bump itself.)
+     */
     private static Placements declaredIn(ComponentRef component, ServiceComponentLink link) {
         ManifestEditor editor = ManifestEditor.forEcosystem(component.ecosystem()).orElseThrow();
         List<String> recorded = link == null ? List.of() : link.manifestPaths();
@@ -284,6 +297,12 @@ public class UpgradeProposalService {
         }
         Map<String, Pinning> files = new LinkedHashMap<>();
         manifests.forEach(manifest -> files.put(manifest, Pinning.BUMP));
+        if (link != null && !link.lockfilePaths().isEmpty()) {
+            Overrides.find(component.ecosystem(), recorded, link.lockfilePaths()).targets().stream()
+                    .filter(target -> target.packageManager() != null)
+                    .forEach(target -> files.putIfAbsent(target.manifestPath(),
+                            new Pinning(VersionOverride.following(target.packageManager()))));
+        }
         List<String> elsewhere = recorded.stream().map(String::strip)
                 .filter(path -> !manifests.contains(path)).distinct().toList();
         return new Placements(files, null, elsewhere.isEmpty() ? null : described + " is also found in "
@@ -365,14 +384,14 @@ public class UpgradeProposalService {
                 planned.serviceName(), planned.criticality(), planned.exposure(), planned.score(), planned.tier(),
                 plan.edits(), planned.confidence().name(), planned.evidence(), planned.followUps());
         String body = UpgradePullRequestText.body(facts, rationale(id, facts));
-        Edit first = plan.edits().getFirst();
+        Edit first = Edit.shown(plan.edits()).getFirst();
         String serviceName = SensitiveText.redact(planned.serviceName());
         return Optional.of(trail.recorded(() -> store.create(new UpgradeProposal(
                 id, plan.serviceId(), plan.changeSignalId(), plan.vulnerabilityId(), riskTicketId, plan.edits(),
                 planned.repositoryUrl(), planned.baseBranch(), headBranch(first.packageName(), first.toVersion(), id),
                 planned.confidence(), planned.score(),
                 planned.tier() == null ? null : ImpactTier.valueOf(planned.tier()),
-                UpgradePullRequestText.title(plan.edits(), plan.vulnerabilityId()), body,
+                UpgradePullRequestText.title(Edit.shown(plan.edits()), plan.vulnerabilityId()), body,
                 UpgradeProposalStatus.PROPOSED, drafter, null, null, null, null, null, null, null, 0)),
                 saved -> record(saved, serviceName, Action.DRAFTED, drafter, null)));
     }
@@ -518,12 +537,18 @@ public class UpgradeProposalService {
         Map<String, List<Edit>> byManifest = new LinkedHashMap<>();
         proposal.edits().forEach(edit -> byManifest.computeIfAbsent(edit.manifestPath(), path -> new ArrayList<>())
                 .add(edit));
+        // What only follows a bump goes last in its file, after whatever the file's own edits set.
+        byManifest.values().forEach(edits -> edits.sort(Comparator.comparing(Edit::follows)));
         List<FileChange> changes = new ArrayList<>();
         for (Map.Entry<String, List<Edit>> manifest : byManifest.entrySet()) {
+            boolean onlyFollows = manifest.getValue().stream().allMatch(Edit::follows);
             RepositoryFile file;
             try {
                 file = provider.readFile(repository, proposal.baseBranch(), manifest.getKey());
             } catch (ApiExceptions.NotFound missing) {
+                if (onlyFollows) {
+                    continue; // no file, so no override to raise
+                }
                 // An override can be a file's first setting (pnpm-workspace.yaml): the pull request creates it.
                 if (!ManifestEditor.forEdit(manifest.getValue().getFirst()).createsMissing()) {
                     throw missing;
@@ -535,7 +560,8 @@ public class UpgradeProposalService {
             Set<String> moved = new HashSet<>();
             for (Edit edit : manifest.getValue()) {
                 ManifestEditor editor = ManifestEditor.forEdit(edit);
-                if (!moved.add(edit.packageName() + " " + edit.toVersion())) {
+                String kind = edit.override() == null ? "bump" : edit.follows() ? "follow" : "override";
+                if (!moved.add(edit.packageName() + " " + edit.toVersion() + " " + kind)) {
                     continue; // two versions of one package in one file: the first edit moved every declaration
                 }
                 try {
@@ -547,6 +573,9 @@ public class UpgradeProposalService {
                         throw refused;
                     }
                 }
+            }
+            if (onlyFollows && content.equals(file.content())) {
+                continue; // the file overrides none of it: nothing to raise
             }
             changes.add(new FileChange(manifest.getKey(), content, file.revision()));
         }
@@ -578,7 +607,7 @@ public class UpgradeProposalService {
 
     /** The ai-service's grounding: the advisory's own text and the deterministic facts, nothing else. */
     private static String context(Facts facts) {
-        String upgrades = facts.edits().stream()
+        String upgrades = Edit.shown(facts.edits()).stream()
                 .map(edit -> edit.packageName() + " " + edit.fromVersion() + " to " + edit.toVersion() + " in "
                         + edit.manifestPath() + (edit.override() == null ? "" : " (an override: "
                         + (edit.override().via() == null ? "no manifest declares it"

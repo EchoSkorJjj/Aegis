@@ -123,7 +123,9 @@ final class RiskTicketText {
             blocks.add(Block.heading("Upgrade pull request"));
             blocks.add(Block.paragraph("Aegis opens it as a draft with this ticket's key in its title, upgrading:"));
             blocks.add(Block.bullets(pullRequest.edits().stream()
-                    .map(edit -> edit.packageName() + " " + edit.fromVersion() + " to " + edit.toVersion() + " in "
+                    .map(edit -> edit.follows() ? "any override of " + edit.packageName() + " in " + edit.manifestPath()
+                            + ", raised to " + edit.toVersion() + " with it"
+                            : edit.packageName() + " " + edit.fromVersion() + " to " + edit.toVersion() + " in "
                             + edit.manifestPath() + (edit.override() == null ? "" : " (an override"
                             + (edit.override().via() == null ? "" : "; it comes in through " + edit.override().via())
                             + ")"))
