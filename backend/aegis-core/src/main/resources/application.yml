@@ -149,6 +149,13 @@ aegis:
     confidence:
       confirmed: ${AEGIS_SCORING_CONFIDENCE_CONFIRMED:1.0}
       possible: ${AEGIS_SCORING_CONFIDENCE_POSSIBLE:1.0}
+    # Whether the service's code reaches the vulnerable package (E11-4): a vulnerability in a package the code never
+    # imports, nor anything that pulls it in, keeps `not-imported` of its score — 0.8, a band lower at most, like a
+    # step on criticality or exposure. Unknown (the code wasn't read, or Aegis can't be sure) always scores like
+    # `imported`, so no score drops without evidence, and `not-imported` is held at or below `imported`.
+    reachability:
+      imported: ${AEGIS_SCORING_REACHABILITY_IMPORTED:1.0}
+      not-imported: ${AEGIS_SCORING_REACHABILITY_NOT_IMPORTED:0.8}
     # Severity words for a signal with no CVSS (a vendor outage, an un-scored CVE), by the feed's own
     # vocabulary. NVD's critical/high/medium/low and Statuspage's critical/major/minor/none ship with
     # defaults (see ScoringProperties); add a key here only for a feed that speaks a different word,

@@ -12,8 +12,11 @@ import java.util.UUID;
 
 import com.aegis.core.advisories.Advisory;
 import com.aegis.core.advisories.AdvisoryStore;
+import com.aegis.core.inventory.Reachability;
 import com.aegis.core.matching.MatchingDtos.ChangeMatchResponse;
 import com.aegis.core.matching.MatchingDtos.ChangeRef;
+import com.aegis.core.matching.MatchingDtos.EvidenceChain;
+import com.aegis.core.matching.MatchingDtos.EvidenceKind;
 import com.aegis.core.matching.MatchingDtos.ImpactedServiceMatch;
 import com.aegis.core.matching.MatchingDtos.OwnerRef;
 import com.aegis.core.matching.MatchingDtos.ServiceRef;
@@ -45,7 +48,8 @@ import org.springframework.transaction.annotation.Transactional;
  * affected, applies {@link ImpactScorer} to each, and rolls the results up per owner.
  *
  * <p>Scoring adds no traversal of its own — it is matching's output multiplied by the advisory's
- * severity. Like matching it is recomputed per request and nothing is persisted: a score derived from
+ * severity, and by whether each service's code reaches the vulnerable components matching found
+ * ({@link Reachability}, E11-4). Like matching it is recomputed per request and nothing is persisted: a score derived from
  * today's SBOM and today's CVSS would be a lie tomorrow, and the findings table that will freeze one
  * is a later epic.
  */
@@ -73,17 +77,20 @@ public class ScoringService {
     private final AdvisoryStore advisories;
     private final ImpactScorer scorer;
     private final ScoreExplainer explainer;
+    private final Reachability reachability;
 
     public ScoringService(
             MatchingService matching,
             ChangeSignalStore signals,
             AdvisoryStore advisories,
-            ImpactScorer scorer) {
+            ImpactScorer scorer,
+            Reachability reachability) {
         this.matching = matching;
         this.signals = signals;
         this.advisories = advisories;
         this.scorer = scorer;
         this.explainer = new ScoreExplainer(scorer);
+        this.reachability = reachability;
     }
 
     @Transactional(readOnly = true)
@@ -98,8 +105,24 @@ public class ScoringService {
 
     private ChangeImpactResponse score(ChangeSignal signal, ChangeMatchResponse match) {
         SeverityInput severity = resolveSeverity(signal);
+        // The vulnerable components matching found in each service: where its code may reach the vulnerability.
+        Map<UUID, Set<UUID>> vulnerable = new LinkedHashMap<>();
+        if (signal.signalType() == ChangeSignal.SignalType.VULNERABILITY) {
+            for (ImpactedServiceMatch impacted : match.impactedServices()) {
+                for (EvidenceChain chain : impacted.evidence()) {
+                    if (chain.kind() == EvidenceKind.ADVISORY_COMPONENT && !chain.componentPath().isEmpty()) {
+                        vulnerable.computeIfAbsent(impacted.service().id(), id -> new LinkedHashSet<>())
+                                .add(chain.componentPath().getFirst().id());
+                    }
+                }
+            }
+        }
+        Reachability.Reached reached = reachability.of(vulnerable);
         List<ScoredService> services = match.impactedServices().stream()
-                .map(impacted -> scoreService(match, severity, impacted))
+                .map(impacted -> scoreService(match, severity, impacted,
+                        signal.signalType() != ChangeSignal.SignalType.VULNERABILITY ? null
+                                : reached.strongest(impacted.service().id(),
+                                        vulnerable.getOrDefault(impacted.service().id(), Set.of()))))
                 .sorted(Comparator.comparingDouble(ScoredService::score).reversed()
                         .thenComparing(scored -> scored.service().name(), String.CASE_INSENSITIVE_ORDER)
                         .thenComparing(scored -> scored.service().id()))
@@ -207,11 +230,12 @@ public class ScoringService {
                         .toList());
     }
 
-    private ScoredService scoreService(
-            ChangeMatchResponse match, SeverityInput severity, ImpactedServiceMatch impacted) {
+    private ScoredService scoreService(ChangeMatchResponse match, SeverityInput severity,
+            ImpactedServiceMatch impacted, Reachability.Verdict reaches) {
         ServiceRef service = impacted.service();
-        ScoreBreakdown breakdown = scorer.breakdown(match.change().signalType(),
-                severity.factor(), service.exposure(), service.criticality(), impacted.confidence());
+        ScoreBreakdown breakdown = scorer.breakdown(match.change().signalType(), severity.factor(),
+                service.exposure(), service.criticality(), impacted.confidence(),
+                reaches == null ? null : reaches.status());
         double score = scorer.score(breakdown);
         ImpactTier tier = scorer.tier(score);
         List<ScoreFactor> factors = explainer.factors(severity, breakdown);
@@ -223,6 +247,7 @@ public class ScoringService {
                 impacted.confidence(),
                 breakdown,
                 factors,
+                reaches,
                 explainer.explain(match.change().title(), service.name(), score, tier, breakdown, factors),
                 impacted.owners(),
                 impacted.evidence());

@@ -1,5 +1,5 @@
 import { formatDateTime } from "@/components/app/responses/response-status";
-import type { CodeUsage, ImportScanSummary, UpgradeRecommendation } from "@/lib/types";
+import type { CodeUsage, ImportScanSummary, Reachability, UpgradeRecommendation } from "@/lib/types";
 
 const LANGUAGE_LABELS: Record<string, string> = {
   npm: "JavaScript/TypeScript",
@@ -10,10 +10,15 @@ const LANGUAGE_LABELS: Record<string, string> = {
 /**
  * Where the service's code imports a vulnerable dependency (E11-3): the lines, linked to them in the repository at
  * the commit read; or that nothing imports it; or that it's unknown, and why — never shown as unused without the
- * evidence. For a package another one pulls in that the code doesn't import itself, also where it imports that one.
+ * evidence. For a package another one pulls in that the code doesn't import itself, also where it imports that one;
+ * and when nothing the code imports reaches it, that it ranks lower for it (E11-4).
  */
-export function CodeUsageLine({ item }: { item: Pick<UpgradeRecommendation, "usage" | "viaUsage" | "via"> }) {
-  const { usage, viaUsage, via } = item;
+export function CodeUsageLine({
+  item,
+}: {
+  item: Pick<UpgradeRecommendation, "usage" | "viaUsage" | "via"> & { reachability?: Reachability | null };
+}) {
+  const { usage, viaUsage, via, reachability } = item;
   return (
     <span className="mt-1 block text-xs text-muted-foreground">
       <UsageText usage={usage} subject="Imported" />
@@ -21,6 +26,34 @@ export function CodeUsageLine({ item }: { item: Pick<UpgradeRecommendation, "usa
         <span className="mt-0.5 block">
           <span className="font-mono">{via.name}</span>, which pulls it in:{" "}
           <UsageText usage={viaUsage} subject="imported" inline />
+        </span>
+      )}
+      {reachability?.status === "NOT_IMPORTED" && (
+        <span className="mt-0.5 block">Nothing the code imports reaches it, so it ranks lower.</span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * What a score's reachability factor rests on (E11-4): the lines importing the package, linked at the commit read;
+ * or the package pulling it in that the code imports, and its lines; or why nothing reaches it; or why that's unknown.
+ */
+export function ReachabilityEvidence({ reachability }: { reachability: Reachability }) {
+  const { status, reason, through, usage } = reachability;
+  if (status === "IMPORTED" && usage) {
+    return (
+      <span className="block text-xs text-muted-foreground">
+        <UsageText usage={usage} subject="Imported" />
+      </span>
+    );
+  }
+  return (
+    <span className="block text-xs text-muted-foreground">
+      <span className="block">{status === "UNKNOWN" && !through ? `Unknown: ${reason}` : reason}.</span>
+      {through && usage?.status === "IMPORTED" && (
+        <span className="mt-0.5 block">
+          <UsageText usage={usage} subject={`${through} imported`} />
         </span>
       )}
     </span>

@@ -106,7 +106,7 @@ class ScoringRankingTest {
     @Test
     void aConfirmedMatchNeverRanksBelowAPossibleOneEvenUnderADiscount() {
         ImpactScorer discounting = new ImpactScorer(new ScoringProperties(
-                null, null, Map.of(MatchConfidence.POSSIBLE, 0.6), null, null, null, null, null));
+                null, null, Map.of(MatchConfidence.POSSIBLE, 0.6), null, null, null, null, null, null));
         for (String cvss : CVSS) {
             for (ServiceExposure exposure : ServiceExposure.values()) {
                 for (BusinessCriticality criticality : BusinessCriticality.values()) {

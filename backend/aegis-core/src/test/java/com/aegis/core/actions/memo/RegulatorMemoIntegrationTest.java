@@ -150,7 +150,7 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
                 .contains("| " + v.service().getName() + " | HIGH | INTERNET_FACING |")
                 .contains(FakeAiDrafter.MEMO.measures())
                 .contains("Source: osv / " + v.advisory().externalId(), "Source excerpt: A flaw in memo-lib.")
-                .contains("Score calculation: severity 0.91 x exposure 1 x criticality 0.8 x confidence 1 x 100 = 72.8")
+                .contains("Score calculation: severity 0.91 x exposure 1 x reachability 1 x criticality 0.8 x confidence 1 x 100 = 72.8")
                 .contains("### Sources the AI draft quotes (unverified)", "> C1 quoted context")
                 .doesNotContain("{{");
         assertThat(drafter.requests()).anySatisfy(sent -> {

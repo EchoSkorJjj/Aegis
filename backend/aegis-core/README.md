@@ -1096,11 +1096,11 @@ their extracted CVE references remain available for a later article → advisory
 `GET /api/scoring/change-signals/{id}` ranks one change signal across everything it reaches:
 
 ```
-score = severity x exposure x criticality x 100
+score = severity x exposure x reachability x criticality x 100
 ```
 
-Three multipliers in `[0,1]`, so the score is a 0-100 percentage of the worst case and a service that
-is weak on any one axis cannot be pushed to the top by the other two. Same read roles as matching
+Multipliers in `[0,1]`, so the score is a 0-100 percentage of the worst case and a service that
+is weak on any one axis cannot be pushed to the top by the others. Same read roles as matching
 (`SERVICE_OWNER`, `ANALYST`, `COMPLIANCE_ADMIN`).
 
 - **severity** — the advisory's published CVSS base score rescaled to `[0,1]`, taken as the highest
@@ -1115,6 +1115,20 @@ is weak on any one axis cannot be pushed to the top by the other two. Same read 
   Exposure is inbound attack reach, so it applies to vulnerabilities only: a vendor outage takes an
   internal service down as surely as an internet-facing one, and its breakdown says
   `exposureApplies: false`.
+- **reachability** (E11-4) — whether the service's code reaches the vulnerable package, from where its
+  code imports packages (E11-3, `inventory.CodeUsage`) and its own dependency graph
+  (`inventory.Reachability`): `IMPORTED` when the code imports the package; `NOT_IMPORTED` only when it
+  imports neither the package nor anything above it in the service's graph (every package that pulls it
+  in, directly or through others; a cycle ends), each of them not imported by CodeUsage's rule of
+  evidence; `UNKNOWN` otherwise — the code imports what pulls it in, or that is unknown, or the package's
+  own imports are (the code wasn't read, a guessed import name, a scan that stopped early). Only
+  `NOT_IMPORTED` discounts (0.8: a band lower at most); `UNKNOWN` scores like `IMPORTED`, so no score
+  drops without evidence. A change matching several of a service's components takes the most reachable
+  of them. Like exposure it applies to vulnerabilities only (`reachabilityApplies: false` for an outage).
+  Each scored service carries the verdict as `reachability` — `status`, `reason`, `through` (the package
+  pulling it in that the verdict rests on, if any) and `usage` (that package's imports, with each line
+  linked at the commit read) — and so does each upgrade recommendation, which the triage queue and each
+  service's vulnerable dependencies rank by. Drafts state the verdict and its reason, never the files.
 - **criticality** — the service's business tier (`CRITICAL` 1.0 → `LOW` 0.25).
 
 Each scored service carries the full `breakdown` (every multiplier, enough to reproduce the score by
@@ -1140,13 +1154,13 @@ later epic. Security-news signals are rejected by matching before scoring sees t
 ### Why this score — contributing factors (CS203-72)
 
 Every scored service lists its `factors`: one entry per term of the model, always in the order
-`SEVERITY`, `EXPOSURE`, `CRITICALITY`, `CONFIDENCE`, so a client can render "why this number" without
+`SEVERITY`, `EXPOSURE`, `REACHABILITY`, `CRITICALITY`, `CONFIDENCE`, so a client can render "why this number" without
 knowing the model's shape.
 
 | Field | Meaning |
 |---|---|
 | `factor` | Which term this is |
-| `input` | What the multiplier was read from: `CVSS 3.1 base 9.8`, `severity major`, `INTERNET_FACING`, `HIGH`, `CONFIRMED`, … |
+| `input` | What the multiplier was read from: `CVSS 3.1 base 9.8`, `severity major`, `INTERNET_FACING`, `NOT_IMPORTED`, `HIGH`, `CONFIRMED`, … |
 | `weight` | The multiplier, in `[0,1]` |
 | `headroom` | Points the score would gain if this factor alone were at its maximum (1.0) — what it is costing the score |
 | `limiting` | True for the factor with the most headroom: the one holding the score down (every one tied, if several are; none at the worst case) |
@@ -1165,8 +1179,9 @@ x criticality 0.80 (HIGH); exposure (ISOLATED) holds it down most, costing 32.0 
 
 Roll-up rows carry the same reasons for their headline number: each `ServiceRollup` and `OwnerRollup`
 has `topFactors` and `topExplanation`, the factors of the score `topSignal` earned against that service.
-The change-impact page in the frontend (`/advisories/{id}`) shows the score, tier, and factors on each
-impacted service.
+The change-impact page in the frontend (`/advisories/{id}`, and the item detail `/findings/{id}`) shows the
+score, tier, and factors on each impacted service, with the files and lines the reachability factor rests on
+under its row (linked at the commit read), or why nothing reaches the package, or why that's unknown.
 
 ### Configurable weights
 
@@ -1189,6 +1204,7 @@ all of it against the real demo files, so a retune that breaks an anchor fails t
 | `aegis.scoring.criticality.*` | `1.0 / 0.8 / 0.5 / 0.25` | How much severity a business tier retains |
 | `aegis.scoring.exposure.*` | `1.0 / 0.9 / 0.5` | What an attacker's reach is worth |
 | `aegis.scoring.confidence.*` | `1.0 / 1.0` | Optional discount for an unreviewed (`POSSIBLE`) match |
+| `aegis.scoring.reachability.*` | `imported 1.0 / not-imported 0.8` | What a vulnerability is worth when the code never imports the package nor anything pulling it in; unknown always takes `imported`'s weight (a configured `unknown` is ignored), and `not-imported` is held at or below `imported` |
 | `aegis.scoring.severity-label.*` | `critical 0.95 … none 0.05` | Severity per feed word when there is no CVSS; add a word for a new feed vocabulary |
 | `aegis.scoring.unknown-severity-factor` | `0.5` | Applied when neither a CVSS score nor a known label exists |
 | `aegis.scoring.tiers.*` | `90 / 70 / 40 / 10` | Lower bound of each `ImpactTier` |

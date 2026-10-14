@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Stream;
 
+import com.aegis.core.inventory.CodeUsage;
 import com.aegis.core.inventory.demo.DemoEstateSeeder;
 import com.aegis.core.inventory.demo.DemoEstateSeeder.Estate;
 import com.aegis.core.inventory.demo.DemoEstateSeeder.ServiceSpec;
@@ -47,7 +48,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * (bound from {@code application.yml}, not from Java defaults):
  *
  * <ul>
- *   <li><b>Principles</b> (P1-P5) hold for every service profile and at every CVSS band edge, so the
+ *   <li><b>Principles</b> (P1-P6) hold for every service profile and at every CVSS band edge, so the
  *       model is right in general, not only for five services.</li>
  *   <li><b>The demo dataset</b>: the real CVEs the demo SBOMs' pinned versions are exposed to, and the
  *       vendor outages its vendors can raise, scored against the demo services as {@code estate.json}
@@ -212,12 +213,14 @@ class ScoringCalibrationTest {
     }
 
     @Test
-    void p3ACriticalCveIsNeverImmaterialOnAnyService() {
+    void p3ACriticalCveIsNeverImmaterialOnAnyServiceWhileItsCodeMayReachIt() {
         for (BusinessCriticality criticality : BusinessCriticality.values()) {
             for (ServiceExposure exposure : ServiceExposure.values()) {
-                assertThat(scorer.material(cvssScore("9.0", criticality, exposure)))
-                        .as("CVSS 9.0 on %s/%s", criticality, exposure)
-                        .isTrue();
+                for (CodeUsage.Status reachability : List.of(CodeUsage.Status.IMPORTED, CodeUsage.Status.UNKNOWN)) {
+                    assertThat(scorer.material(cvssScore("9.0", criticality, exposure, reachability)))
+                            .as("CVSS 9.0 on %s/%s, %s", criticality, exposure, reachability)
+                            .isTrue();
+                }
             }
         }
     }
@@ -225,6 +228,25 @@ class ScoringCalibrationTest {
     @Test
     void p4AMediumCveOnTheLowestValueServiceIsNoise() {
         assertThat(scorer.material(cvssScore("6.9", BusinessCriticality.LOW, ServiceExposure.ISOLATED))).isFalse();
+    }
+
+    @Test
+    void p6CodeThatNeverImportsThePackageRanksItLowerButCostsAtMostOneBand() {
+        for (BusinessCriticality criticality : BusinessCriticality.values()) {
+            for (ServiceExposure exposure : ServiceExposure.values()) {
+                for (String cvss : CVSS_EDGES) {
+                    double imported = cvssScore(cvss, criticality, exposure, CodeUsage.Status.IMPORTED);
+                    double notImported = cvssScore(cvss, criticality, exposure, CodeUsage.Status.NOT_IMPORTED);
+                    String profile = "CVSS %s on %s/%s".formatted(cvss, criticality, exposure);
+                    // No score drops without evidence: unknown is imported.
+                    assertThat(cvssScore(cvss, criticality, exposure, CodeUsage.Status.UNKNOWN)).as(profile)
+                            .isEqualTo(imported);
+                    assertThat(notImported).as(profile).isLessThan(imported);
+                    assertThat(tierOf(notImported).ordinal()).as(profile)
+                            .isGreaterThanOrEqualTo(tierOf(imported).ordinal() - 1);
+                }
+            }
+        }
     }
 
     @Test
@@ -297,6 +319,13 @@ class ScoringCalibrationTest {
     private static double cvssScore(String cvss, BusinessCriticality criticality, ServiceExposure exposure) {
         SeverityInput severity = scorer.severityFromCvss("3.1", new BigDecimal(cvss));
         return scorer.score(scorer.breakdown(SignalType.VULNERABILITY, severity.factor(), exposure, criticality, CONFIRMED));
+    }
+
+    private static double cvssScore(String cvss, BusinessCriticality criticality, ServiceExposure exposure,
+            CodeUsage.Status reachability) {
+        SeverityInput severity = scorer.severityFromCvss("3.1", new BigDecimal(cvss));
+        return scorer.score(scorer.breakdown(SignalType.VULNERABILITY, severity.factor(), exposure, criticality,
+                CONFIRMED, reachability));
     }
 
     private static double labelScore(

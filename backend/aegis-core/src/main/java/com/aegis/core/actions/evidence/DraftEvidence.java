@@ -65,10 +65,19 @@ public final class DraftEvidence {
         lines.add("Service owners: " + (scored.owners().isEmpty() ? "none assigned"
                 : scored.owners().size() + " assigned (personal details omitted)") + ".");
         lines.add("Match confidence: " + scored.confidence() + ".");
+        if (scored.reachability() != null) {
+            // Whether the code reaches it, and why — never the files and lines, which stay in Aegis.
+            var reachability = scored.reachability();
+            lines.add("Code reachability: " + reachability.status() + ". " + (reachability.reason() != null
+                    ? reachability.reason()
+                    : "The service's code imports it in " + reachability.usage().siteCount() + " place"
+                            + (reachability.usage().siteCount() == 1 ? "" : "s")) + ".");
+        }
         var breakdown = scored.breakdown();
         if (breakdown != null) {
             lines.add("Score calculation: severity " + number(breakdown.severityFactor())
                     + " x exposure " + number(breakdown.exposureFactor())
+                    + (breakdown.reachabilityApplies() ? " x reachability " + number(breakdown.reachabilityFactor()) : "")
                     + " x criticality " + number(breakdown.criticalityFactor())
                     + " x confidence " + number(breakdown.confidenceFactor()) + " x 100 = "
                     + String.format(Locale.ROOT, "%.1f", scored.score()) + " (rounded to one decimal)."

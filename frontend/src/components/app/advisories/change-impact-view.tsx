@@ -4,6 +4,7 @@ import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, Info } from "lucide-react";
 
+import { ReachabilityEvidence } from "@/components/app/responses/code-usage";
 import { MemoAction, useLiveMemo } from "@/components/app/responses/memo-action";
 import { ResponseAction, useResponses } from "@/components/app/responses/response-action";
 import { UpgradeEditsTable } from "@/components/app/responses/upgrade-edits";
@@ -73,6 +74,7 @@ const TIER_CLASS: Record<ImpactTier, string> = {
 const FACTOR_LABEL: Record<ScoreFactorKind, string> = {
   SEVERITY: "Severity",
   EXPOSURE: "Exposure",
+  REACHABILITY: "Reachability",
   CRITICALITY: "Criticality",
   CONFIDENCE: "Confidence",
 };
@@ -354,8 +356,12 @@ function ScoreBadge({ score, tier }: { score: number; tier: ImpactTier }) {
  */
 function WhyThisScore({ scored }: { scored: ScoredService }) {
   // Confidence only discounts when a deployment configures it; at ×1.00 it is noise here, just as the
-  // backend leaves it out of the explanation sentence.
-  const factors = scored.factors.filter((factor) => factor.factor !== "CONFIDENCE" || factor.weight !== 1);
+  // backend leaves it out of the explanation sentence. Reachability is about a package, so an outage has none.
+  const factors = scored.factors.filter(
+    (factor) =>
+      (factor.factor !== "CONFIDENCE" || factor.weight !== 1) &&
+      (factor.factor !== "REACHABILITY" || scored.breakdown.reachabilityApplies),
+  );
   const limiting = factors.filter((factor) => factor.limiting);
   const formula = `${factors.map((factor) => factor.weight.toFixed(2)).join(" × ")} × 100 = ${scored.score.toFixed(1)}`;
 
@@ -367,11 +373,18 @@ function WhyThisScore({ scored }: { scored: ScoredService }) {
       </div>
       <ul className="space-y-2.5">
         {factors.map((factor) => (
-          <FactorRow
-            key={factor.factor}
-            factor={factor}
-            notApplied={factor.factor === "EXPOSURE" && !scored.breakdown.exposureApplies}
-          />
+          <Fragment key={factor.factor}>
+            <FactorRow
+              factor={factor}
+              notApplied={factor.factor === "EXPOSURE" && !scored.breakdown.exposureApplies}
+            />
+            {/* The files and lines reachability rests on (E11-4), under its row. */}
+            {factor.factor === "REACHABILITY" && scored.reachability && (
+              <li className="-mt-1 pl-[6.75rem]" aria-label="What reachability rests on">
+                <ReachabilityEvidence reachability={scored.reachability} />
+              </li>
+            )}
+          </Fragment>
         ))}
       </ul>
       <p className="mt-3 text-xs text-muted-foreground">
@@ -467,8 +480,15 @@ function SettingHint({ factor, notApplied }: { factor: ScoreFactor; notApplied: 
   );
 }
 
+const REACHABILITY_INPUT: Record<string, string> = {
+  IMPORTED: "Imported by the code",
+  NOT_IMPORTED: "Not imported, nor what pulls it in",
+  UNKNOWN: "Unknown — scored as imported",
+};
+
 /** Enum inputs ("INTERNET_FACING") read as words; severity inputs are already prose ("CVSS 3.1 base 9.8"). */
 function describeInput(factor: ScoreFactor) {
+  if (factor.factor === "REACHABILITY" && REACHABILITY_INPUT[factor.input]) return REACHABILITY_INPUT[factor.input];
   if (factor.factor === "SEVERITY") {
     // "severity major" sits in the Severity row, so name it for what it is: the feed's own word.
     if (factor.input.startsWith("severity ")) return `Feed label “${factor.input.slice("severity ".length)}”`;

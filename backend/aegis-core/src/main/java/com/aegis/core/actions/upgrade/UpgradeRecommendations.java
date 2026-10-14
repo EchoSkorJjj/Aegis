@@ -15,6 +15,7 @@ import java.util.stream.Collectors;
 import com.aegis.core.inventory.CodeUsage;
 import com.aegis.core.inventory.InventoryFilters.ServiceFilter;
 import com.aegis.core.inventory.InventoryStore;
+import com.aegis.core.inventory.Reachability;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.matching.MatchingDtos.ComponentRef;
 import com.aegis.core.matching.MatchingDtos.MatchConfidence;
@@ -40,8 +41,9 @@ import org.springframework.stereotype.Service;
  * The upgrades Aegis recommends without anyone asking: every vulnerable dependency of the services the
  * caller can see, with the version that fixes it, how much it matters, whether Aegis can automate the pull
  * request — bumping the declaration, or overriding a dependency another one pulls in — and the response already
- * drafted for it, if any — highest impact first. Nobody has to know a CVE to find them; this is E9's queue of material
- * items, for dependency vulnerabilities. Recomputed per request from matching ({@link VulnerableDependencies},
+ * drafted for it, if any — highest impact first, where a package the service's code never reaches ranks below one it
+ * does ({@link Reachability}, E11-4). Nobody has to know a CVE to find them; this is E9's queue of material items, for
+ * dependency vulnerabilities. Recomputed per request from matching ({@link VulnerableDependencies},
  * {@link UpgradeTargets}) and scoring ({@link ImpactScorer}); a proposal is only drafted when a person asks.
  *
  * <p>Every lookup happens up front, in a fixed number of batched queries however many services and
@@ -65,18 +67,18 @@ public class UpgradeRecommendations {
     private final UpgradeProposalStore proposals;
     private final ResponseDirectory responses;
     private final PullRequestHosts pullRequestHosts;
-    private final CodeUsage codeUsage;
+    private final Reachability reachability;
 
     public UpgradeRecommendations(InventoryStore inventory, VulnerableDependencies vulnerable, ImpactScorer scorer,
             UpgradeProposalStore proposals, ResponseDirectory responses, PullRequestHosts pullRequestHosts,
-            CodeUsage codeUsage) {
+            Reachability reachability) {
         this.inventory = inventory;
         this.vulnerable = vulnerable;
         this.scorer = scorer;
         this.proposals = proposals;
         this.responses = responses;
         this.pullRequestHosts = pullRequestHosts;
-        this.codeUsage = codeUsage;
+        this.reachability = reachability;
     }
 
     /** Whether Aegis can draft the pull request now and, if not, what stands in the way. */
@@ -114,7 +116,8 @@ public class UpgradeRecommendations {
      * with a fix too. {@code overrideIn} is where the pull request overrides a dependency no manifest declares
      * (client/pnpm-workspace.yaml, pom.xml), empty when it bumps a declaration instead. {@code usage} is where the
      * service's code imports it (E11-3), and {@code viaUsage} where it imports what pulls it in (null for a direct
-     * dependency). {@code response} is the response already drafted for it: the one whose pull request upgrades this
+     * dependency); {@code reachability} is whether the code reaches it at all, through anything that pulls it in too,
+     * which the score counts (E11-4). {@code response} is the response already drafted for it: the one whose pull request upgrades this
      * dependency, else the one for {@code changeSignalId} in this service.
      */
     public record Recommendation(
@@ -135,6 +138,7 @@ public class UpgradeRecommendations {
             List<String> overrideIn,
             CodeUsage.Usage usage,
             CodeUsage.Usage viaUsage,
+            Reachability.Verdict reachability,
             ProposalRef proposal,
             ResponseDirectory.ResponseRef response) {
     }
@@ -158,17 +162,13 @@ public class UpgradeRecommendations {
         Map<UUID, ResponseDirectory.ResponseRef> byTicket = new HashMap<>();
         byChange.values().forEach(response -> byTicket.put(response.ticketId(), response));
         Found found = vulnerable.find(services.keySet());
-        List<CodeUsage.Package> packages = new ArrayList<>();
-        for (VulnerableDependency dependency : found.dependencies()) {
-            packages.add(new CodeUsage.Package(dependency.component().ecosystem(), dependency.component().name()));
-            if (dependency.via() != null) {
-                packages.add(new CodeUsage.Package(dependency.via().ecosystem(), dependency.via().name()));
-            }
-        }
-        CodeUsage.Code code = codeUsage.read(services, packages);
+        Map<UUID, List<UUID>> components = new HashMap<>();
+        found.dependencies().forEach(dependency -> components.computeIfAbsent(dependency.serviceId(),
+                id -> new ArrayList<>()).add(dependency.component().id()));
+        Reachability.Reached reached = reachability.of(services, found.graphs(), components);
         return found.dependencies().stream()
                 .map(dependency -> recommendation(dependency, services.get(dependency.serviceId()), current, found,
-                        byChange, byTicket, code))
+                        byChange, byTicket, reached))
                 .sorted(Comparator.comparingDouble(Recommendation::score).reversed()
                         .thenComparing(Recommendation::readiness)
                         .thenComparing(Recommendation::serviceName, String.CASE_INSENSITIVE_ORDER)
@@ -179,11 +179,12 @@ public class UpgradeRecommendations {
     private Recommendation recommendation(VulnerableDependency dependency, BusinessService service,
             Map<String, ProposalRef> current, Found found,
             Map<ResponseDirectory.ServiceChange, ResponseDirectory.ResponseRef> byChange,
-            Map<UUID, ResponseDirectory.ResponseRef> byTicket, CodeUsage.Code code) {
+            Map<UUID, ResponseDirectory.ResponseRef> byTicket, Reachability.Reached reached) {
         ComponentRef component = dependency.component();
+        Reachability.Verdict reaches = reached.verdict(service.getId(), component.id());
         ScoreBreakdown breakdown = scorer.breakdown(SignalType.VULNERABILITY,
                 severityFactor(dependency.vulnerabilities().getFirst()), service.getExposure(),
-                service.getCriticality(), dependency.confidence());
+                service.getCriticality(), dependency.confidence(), reaches.status());
         double score = scorer.score(breakdown);
 
         String toVersion = null;
@@ -260,10 +261,9 @@ public class UpgradeRecommendations {
         return new Recommendation(service.getId(), service.getName(), component, dependency.via(),
                 dependency.manifestPaths(), dependency.confidence(), dependency.vulnerabilities(), score,
                 scorer.tier(score), scorer.material(score), toVersion, answered, readiness, reason, overrideIn,
-                code.usageOf(service.getId(), component.ecosystem(), component.name(), dependency.fromRepository()),
-                dependency.via() == null ? null : code.usageOf(service.getId(), dependency.via().ecosystem(),
-                        dependency.via().name(), dependency.fromRepository()),
-                proposal, response);
+                reached.usage(service.getId(), component.id()),
+                dependency.via() == null ? null : reached.usage(service.getId(), dependency.via().id()),
+                reaches, proposal, response);
     }
 
     /** The severity term of the most severe vulnerability: its CVSS score, else its feed's severity word. */

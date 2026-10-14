@@ -2,6 +2,7 @@ package com.aegis.core.scoring;
 
 import java.math.BigDecimal;
 
+import com.aegis.core.inventory.CodeUsage;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.matching.MatchingDtos.MatchConfidence;
@@ -12,6 +13,7 @@ import com.aegis.core.scoring.ScoringDtos.SeveritySource;
 import org.junit.jupiter.api.Test;
 
 import static com.aegis.core.matching.MatchingDtos.MatchConfidence.CONFIRMED;
+import static com.aegis.core.signals.ChangeSignal.SignalType.VENDOR_OUTAGE;
 import static com.aegis.core.signals.ChangeSignal.SignalType.VULNERABILITY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
@@ -52,6 +54,37 @@ class ImpactScorerTest {
         assertThat(isolatedLow).isEqualTo(12.5);
         assertThat(scorer.tier(internalCritical)).isEqualTo(ImpactTier.CRITICAL);
         assertThat(scorer.tier(isolatedLow)).isEqualTo(ImpactTier.LOW);
+    }
+
+    @Test
+    void aPackageTheCodeNeverReachesScoresBelowOneItDoesAndUnknownScoresLikeImported() {
+        // CVSS 9.0 on a worst-case service: 90.0 while the code imports the package or may.
+        ScoreBreakdown imported = scorer.breakdown(VULNERABILITY, 0.9, ServiceExposure.INTERNET_FACING,
+                BusinessCriticality.CRITICAL, CONFIRMED, CodeUsage.Status.IMPORTED);
+        ScoreBreakdown unknown = scorer.breakdown(VULNERABILITY, 0.9, ServiceExposure.INTERNET_FACING,
+                BusinessCriticality.CRITICAL, CONFIRMED, CodeUsage.Status.UNKNOWN);
+        ScoreBreakdown notImported = scorer.breakdown(VULNERABILITY, 0.9, ServiceExposure.INTERNET_FACING,
+                BusinessCriticality.CRITICAL, CONFIRMED, CodeUsage.Status.NOT_IMPORTED);
+        ScoreBreakdown unread = scorer.breakdown(VULNERABILITY, 0.9, ServiceExposure.INTERNET_FACING,
+                BusinessCriticality.CRITICAL, CONFIRMED);
+
+        assertThat(scorer.score(imported)).isEqualTo(90.0);
+        // No score drops without evidence: not knowing is scored as imported.
+        assertThat(scorer.score(unknown)).isEqualTo(90.0);
+        assertThat(unread.reachability()).isEqualTo(CodeUsage.Status.UNKNOWN);
+        assertThat(scorer.score(unread)).isEqualTo(90.0);
+        // Never imported, nor anything that pulls it in: one band lower, HIGH rather than CRITICAL.
+        assertThat(notImported.reachabilityFactor()).isEqualTo(0.8);
+        assertThat(scorer.score(notImported)).isEqualTo(72.0);
+        assertThat(scorer.tier(scorer.score(notImported))).isEqualTo(ImpactTier.HIGH);
+
+        // An outage has no package, so the term doesn't apply, whatever it is handed.
+        ScoreBreakdown outage = scorer.breakdown(VENDOR_OUTAGE, 0.75, ServiceExposure.INTERNET_FACING,
+                BusinessCriticality.CRITICAL, CONFIRMED, CodeUsage.Status.NOT_IMPORTED);
+        assertThat(outage.reachabilityApplies()).isFalse();
+        assertThat(outage.reachability()).isNull();
+        assertThat(outage.reachabilityFactor()).isEqualTo(1.0);
+        assertThat(scorer.score(outage)).isEqualTo(75.0);
     }
 
     @Test
@@ -142,7 +175,7 @@ class ImpactScorerTest {
     @Test
     void honoursSuppliedWeightsRatherThanTheDefaults() {
         ScoringProperties strict = new ScoringProperties(
-                null, null, null, null, 0.5, new ScoringProperties.Tiers(95.0, 80.0, 50.0, 20.0), 20.0, null);
+                null, null, null, null, 0.5, new ScoringProperties.Tiers(95.0, 80.0, 50.0, 20.0), 20.0, null, null);
         ImpactScorer strictScorer = new ImpactScorer(strict);
 
         assertThat(scorer.tier(90.0)).isEqualTo(ImpactTier.CRITICAL);

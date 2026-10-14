@@ -39,11 +39,11 @@ function impact(owners: OwnerRef[]): ChangeImpactResponse {
       service: { id: SERVICE, name: "Payments API", criticality: "HIGH", exposure: "INTERNET_FACING" },
       score: 100, tier: "CRITICAL", material: true, confidence: "CONFIRMED",
       breakdown: {
-        severityFactor: 1, exposure: "INTERNET_FACING", exposureFactor: 1, exposureApplies: true,
+        severityFactor: 1, exposure: "INTERNET_FACING", exposureFactor: 1, exposureApplies: true, reachability: "UNKNOWN", reachabilityFactor: 1, reachabilityApplies: true,
         criticality: "HIGH", criticalityFactor: 1, confidence: "CONFIRMED", confidenceFactor: 1,
       },
       factors: [factor("SEVERITY", "CVSS 3.1 base 10.0"), factor("EXPOSURE", "INTERNET_FACING"), factor("CRITICALITY", "HIGH")],
-      explanation: "Worst case.",
+      reachability: { status: "UNKNOWN", reason: "The service's code hasn't been read yet: import the SBOM from its repository", through: null, usage: null }, explanation: "Worst case.",
       owners,
       evidence: [chain([LOG4J])],
     }],

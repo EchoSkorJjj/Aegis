@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.stream.Collectors;
 
+import com.aegis.core.inventory.CodeUsage;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
@@ -38,7 +39,7 @@ final class ScoreExplainer {
 
     private static final String SETTINGS = "aegis.scoring.";
 
-    /** The exposure term's input when it does not apply — see {@link ImpactScorer#breakdown}. */
+    /** The exposure and reachability terms' input when they do not apply — see {@link ImpactScorer#breakdown}. */
     static final String NOT_APPLIED = "not applied to outages";
 
     private final ImpactScorer scorer;
@@ -61,6 +62,13 @@ final class ScoreExplainer {
                                 breakdown.exposureFactor(), setting("exposure", exposure))
                         // An outage is not an attack, so no exposure setting can move this term.
                         : new Term(ScoreFactorKind.EXPOSURE, NOT_APPLIED, breakdown.exposureFactor(), null),
+                breakdown.reachabilityApplies()
+                        // Unknown has no weight of its own: it scores like imported, so that is its setting.
+                        ? new Term(ScoreFactorKind.REACHABILITY, breakdown.reachability().name(),
+                                breakdown.reachabilityFactor(), setting("reachability",
+                                        breakdown.reachability() == CodeUsage.Status.NOT_IMPORTED
+                                                ? CodeUsage.Status.NOT_IMPORTED : CodeUsage.Status.IMPORTED))
+                        : new Term(ScoreFactorKind.REACHABILITY, NOT_APPLIED, breakdown.reachabilityFactor(), null),
                 new Term(ScoreFactorKind.CRITICALITY,
                         breakdown.criticality() == null ? "unset" : breakdown.criticality().name(),
                         breakdown.criticalityFactor(), setting("criticality", breakdown.criticality())),
@@ -89,9 +97,9 @@ final class ScoreExplainer {
 
     /**
      * The one-sentence form: the multiplication as it was done, then — when anything is holding the
-     * score below the worst case — which factor holds it down most and by how much. A deployment's
-     * confidence discount is only spelled out when one is configured, so the default sentence stays
-     * the three-factor model it is described as.
+     * score below the worst case — which factor holds it down most and by how much. Reachability and a
+     * deployment's confidence discount are only spelled out when they discount, so the sentence stays the
+     * three-factor model for everything the code reaches or might.
      */
     String explain(
             String changeTitle,
@@ -112,6 +120,10 @@ final class ScoreExplainer {
                         factor(factors, ScoreFactorKind.EXPOSURE).input(),
                         weight(breakdown.criticalityFactor()),
                         factor(factors, ScoreFactorKind.CRITICALITY).input()));
+        if (breakdown.reachabilityFactor() != 1.0) {
+            sentence.append(" x reachability %s (%s)".formatted(
+                    weight(breakdown.reachabilityFactor()), factor(factors, ScoreFactorKind.REACHABILITY).input()));
+        }
         if (breakdown.confidenceFactor() != 1.0) {
             sentence.append(" x confidence %s (%s)".formatted(
                     weight(breakdown.confidenceFactor()), factor(factors, ScoreFactorKind.CONFIDENCE).input()));
@@ -138,6 +150,9 @@ final class ScoreExplainer {
                 b.exposure(),
                 kind == ScoreFactorKind.EXPOSURE ? 1.0 : b.exposureFactor(),
                 b.exposureApplies(),
+                b.reachability(),
+                kind == ScoreFactorKind.REACHABILITY ? 1.0 : b.reachabilityFactor(),
+                b.reachabilityApplies(),
                 b.criticality(),
                 kind == ScoreFactorKind.CRITICALITY ? 1.0 : b.criticalityFactor(),
                 b.confidence(),

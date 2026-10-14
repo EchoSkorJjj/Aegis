@@ -67,17 +67,19 @@ public class VulnerableDependencies {
      */
     public static final class Found {
 
-        static final Found NONE = new Found(List.of(), List.of(), List.of());
+        static final Found NONE = new Found(List.of(), List.of(), List.of(), Map.of());
 
         private final List<VulnerableDependency> dependencies;
+        private final Map<UUID, ServiceGraph> graphs;
         // Keyed exactly as the advisory store's prefilter compares them (UpgradeTargets#packageKeys/productKeys).
         private final Map<String, List<Advisory>> byPackageKey = new HashMap<>();
         private final Map<String, List<Advisory>> byProductKey = new HashMap<>();
         private final Map<String, List<Advisory>> byVulnerability = new HashMap<>();
 
         Found(List<VulnerableDependency> dependencies, Collection<Advisory> namingPackages,
-                Collection<Advisory> ofVulnerabilities) {
+                Collection<Advisory> ofVulnerabilities, Map<UUID, ServiceGraph> graphs) {
             this.dependencies = List.copyOf(dependencies);
+            this.graphs = Map.copyOf(graphs);
             for (Advisory advisory : namingPackages) {
                 for (AffectedProduct product : advisory.affected()) {
                     if (product.packageName() != null) {
@@ -96,6 +98,11 @@ public class VulnerableDependencies {
 
         public List<VulnerableDependency> dependencies() {
             return dependencies;
+        }
+
+        /** Each service's dependency graph, as the search walked it — what pulls each dependency in. */
+        public Map<UUID, ServiceGraph> graphs() {
+            return graphs;
         }
 
         /**
@@ -170,7 +177,7 @@ public class VulnerableDependencies {
         }
         Set<String> vulnerabilityIds = new HashSet<>();
         found.forEach(dependency -> dependency.vulnerabilities().forEach(ref -> vulnerabilityIds.add(ref.id())));
-        return new Found(found, matched.naming(), advisories.findByCanonicalIds(vulnerabilityIds));
+        return new Found(found, matched.naming(), advisories.findByCanonicalIds(vulnerabilityIds), graphs);
     }
 
     /** The vulnerabilities affecting each component, and every advisory the prefilter loaded to find them. */

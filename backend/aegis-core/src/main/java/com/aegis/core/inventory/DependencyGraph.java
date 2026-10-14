@@ -189,6 +189,8 @@ public class DependencyGraph {
         private final Map<UUID, Set<UUID>> dependsOn;
         private final Set<UUID> components;
         private final Map<UUID, Set<UUID>> below = new HashMap<>();
+        private final Map<UUID, Set<UUID>> above = new HashMap<>();
+        private Map<UUID, Set<UUID>> dependedOnBy;
 
         ServiceGraph(List<ServiceComponentLink> direct, Map<UUID, Set<UUID>> dependsOn, Set<UUID> components) {
             this.direct = List.copyOf(direct);
@@ -221,6 +223,32 @@ public class DependencyGraph {
                 }
             }
             below.put(componentId, reached);
+            return reached;
+        }
+
+        /**
+         * Everything above {@code componentId} in this graph: every component that pulls it in, directly or through
+         * others, up to the ones the service links. Never itself, even in a cycle. Worked out once per component.
+         */
+        public Set<UUID> above(UUID componentId) {
+            Set<UUID> cached = above.get(componentId);
+            if (cached != null) {
+                return cached;
+            }
+            if (dependedOnBy == null) {
+                dependedOnBy = new HashMap<>();
+                dependsOn.forEach((component, dependencies) -> dependencies.forEach(dependency ->
+                        dependedOnBy.computeIfAbsent(dependency, id -> new LinkedHashSet<>()).add(component)));
+            }
+            Set<UUID> reached = new LinkedHashSet<>();
+            List<UUID> pending = new ArrayList<>(dependedOnBy.getOrDefault(componentId, Set.of()));
+            while (!pending.isEmpty()) {
+                UUID next = pending.removeLast();
+                if (!next.equals(componentId) && reached.add(next)) {
+                    pending.addAll(dependedOnBy.getOrDefault(next, Set.of()));
+                }
+            }
+            above.put(componentId, reached);
             return reached;
         }
     }

@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
+import com.aegis.core.inventory.CodeUsage;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.matching.MatchingDtos.MatchConfidence;
@@ -20,6 +21,7 @@ import static com.aegis.core.matching.MatchingDtos.MatchConfidence.POSSIBLE;
 import static com.aegis.core.scoring.ScoringDtos.ScoreFactorKind.CONFIDENCE;
 import static com.aegis.core.scoring.ScoringDtos.ScoreFactorKind.CRITICALITY;
 import static com.aegis.core.scoring.ScoringDtos.ScoreFactorKind.EXPOSURE;
+import static com.aegis.core.scoring.ScoringDtos.ScoreFactorKind.REACHABILITY;
 import static com.aegis.core.scoring.ScoringDtos.ScoreFactorKind.SEVERITY;
 import static com.aegis.core.signals.ChangeSignal.SignalType.VULNERABILITY;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -43,15 +45,17 @@ class ScoreExplainerTest {
         List<ScoreFactor> factors = explainer.factors(severity, breakdown);
 
         assertThat(factors).extracting(ScoreFactor::factor)
-                .containsExactly(SEVERITY, EXPOSURE, CRITICALITY, CONFIDENCE);
+                .containsExactly(SEVERITY, EXPOSURE, REACHABILITY, CRITICALITY, CONFIDENCE);
+        // Without a reading of the code, reachability is unknown — and scores like imported.
         assertThat(factors).extracting(ScoreFactor::input)
-                .containsExactly("CVSS 3.1 base 8", "INTERNAL", "HIGH", "CONFIRMED");
-        assertThat(factors).extracting(ScoreFactor::weight).containsExactly(0.8, 0.9, 0.8, 1.0);
+                .containsExactly("CVSS 3.1 base 8", "INTERNAL", "UNKNOWN", "HIGH", "CONFIRMED");
+        assertThat(factors).extracting(ScoreFactor::weight).containsExactly(0.8, 0.9, 1.0, 0.8, 1.0);
         // A CVSS score is published by the feed, so nothing in configuration sets it; the rest are
-        // the exact keys an operator would write in application.yml.
+        // the exact keys an operator would write in application.yml. Unknown has no weight of its own.
         assertThat(factors).extracting(ScoreFactor::setting).containsExactly(
                 null,
                 "aegis.scoring.exposure.internal",
+                "aegis.scoring.reachability.imported",
                 "aegis.scoring.criticality.high",
                 "aegis.scoring.confidence.confirmed");
     }
@@ -67,9 +71,9 @@ class ScoreExplainerTest {
         assertThat(scorer.score(breakdown)).isEqualTo(32.0);
         List<ScoreFactor> factors = explainer.factors(severity, breakdown);
 
-        assertThat(factors).extracting(ScoreFactor::headroom).containsExactly(8.0, 32.0, 8.0, 0.0);
+        assertThat(factors).extracting(ScoreFactor::headroom).containsExactly(8.0, 32.0, 0.0, 8.0, 0.0);
         // Exposure costs the most, so it is the one holding the score down.
-        assertThat(factors).extracting(ScoreFactor::limiting).containsExactly(false, true, false, false);
+        assertThat(factors).extracting(ScoreFactor::limiting).containsExactly(false, true, false, false, false);
         assertThat(explainer.explain("CVE-2099-1", "Orders", 32.0, ImpactTier.LOW, breakdown, factors))
                 .isEqualTo("CVE-2099-1 scores 32.0 (LOW) for Orders: severity 0.80 (CVSS 3.1 base 8) "
                         + "x exposure 0.50 (ISOLATED) x criticality 0.80 (HIGH); "
@@ -80,7 +84,7 @@ class ScoreExplainerTest {
     void headroomAgreesWithTheScorerToTheDisplayedDecimalForEveryCombination() {
         // A discount on POSSIBLE so the confidence term is exercised too.
         ImpactScorer discounting = new ImpactScorer(new ScoringProperties(
-                null, null, Map.of(POSSIBLE, 0.7), null, null, null, null, null));
+                null, null, Map.of(POSSIBLE, 0.7), null, null, null, null, null, null));
         ScoreExplainer explaining = new ScoreExplainer(discounting);
 
         for (String cvss : List.of("0.0", "2.5", "5.5", "7.5", "9.8", "10.0")) {
@@ -121,8 +125,8 @@ class ScoreExplainerTest {
         List<ScoreFactor> factors = explainer.factors(severity, breakdown);
 
         // Maxed alone: severity -> 45.0, exposure -> 37.5, criticality -> 67.5.
-        assertThat(factors).extracting(ScoreFactor::headroom).containsExactly(11.2, 3.7, 33.7, 0.0);
-        assertThat(factors).extracting(ScoreFactor::limiting).containsExactly(false, false, true, false);
+        assertThat(factors).extracting(ScoreFactor::headroom).containsExactly(11.2, 3.7, 0.0, 33.7, 0.0);
+        assertThat(factors).extracting(ScoreFactor::limiting).containsExactly(false, false, false, true, false);
         assertThat(factor(factors, SEVERITY).setting()).isEqualTo("aegis.scoring.severity-label.high");
     }
 
@@ -145,12 +149,12 @@ class ScoreExplainerTest {
     @Test
     void flagsEveryFactorTiedForHoldingTheScoreDownMost() {
         SeverityInput severity = scorer.severityFromCvss("3.1", new BigDecimal("10.0"));
-        ScoreBreakdown breakdown = new ScoreBreakdown(
-                1.0, ServiceExposure.INTERNAL, 0.5, true, BusinessCriticality.MEDIUM, 0.5, CONFIRMED, 1.0);
+        ScoreBreakdown breakdown = new ScoreBreakdown(1.0, ServiceExposure.INTERNAL, 0.5, true,
+                CodeUsage.Status.IMPORTED, 1.0, true, BusinessCriticality.MEDIUM, 0.5, CONFIRMED, 1.0);
 
         List<ScoreFactor> factors = explainer.factors(severity, breakdown);
 
-        assertThat(factors).extracting(ScoreFactor::limiting).containsExactly(false, true, true, false);
+        assertThat(factors).extracting(ScoreFactor::limiting).containsExactly(false, true, false, true, false);
         assertThat(explainer.explain("CVE-2099-1", "Orders", 25.0, ImpactTier.MEDIUM, breakdown, factors))
                 .endsWith("; exposure (INTERNAL) and criticality (MEDIUM) hold it down most, "
                         + "costing 25.0 points each");
@@ -165,8 +169,8 @@ class ScoreExplainerTest {
 
         List<ScoreFactor> factors = explainer.factors(severity, breakdown);
 
-        assertThat(factors).extracting(ScoreFactor::headroom).containsExactly(72.0, 0.0, 0.0, 0.0);
-        assertThat(factors).extracting(ScoreFactor::limiting).containsExactly(true, false, false, false);
+        assertThat(factors).extracting(ScoreFactor::headroom).containsExactly(72.0, 0.0, 0.0, 0.0, 0.0);
+        assertThat(factors).extracting(ScoreFactor::limiting).containsExactly(true, false, false, false, false);
     }
 
     @Test
@@ -211,7 +215,7 @@ class ScoreExplainerTest {
     @Test
     void spellsOutAConfiguredConfidenceDiscountAndCanBlameIt() {
         ImpactScorer strict = new ImpactScorer(new ScoringProperties(
-                null, null, Map.of(POSSIBLE, 0.5), null, null, null, null, null));
+                null, null, Map.of(POSSIBLE, 0.5), null, null, null, null, null, null));
         ScoreExplainer explaining = new ScoreExplainer(strict);
         SeverityInput severity = strict.severityFromCvss("3.1", new BigDecimal("10.0"));
         ScoreBreakdown breakdown = strict.breakdown(VULNERABILITY,
@@ -256,6 +260,9 @@ class ScoreExplainerTest {
                 b.exposure(),
                 kind == EXPOSURE ? 1.0 : b.exposureFactor(),
                 b.exposureApplies(),
+                b.reachability(),
+                kind == REACHABILITY ? 1.0 : b.reachabilityFactor(),
+                b.reachabilityApplies(),
                 b.criticality(),
                 kind == CRITICALITY ? 1.0 : b.criticalityFactor(),
                 b.confidence(),
