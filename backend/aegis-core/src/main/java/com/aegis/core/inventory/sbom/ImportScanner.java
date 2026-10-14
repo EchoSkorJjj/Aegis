@@ -12,6 +12,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -139,6 +140,7 @@ final class ImportScanner {
             log.warn("import scan: checkout not walked: {}", unreadable.getClass().getSimpleName());
         }
         sources.sort(null);
+        Set<String> ownPython = ownPythonModules(checkout, sources);
 
         Map<String, Accumulator> modules = new LinkedHashMap<>();
         Set<String> languages = new TreeSet<>();
@@ -175,7 +177,7 @@ final class ImportScanner {
             String language = language(file);
             languages.add(language);
             String path = relative(checkout, file);
-            for (Found found : imports(language, text)) {
+            for (Found found : imports(language, text, ownPython)) {
                 Accumulator accumulator = modules.get(language + "\0" + found.module());
                 if (accumulator == null) {
                     if (modules.size() >= MAX_MODULES) {
@@ -200,11 +202,14 @@ final class ImportScanner {
                 modules.values().stream().map(Accumulator::toImports).toList());
     }
 
-    /** The modules one file imports, in its language, each with the line it is imported on. */
-    static List<Found> imports(String language, String text) {
+    /**
+     * The modules one file imports, in its language, each with the line it is imported on. {@code ownPython}: the
+     * top-level modules the repository's own Python code defines ({@link #ownPythonModules}).
+     */
+    static List<Found> imports(String language, String text, Set<String> ownPython) {
         return switch (language) {
             case "npm" -> javascript(text);
-            case "pypi" -> python(text);
+            case "pypi" -> python(text, ownPython);
             case "maven" -> jvm(text);
             default -> List.of();
         };
@@ -215,15 +220,13 @@ final class ImportScanner {
     }
 
     private static List<Found> javascript(String text) {
-        int[] lineStarts = lineStarts(text);
+        String code = withoutCComments(text);
+        int[] lineStarts = lineStarts(code);
         List<Found> found = new ArrayList<>();
         for (Pattern pattern : List.of(JS_FROM, JS_BARE, JS_DYNAMIC)) {
-            Matcher matcher = pattern.matcher(text);
+            Matcher matcher = pattern.matcher(code);
             while (matcher.find()) {
                 int line = lineOf(lineStarts, matcher.start(2));
-                if (commented(text, lineStarts, lineOf(lineStarts, matcher.start()))) {
-                    continue;
-                }
                 String module = npmPackage(matcher.group(2).strip());
                 if (module != null) {
                     found.add(new Found(module, line));
@@ -251,25 +254,69 @@ final class ImportScanner {
         return name;
     }
 
-    private static List<Found> python(String text) {
+    private static List<Found> python(String text, Set<String> ownPython) {
         List<Found> found = new ArrayList<>();
-        String[] lines = text.split("\n", -1);
+        String[] lines = withoutPythonComments(text).replace("\r", "").split("\n", -1);
         for (int index = 0; index < lines.length; index++) {
-            String line = withoutComment(lines[index]);
-            Matcher from = PY_FROM.matcher(line);
+            int number = index + 1;
+            // A statement runs on past a line ending in a backslash, and "from x import (a," to its closing parenthesis.
+            String statement = lines[index];
+            while (index + 1 < lines.length && (statement.stripTrailing().endsWith("\\") || unclosedFrom(statement))) {
+                String head = statement.stripTrailing();
+                statement = (head.endsWith("\\") ? head.substring(0, head.length() - 1) : head) + " " + lines[++index];
+            }
+            Matcher from = PY_FROM.matcher(statement);
             if (from.find()) {
-                addPython(found, from.group(1), index + 1);
+                String module = from.group(1);
+                List<String> modules = ownPython.contains(module.split("\\.")[0]) ? List.of(module)
+                        : fromImports(module, statement.substring(from.end()));
+                for (String imported : modules) {
+                    addPython(found, imported, number);
+                }
                 continue;
             }
-            Matcher plain = PY_IMPORT.matcher(line);
+            Matcher plain = PY_IMPORT.matcher(statement);
             if (plain.matches()) {
                 for (String part : plain.group(1).split(",")) {
                     String module = part.strip().split("\\s+as\\s+")[0].strip();
-                    addPython(found, module, index + 1);
+                    addPython(found, module, number);
                 }
             }
         }
         return found;
+    }
+
+    /** A {@code from … import (} whose parenthesis closes on a later line. */
+    private static boolean unclosedFrom(String statement) {
+        return statement.indexOf('(') >= 0 && statement.indexOf(')') < 0 && PY_FROM.matcher(statement).find();
+    }
+
+    /**
+     * The modules {@code from module import names} imports. A name may be a submodule ({@code from google.cloud import
+     * storage} imports {@code google.cloud.storage}), and submodules are lowercase by convention, so a lowercase name is
+     * recorded below the module — a function too, which is harmless: it names no package. A class or constant (CapWords,
+     * UPPER), or {@code *}, records the module itself. From the repository's own packages, whose names are its own
+     * functions and modules and never a dependency, only the module is recorded ({@link #python}), so a large codebase's
+     * imports of its own functions don't fill the scan's {@value #MAX_MODULES} modules.
+     */
+    static List<String> fromImports(String module, String names) {
+        List<String> modules = new ArrayList<>();
+        boolean itself = false;
+        for (String part : names.replace("(", " ").replace(")", " ").split(",")) {
+            String name = part.strip().split("\\s+as\\s+")[0].strip();
+            if (name.isEmpty()) {
+                continue;
+            }
+            if (name.matches("[a-z_][a-z0-9_]*")) {
+                modules.add(module + "." + name);
+            } else {
+                itself = true;
+            }
+        }
+        if (itself || modules.isEmpty()) {
+            modules.addFirst(module);
+        }
+        return modules;
     }
 
     private static void addPython(List<Found> found, String module, int line) {
@@ -283,7 +330,7 @@ final class ImportScanner {
 
     private static List<Found> jvm(String text) {
         List<Found> found = new ArrayList<>();
-        String[] lines = text.split("\n", -1);
+        String[] lines = withoutCComments(text).split("\n", -1);
         for (int index = 0; index < lines.length; index++) {
             Matcher matcher = JVM_IMPORT.matcher(lines[index].replace("\r", ""));
             if (!matcher.matches()) {
@@ -307,6 +354,33 @@ final class ImportScanner {
             }
         }
         return found;
+    }
+
+    /**
+     * The top-level modules the repository's own Python code defines: each file's outermost package (the folders above
+     * it holding an {@code __init__.py}), or the file itself where its folder holds none.
+     */
+    static Set<String> ownPythonModules(Path checkout, List<Path> sources) {
+        Set<Path> packages = new HashSet<>();
+        for (Path file : sources) {
+            if (file.getFileName().toString().equals("__init__.py")) {
+                packages.add(file.getParent());
+            }
+        }
+        Set<String> own = new HashSet<>();
+        for (Path file : sources) {
+            String name = file.getFileName().toString();
+            if (!"pypi".equals(language(file))) {
+                continue;
+            }
+            String top = name.substring(0, name.lastIndexOf('.'));
+            for (Path dir = file.getParent(); dir != null && !dir.equals(checkout) && packages.contains(dir);
+                    dir = dir.getParent()) {
+                top = dir.getFileName().toString();
+            }
+            own.add(top);
+        }
+        return own;
     }
 
     // --- helpers ---------------------------------------------------------------------------------------------------
@@ -348,9 +422,103 @@ final class ImportScanner {
         return checkout.relativize(file).toString().replace('\\', '/');
     }
 
-    private static String withoutComment(String line) {
-        int hash = line.indexOf('#');
-        return (hash < 0 ? line : line.substring(0, hash)).replace("\r", "");
+    /**
+     * JavaScript, TypeScript, Java or Kotlin with every comment — a line comment to the end of its line, a block comment
+     * across lines — blanked to spaces, newlines kept, so an import commented out is never read and every offset and
+     * line stays where it was. String and template literals (and Java's text blocks) are left as they are: a {@code //}
+     * in {@code "https://…"} starts no comment. A backslash outside one escapes the next character (a regular expression's
+     * {@code \/}, so {@code /\/*$/} opens no comment); a literal still open at a line's end is closed there; and a block
+     * comment that never closes is no comment at all — each a misreading of something else, which blanks nothing.
+     */
+    static String withoutCComments(String text) {
+        char[] code = text.toCharArray();
+        int at = 0;
+        while (at < code.length) {
+            char c = code[at];
+            char next = at + 1 < code.length ? code[at + 1] : '\0';
+            if (c == '/' && next == '/') {
+                while (at < code.length && code[at] != '\n') {
+                    code[at++] = ' ';
+                }
+            } else if (c == '/' && next == '*') {
+                int end = text.indexOf("*/", at + 2);
+                if (end < 0) {
+                    at += 2;
+                } else {
+                    blank(code, at, end + 2);
+                    at = end + 2;
+                }
+            } else if (c == '\\') {
+                at += 2;
+            } else if (c == '"' && next == '"' && at + 2 < code.length && code[at + 2] == '"') {
+                int end = text.indexOf("\"\"\"", at + 3);
+                at = end < 0 ? code.length : end + 3;
+            } else if (c == '"' || c == '\'' || c == '`') {
+                at = endOfLiteral(code, at, c == '`');
+            } else {
+                at++;
+            }
+        }
+        return new String(code);
+    }
+
+    /**
+     * Python with every {@code #} comment and every triple-quoted string (a docstring is text, not code) blanked to
+     * spaces, newlines kept. Other strings are left as they are: a {@code #} in {@code "a#b"} starts no comment. A
+     * triple-quoted string that never closes is left as it is.
+     */
+    static String withoutPythonComments(String text) {
+        char[] code = text.toCharArray();
+        int at = 0;
+        while (at < code.length) {
+            char c = code[at];
+            if (c == '#') {
+                while (at < code.length && code[at] != '\n') {
+                    code[at++] = ' ';
+                }
+            } else if ((c == '"' || c == '\'') && at + 2 < code.length && code[at + 1] == c && code[at + 2] == c) {
+                int end = text.indexOf(String.valueOf(c).repeat(3), at + 3);
+                if (end < 0) {
+                    at += 3;
+                } else {
+                    blank(code, at, end + 3);
+                    at = end + 3;
+                }
+            } else if (c == '"' || c == '\'') {
+                at = endOfLiteral(code, at, false);
+            } else {
+                at++;
+            }
+        }
+        return new String(code);
+    }
+
+    /** Where the literal opening at {@code start} ends: after its closing quote, or at the line's end if none. */
+    private static int endOfLiteral(char[] code, int start, boolean multiline) {
+        char quote = code[start];
+        int at = start + 1;
+        while (at < code.length) {
+            char c = code[at];
+            if (c == '\\') {
+                at += 2;
+            } else if (c == quote) {
+                return at + 1;
+            } else if (c == '\n' && !multiline) {
+                return at;
+            } else {
+                at++;
+            }
+        }
+        return code.length;
+    }
+
+    /** Spaces in place of {@code [from, to)}, keeping its newlines. */
+    private static void blank(char[] code, int from, int to) {
+        for (int at = from; at < to; at++) {
+            if (code[at] != '\n' && code[at] != '\r') {
+                code[at] = ' ';
+            }
+        }
     }
 
     private static int[] lineStarts(String text) {
@@ -367,14 +535,6 @@ final class ImportScanner {
     private static int lineOf(int[] lineStarts, int offset) {
         int index = Arrays.binarySearch(lineStarts, offset);
         return (index >= 0 ? index : -index - 2) + 1;
-    }
-
-    /** Whether the 1-based line is a comment: {@code //}, or a block comment's opening or continuation. */
-    private static boolean commented(String text, int[] lineStarts, int line) {
-        int start = lineStarts[line - 1];
-        int end = line < lineStarts.length ? lineStarts[line] : text.length();
-        String trimmed = text.substring(start, end).strip();
-        return trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*");
     }
 
     private static String capitalized(String text) {

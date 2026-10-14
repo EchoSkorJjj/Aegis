@@ -61,6 +61,48 @@ class ImportScannerTest {
     }
 
     @Test
+    void anImportInsideABlockCommentIsNotReadAndLinesAfterItKeepTheirNumbers() throws Exception {
+        write("web/src/legacy.ts", """
+                /*
+                import hidden from "in-a-block-comment";
+                const old = require("old-require");
+                 */
+                /**
+                 * Usage: import { thing } from "in-a-doc-comment";
+                 */
+                const pattern = /\\/*$/; import afterRegex from "after-a-regex";
+                const url = "https://cdn.example.test/*"; import afterUrl from "after-a-url";
+                const tick = `/* ${"*/"} `; import afterTemplate from "after-a-template";
+                import real from "real"; /* trailing
+                import alsoHidden from "also-hidden"; */ import afterClose from "after-the-close";
+                """);
+        write("svc/src/main/java/com/acme/Legacy.java", """
+                package com.acme;
+
+                /*
+                import org.hidden.Thing;
+                 */
+                // import org.commented.Thing;
+                import org.visible.Thing; // import org.trailing.Thing;
+                class Legacy {
+                    String url = "http://example.test/*";
+                }
+                import org.after.Thing;
+                """);
+
+        ImportScan scan = ImportScanner.scan(checkout, Set.of(), REVISION);
+
+        Map<String, List<Site>> javascript = sites(scan, "npm");
+        assertThat(javascript).containsOnlyKeys("after-a-regex", "after-a-url", "after-a-template", "real",
+                "after-the-close");
+        assertThat(javascript.get("after-a-regex")).containsExactly(new Site("web/src/legacy.ts", 8));
+        assertThat(javascript.get("after-the-close")).containsExactly(new Site("web/src/legacy.ts", 12));
+        Map<String, List<Site>> jvm = sites(scan, "maven");
+        assertThat(jvm).containsOnlyKeys("org.visible", "org.after");
+        assertThat(jvm.get("org.after")).containsExactly(new Site("svc/src/main/java/com/acme/Legacy.java", 11));
+    }
+
+    @Test
     void pythonImportsAreFoundByModuleAndTheStandardLibraryAndRelativeImportsAreLeftOut() throws Exception {
         write("api/main.py", """
                 import os, sys
@@ -76,9 +118,57 @@ class ImportScannerTest {
 
         Map<String, List<Site>> found = sites(ImportScanner.scan(checkout, Set.of(), REVISION), "pypi");
 
-        assertThat(found).containsOnlyKeys("yaml", "google.protobuf.json_format", "requests", "PIL", "jose.jwt", "attr");
+        assertThat(found).containsOnlyKeys("yaml", "google.protobuf.json_format", "requests", "PIL", "jose.jwt.decode",
+                "attr");
         assertThat(found.get("requests")).containsExactly(new Site("api/main.py", 3));
         assertThat(found.get("attr")).containsExactly(new Site("api/main.py", 8));
+    }
+
+    @Test
+    void aPythonFromImportRecordsEachSubmoduleItMayImport() throws Exception {
+        write("api/storage.py", """
+                from google.cloud import storage
+                from google.cloud import (
+                    bigquery,
+                    pubsub_v1 as pubsub,  # a comment inside
+                )
+                from flask import Flask, request
+                from sqlalchemy.orm import *
+                from botocore \\
+                    import session
+                from myapp.billing import charge
+                \"""Usage:
+
+                import inside_a_docstring
+                from inside.a.docstring import thing
+                \"""
+                LABEL = "# import not_a_comment"
+                import after_the_docstring
+                """);
+        write("myapp/__init__.py", "");
+        write("myapp/billing/__init__.py", "def charge():\n    pass\n");
+
+        Map<String, List<Site>> found = sites(ImportScanner.scan(checkout, Set.of(), REVISION), "pypi");
+
+        // google-cloud-storage is imported as google.cloud.storage: found, not just google.cloud.
+        assertThat(found).containsOnlyKeys("google.cloud.storage", "google.cloud.bigquery", "google.cloud.pubsub_v1",
+                "flask", "flask.request", "sqlalchemy.orm", "botocore.session", "myapp.billing", "after_the_docstring");
+        assertThat(found.get("google.cloud.storage")).containsExactly(new Site("api/storage.py", 1));
+        // A parenthesised or continued import is found on its first line.
+        assertThat(found.get("google.cloud.pubsub_v1")).containsExactly(new Site("api/storage.py", 2));
+        assertThat(found.get("botocore.session")).containsExactly(new Site("api/storage.py", 8));
+        assertThat(found.get("after_the_docstring")).containsExactly(new Site("api/storage.py", 17));
+    }
+
+    @Test
+    void theRepositorysOwnPythonModulesAreItsOutermostPackagesAndLooseFiles() {
+        Path root = Path.of("/checkout");
+        Set<String> own = ImportScanner.ownPythonModules(root, List.of(root.resolve("src/myapp/__init__.py"),
+                root.resolve("src/myapp/api/__init__.py"), root.resolve("src/myapp/api/routes.py"),
+                root.resolve("scripts/seed.py"), root.resolve("integrations/google/client.py"),
+                root.resolve("web/app.ts")));
+
+        assertThat(own).containsExactlyInAnyOrder("myapp", "seed", "client");
     }
 
     @Test

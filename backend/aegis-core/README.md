@@ -751,7 +751,12 @@ Services imported before V39 keep their old links until re-imported.
 
 **Where the code imports each dependency (E11-3, V40).** The same import reads the checkout's code for the modules it
 imports (`inventory.sbom.ImportScanner`): JavaScript and TypeScript `import`, `export … from`, `import()` and
-`require()`; Python `import` and `from … import`; Java and Kotlin `import`. It reads source text and never runs it;
+`require()`; Python `import` and `from … import`; Java and Kotlin `import`. It reads source text and never runs it.
+Comments are blanked first, across lines (a `/* … */` block, a Python docstring), so a commented-out import never
+counts, and a Python statement is read whole (a backslash continuation, a parenthesised `from x import (…)`). Each
+lowercase name of `from x import y` is recorded as `x.y`, the submodule it may be (`from google.cloud import storage` is
+`google.cloud.storage`, which google-cloud-storage is imported as), except from the repository's own Python packages,
+whose names are its own (only `x`, so they don't fill the scan's 5,000 modules). It
 skips `node_modules`, virtual environments, build output and minified bundles, symbolic links (on disk, and those the
 repository records as links, from `git ls-files`), and files whose names look like they hold secrets; and stops after
 20,000 files or 128 MB, skipping a file over 1 MB, saying so (`import_scan_limit`). Relative imports and the languages'
@@ -764,10 +769,11 @@ in the host's web view), `NOT_IMPORTED`, or `UNKNOWN` with why. A package's impo
 an npm package by its own name; a Python distribution through a table of the ones imported under another name (PyYAML
 is `yaml`, Pillow `PIL`) and common ones, else its conventional name; a Maven artifact through a table of its Java
 packages (Guava is `com.google.common`), else its group id. Not imported needs a name Aegis is sure of, in code it read
-completely: a guessed name, a library frameworks load without an import (a logging backend, a JDBC driver), a scan that
-stopped early, an ecosystem it doesn't read, a language with no file read, a dependency linked by hand or by an upload,
+completely: a guessed name, a library frameworks load without an import (a logging backend, a JDBC driver), only a
+Python package above the name seen (`import google.cloud` for `google.cloud.storage`), a scan that stopped early, an ecosystem it doesn't read, a language with no file read, a dependency linked by hand or by an upload,
 or a service never imported from its repository are all unknown — never shown as unused. The recommendations carry it
-as `usage` (and `viaUsage`, for what pulls a transitive one in), in one lookup for every service listed. A version syft could
+as `usage` (and `viaUsage`, for what pulls a transitive one in), in one lookup for every service listed; a line
+importing several of a package's modules counts once. A version syft could
 not resolve (`UNKNOWN`, a parent-managed Maven version) is skipped rather than imported.
 
 **A re-import follows the repository (V28).** An import from the repository reads everything it declares, so it

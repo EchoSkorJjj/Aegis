@@ -19,7 +19,10 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -79,6 +82,47 @@ class CodeUsageTest {
         assertThat(read(limited).usageOf(limited.getId(), "npm", "lodash", true).reason())
                 .isEqualTo("Nothing Aegis read imports lodash, but the scan didn't read everything: it stopped after "
                         + "reading 20000 of 30000 source files");
+    }
+
+    @Test
+    void aPythonSubmoduleImportedFromItsPackageIsImportedAndOnlyItsPackageSeenIsUnknown() {
+        // from google.cloud import storage
+        BusinessService storage = scanned("https://github.com/acme/storage", List.of("pypi"), null);
+        imports(storage, new ModuleImports("pypi", "google.cloud.storage", 1, List.of(new Site("api/main.py", 1))));
+        assertThat(read(storage).usageOf(storage.getId(), "pypi", "google-cloud-storage", true).status())
+                .isEqualTo(Status.IMPORTED);
+
+        // import google.cloud: which of its modules the code uses isn't known, so neither is google-cloud-storage.
+        BusinessService parent = scanned("https://github.com/acme/parent", List.of("pypi"), null);
+        imports(parent, new ModuleImports("pypi", "google.cloud", 1, List.of(new Site("api/main.py", 1))));
+        assertThat(read(parent).usageOf(parent.getId(), "pypi", "google-cloud-storage", true))
+                .extracting(Usage::status, Usage::reason)
+                .containsExactly(Status.UNKNOWN, "The code imports google.cloud, and Aegis can't tell whether that "
+                        + "includes google.cloud.storage");
+
+        // from google.cloud import bigquery: another module, so storage isn't imported.
+        BusinessService sibling = scanned("https://github.com/acme/sibling", List.of("pypi"), null);
+        imports(sibling, new ModuleImports("pypi", "google.cloud.bigquery", 1, List.of(new Site("api/main.py", 1))));
+        assertThat(read(sibling).usageOf(sibling.getId(), "pypi", "google-cloud-storage", true).status())
+                .isEqualTo(Status.NOT_IMPORTED);
+
+        // The packages above the name are looked up too, so a scan that recorded only them is found.
+        verify(store, atLeastOnce()).findServiceImports(anyCollection(),
+                argThat(keys -> keys.containsAll(List.of("pypi:google.cloud.storage", "pypi:google.cloud", "pypi:google"))));
+    }
+
+    @Test
+    void aLineImportingSeveralOfAPackagesModulesCountsOnce() {
+        // from flask import request, jsonify, on two lines; and 30 more lines below the first twenty sites kept.
+        BusinessService service = scanned("https://github.com/acme/flask", List.of("pypi"), null);
+        imports(service,
+                new ModuleImports("pypi", "flask.request", 2, List.of(new Site("app.py", 1), new Site("views.py", 3))),
+                new ModuleImports("pypi", "flask.jsonify", 1, List.of(new Site("app.py", 1))));
+
+        Usage flask = read(service).usageOf(service.getId(), "pypi", "flask", true);
+
+        assertThat(flask.siteCount()).isEqualTo(2);
+        assertThat(flask.sites()).extracting(CodeUsage.Site::path).containsExactly("app.py", "views.py");
     }
 
     @Test
@@ -150,6 +194,7 @@ class CodeUsageTest {
     }
 
     private CodeUsage.Code read(BusinessService service) {
-        return usage.read(Map.of(service.getId(), service), List.of(new CodeUsage.Package("npm", "x")));
+        return usage.read(Map.of(service.getId(), service), List.of(new CodeUsage.Package("npm", "x"),
+                new CodeUsage.Package("pypi", "google-cloud-storage")));
     }
 }

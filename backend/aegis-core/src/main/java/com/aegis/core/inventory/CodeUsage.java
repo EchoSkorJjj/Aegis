@@ -30,9 +30,10 @@ import org.springframework.stereotype.Service;
  * <p>A package is {@link Status#IMPORTED} when an import of one of its names was found, {@link Status#NOT_IMPORTED}
  * only when nothing imports a name Aegis is sure of in code the scan read completely, and {@link Status#UNKNOWN}
  * otherwise, with why: the code was never read (no linked repository, an uploaded SBOM), the dependency wasn't
- * linked by that import, the scan doesn't read its ecosystem or found no file of its language, it stopped early, or
- * Aegis doesn't know the package's import name for sure ({@link ImportNames}). An unknown package is never shown as
- * unused.
+ * linked by that import, the scan doesn't read its ecosystem or found no file of its language, it stopped early, the
+ * code imports a Python package the name sits below without saying which of its modules ({@code import google.cloud}
+ * for {@code google.cloud.storage}), or Aegis doesn't know the package's import name for sure ({@link ImportNames}).
+ * An unknown package is never shown as unused.
  */
 @Service
 public class CodeUsage {
@@ -77,8 +78,15 @@ public class CodeUsage {
     public Code read(Map<UUID, BusinessService> services, Collection<Package> packages) {
         Set<String> keys = new LinkedHashSet<>();
         for (Package pkg : packages) {
-            ImportNames.of(pkg.ecosystem(), pkg.name()).ifPresent(names -> names.modules()
-                    .forEach(module -> keys.add(names.language() + ":" + module)));
+            ImportNames.of(pkg.ecosystem(), pkg.name()).ifPresent(names -> names.modules().forEach(module -> {
+                keys.add(names.language() + ":" + module);
+                // A Python package the name sits below, which may be all the code was seen to import (parentOf).
+                if ("pypi".equals(names.language())) {
+                    for (int dot = module.lastIndexOf('.'); dot > 0; dot = module.lastIndexOf('.', dot - 1)) {
+                        keys.add("pypi:" + module.substring(0, dot));
+                    }
+                }
+            }));
         }
         List<UUID> scanned = services.values().stream().filter(service -> service.getImportScannedAt() != null)
                 .map(BusinessService::getId).toList();
@@ -131,7 +139,9 @@ public class CodeUsage {
                             .anyMatch(module -> matches(language, found.module(), module)))
                     .toList();
             if (!matching.isEmpty()) {
-                int count = matching.stream().mapToInt(ImportScan.ModuleImports::count).sum();
+                // One line may import several of the names (from flask import request, jsonify): count it once.
+                int count = (int) matching.stream().flatMap(found -> found.sites().stream()).distinct().count()
+                        + matching.stream().mapToInt(found -> found.count() - found.sites().size()).sum();
                 String ref = service.getImportScanRevision() != null ? service.getImportScanRevision()
                         : service.getRepositoryBranch() != null ? service.getRepositoryBranch() : "HEAD";
                 List<Site> sites = matching.stream().flatMap(found -> found.sites().stream()).distinct()
@@ -143,6 +153,11 @@ public class CodeUsage {
                 return new Usage(Status.IMPORTED, null, importedAs, count, sites);
             }
             String looked = String.join(" or ", importedAs);
+            Optional<String> parent = parentOf(language, imports.getOrDefault(serviceId, List.of()), importedAs);
+            if (parent.isPresent()) {
+                return Usage.unknown("The code imports " + parent.get() + ", and Aegis can't tell whether that "
+                        + "includes " + looked, importedAs);
+            }
             if (service.getImportScanLimit() != null) {
                 return Usage.unknown("Nothing Aegis read imports " + looked + ", but the scan didn't read everything: "
                         + lowercaseFirst(service.getImportScanLimit()), importedAs);
@@ -153,6 +168,20 @@ public class CodeUsage {
             }
             return new Usage(Status.NOT_IMPORTED, "Nothing in the code Aegis read imports " + looked, importedAs, 0,
                     List.of());
+        }
+
+        /**
+         * A Python package found that one of the names sits below: {@code import google.cloud}, or {@code from
+         * google.cloud import …} where the scan recorded only the package, may import {@code google.cloud.storage}.
+         */
+        private static Optional<String> parentOf(String language, List<ImportScan.ModuleImports> found,
+                List<String> names) {
+            if (!"pypi".equals(language)) {
+                return Optional.empty();
+            }
+            return found.stream().filter(module -> module.language().equals(language)).map(ImportScan.ModuleImports::module)
+                    .filter(module -> names.stream().anyMatch(name -> name.startsWith(module + ".")))
+                    .sorted().findFirst();
         }
 
         private static String neverRead(BusinessService service) {
