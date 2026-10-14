@@ -38,13 +38,29 @@ public final class InventoryDtos {
             UUID id, String name, BusinessCriticality criticality, ServiceExposure exposure,
             String repositoryUrl, String repositoryBranch,
             Instant sbomImportedAt, SbomImportSource sbomImportSource,
+            ImportScanResponse importScan,
             Instant createdAt, Instant updatedAt) {
         static BusinessServiceResponse from(BusinessService value) {
             return new BusinessServiceResponse(
                     value.getId(), value.getName(), value.getCriticality(), value.getExposure(),
                     value.getRepositoryUrl(), value.getRepositoryBranch(),
                     value.getSbomImportedAt(), value.getSbomImportSource(),
+                    ImportScanResponse.from(value),
                     value.getCreatedAt(), value.getUpdatedAt());
+        }
+    }
+
+    /**
+     * The code scan of the service's last import from its repository (E11-3): when, at which commit, the languages it
+     * read files of, how many files, and why it stopped before reading everything (null when it read it all). Null on
+     * the service until its SBOM is imported from the repository, and again once the link changes.
+     */
+    public record ImportScanResponse(Instant scannedAt, String revision, List<String> languages, Integer filesRead,
+                                     String limit) {
+        static ImportScanResponse from(BusinessService value) {
+            return value.getImportScannedAt() == null ? null : new ImportScanResponse(value.getImportScannedAt(),
+                    value.getImportScanRevision(), value.getImportScanLanguages(), value.getImportScanFiles(),
+                    value.getImportScanLimit());
         }
     }
 

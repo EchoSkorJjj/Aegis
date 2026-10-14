@@ -24,6 +24,9 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class FakeGitAndSyft implements CommandRunner {
 
+    /** The commit every fake checkout is at. */
+    public static final String REVISION = "0123456789abcdef0123456789abcdef01234567";
+
     /** One recorded git clone: its arguments and the environment git would have seen. */
     public record Clone(List<String> command, Map<String, String> env) {
         public String url() {
@@ -43,6 +46,16 @@ public class FakeGitAndSyft implements CommandRunner {
     public CommandResult run(List<String> command, Path workingDir, Map<String, String> env, Duration timeout)
             throws Exception {
         if (command.get(0).equals("git") && !command.contains("clone")) {
+            if (command.contains("rev-parse")) {
+                return new CommandResult(0, REVISION + "\n", "", false);
+            }
+            if (command.contains("ls-files")) {
+                Path checkout = Path.of(command.get(command.indexOf("-C") + 1));
+                Path named = checkout.resolve("repository-name");
+                boolean linked = Files.exists(named) && Files.readString(named).contains("pnpmapp");
+                return new CommandResult(0, linked ? "120000 " + "a".repeat(40) + " 0\tclient/src/linked.ts\0" : "", "",
+                        false);
+            }
             return new CommandResult(0, "", "", false); // the sparse checkout and the checkout
         }
         if (command.get(0).equals("git")) {
@@ -61,8 +74,12 @@ public class FakeGitAndSyft implements CommandRunner {
             String name = url.substring(url.lastIndexOf('/') + 1).replace(".git", "");
             Files.writeString(checkout.resolve("repository-name"), name);
             if (name.contains("pnpmapp")) {
-                Files.createDirectories(checkout.resolve("client"));
+                Files.createDirectories(checkout.resolve("client/src"));
                 Files.writeString(checkout.resolve("client/pnpm-lock.yaml"), pnpmLockfile(name));
+                Files.writeString(checkout.resolve("client/src/page.tsx"), "import Link from \"" + name + "-next/link\";\n"
+                        + "import { useState } from \"" + name + "-react\";\n");
+                // A link the repository records, checked out as a plain file: never read.
+                Files.writeString(checkout.resolve("client/src/linked.ts"), "import x from \"" + name + "-sharp\";\n");
             }
             return new CommandResult(0, "", "", false);
         }

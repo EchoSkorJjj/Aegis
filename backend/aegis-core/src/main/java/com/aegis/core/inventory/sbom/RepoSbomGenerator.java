@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
@@ -23,6 +24,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 
+import com.aegis.core.inventory.domain.ImportScan;
 import com.aegis.core.inventory.domain.RepositoryUrl;
 import com.aegis.core.inventory.sbom.CommandRunner.CommandResult;
 import com.aegis.core.platform.common.ApiExceptions;
@@ -98,14 +100,19 @@ class RepoSbomGenerator {
      * syft, and return the CycloneDX BOM.
      */
     CycloneDxBom generate(RepositoryUrl repo, String ref, CloneAccess access) {
-        return layout(repo, ref, access).bom();
+        return read(repo, ref, access).layout().bom();
     }
 
     /**
-     * Clone {@code repo} as {@link #generate} does, scan it with syft, and lay out what it holds: syft's BOM, with what
-     * the JavaScript lockfiles in the same checkout say about the packages syft found in them ({@link JsLockfiles}).
+     * What an import from a repository read: its layout — syft's BOM, with what the JavaScript lockfiles in the same
+     * checkout say about the packages syft found in them ({@link JsLockfiles}) — and what its code imports
+     * ({@link ImportScanner}, E11-3).
      */
-    RepositoryLayout layout(RepositoryUrl repo, String ref, CloneAccess access) {
+    record RepositoryScan(RepositoryLayout layout, ImportScan imports) {
+    }
+
+    /** Clone {@code repo} as {@link #generate} does, scan it with syft, read its lockfiles, and read its code's imports. */
+    RepositoryScan read(RepositoryUrl repo, String ref, CloneAccess access) {
         String branch = RepositoryUrl.normalizeRef(ref);
         Path work;
         try {
@@ -119,7 +126,9 @@ class RepoSbomGenerator {
             enforceSizeCap(checkout);
             Path sbom = work.resolve("sbom.cdx.json");
             scan(checkout, sbom, work);
-            return RepositoryLayout.of(parse(sbom), JsLockfiles.read(checkout));
+            RepositoryLayout layout = RepositoryLayout.of(parse(sbom), JsLockfiles.read(checkout));
+            ImportScan imports = ImportScanner.scan(checkout, symbolicLinks(checkout, work), revision(checkout, work));
+            return new RepositoryScan(layout, imports);
         } finally {
             deleteRecursively(work);
         }
@@ -166,6 +175,49 @@ class RepoSbomGenerator {
         runGit(git("-C", checkout.toString(), "checkout"), work, env, deadline, repo, branch, access, token);
         if (!Files.isDirectory(checkout)) {
             throw cloneFailure("", repo, branch, access);
+        }
+    }
+
+    /** The commit checked out, so a link to a line points at what was read; null when git can't say. */
+    private String revision(Path checkout, Path work) {
+        CommandResult result = localGit(work, git("-C", checkout.toString(), "rev-parse", "HEAD"));
+        String revision = result == null || !result.succeeded() || result.stdout() == null ? "" : result.stdout().strip();
+        return revision.matches("[0-9a-f]{40}|[0-9a-f]{64}") ? revision : null;
+    }
+
+    /**
+     * The paths the repository records as symbolic links (mode 120000). The clone checks them out as plain files holding
+     * only the target ({@code core.symlinks=false}), so the code scan is told to skip them. Empty when git can't say.
+     */
+    private Set<String> symbolicLinks(Path checkout, Path work) {
+        CommandResult result = localGit(work, git("-C", checkout.toString(), "ls-files", "-s", "-z"));
+        if (result == null || !result.succeeded() || result.stdout() == null) {
+            return Set.of();
+        }
+        Set<String> links = new HashSet<>();
+        for (String entry : result.stdout().split("\0")) {
+            int tab = entry.indexOf('\t');
+            if (entry.startsWith("120000 ") && tab > 0) {
+                links.add(entry.substring(tab + 1));
+            }
+        }
+        return links;
+    }
+
+    /** A git command that reads only the local checkout: no credential, a short timeout, and no failure of its own. */
+    private CommandResult localGit(Path work, List<String> command) {
+        Map<String, String> env = Map.of(
+                "GIT_TERMINAL_PROMPT", "0",
+                "GIT_CONFIG_NOSYSTEM", "1",
+                "GIT_CONFIG_GLOBAL", "/dev/null",
+                "HOME", work.toString());
+        try {
+            return commands.run(command, work, env, Duration.ofSeconds(30));
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (Exception unavailable) {
+            return null;
         }
     }
 

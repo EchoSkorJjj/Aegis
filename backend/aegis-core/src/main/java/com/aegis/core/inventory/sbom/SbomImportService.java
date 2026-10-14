@@ -20,6 +20,7 @@ import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.InventoryStore.ComponentDependencyLink;
 import com.aegis.core.inventory.InventoryStore.DependencyChanges;
 import com.aegis.core.inventory.domain.BusinessService;
+import com.aegis.core.inventory.domain.ImportScan;
 import com.aegis.core.inventory.domain.SbomImportSource;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.sbom.CycloneDxBom.Component;
@@ -42,7 +43,8 @@ import org.springframework.transaction.annotation.Transactional;
  * longer declares — an upgraded library's old version — and removes the dependency edges it no longer declares.
  * Components stay in the inventory, and a component linked by hand or by an upload stays linked.
  *
- * <p>Each import is recorded on the service — when, and how it got in ({@link SbomImportSource}).
+ * <p>Each import is recorded on the service — when, and how it got in ({@link SbomImportSource}) — and an import from
+ * the repository records what its code imports too (E11-3), which a later one replaces.
  */
 @Service
 public class SbomImportService {
@@ -78,7 +80,24 @@ public class SbomImportService {
      */
     @Transactional
     public SbomImportResult importRepository(UUID serviceId, RepositoryLayout layout, SbomImportSource source) {
-        return importSbom(serviceId, layout.bom(), source, layout);
+        return importRepository(serviceId, layout, source, null);
+    }
+
+    /**
+     * As {@link #importRepository(UUID, RepositoryLayout, SbomImportSource)}, also replacing what the service's code
+     * imports with what this import's code scan found ({@code imports}, E11-3; null leaves the last scan as it is).
+     */
+    @Transactional
+    public SbomImportResult importRepository(UUID serviceId, RepositoryLayout layout, SbomImportSource source,
+            ImportScan imports) {
+        SbomImportResult result = importSbom(serviceId, layout.bom(), source, layout);
+        if (imports != null) {
+            BusinessService service = inventory.getBusinessService(serviceId);
+            service.recordImportScan(imports, Instant.now());
+            store.save(service);
+            store.replaceServiceImports(serviceId, imports.modules());
+        }
+        return result;
     }
 
     /** {@code repository} is the layout of an import from the service's repository; null for an upload. */

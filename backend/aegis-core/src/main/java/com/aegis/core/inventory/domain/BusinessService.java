@@ -1,6 +1,7 @@
 package com.aegis.core.inventory.domain;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -10,7 +11,9 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
 
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.NaturalId;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "business_services")
@@ -48,6 +51,23 @@ public class BusinessService extends InventoryEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "sbom_import_source", length = 16)
     private SbomImportSource sbomImportSource;
+
+    // The code scan of the last import from the repository (E11-3, V40); the modules it found are in service_imports.
+    @Column(name = "import_scanned_at")
+    private Instant importScannedAt;
+
+    @Column(name = "import_scan_revision", length = 64)
+    private String importScanRevision;
+
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "import_scan_languages", nullable = false, columnDefinition = "text[]")
+    private String[] importScanLanguages = new String[0];
+
+    @Column(name = "import_scan_files")
+    private Integer importScanFiles;
+
+    @Column(name = "import_scan_limit", length = 300)
+    private String importScanLimit;
 
     protected BusinessService() {
         // Required by JPA.
@@ -106,9 +126,51 @@ public class BusinessService extends InventoryEntity {
         this.sbomImportedAt = requireNonNull(at, "at");
     }
 
+    /**
+     * The code scan of an import from the repository at {@code at}: the commit it read, the languages it read files of,
+     * how many, and why it stopped early if it did. The modules it found are stored beside the service.
+     */
+    public void recordImportScan(ImportScan scan, Instant at) {
+        requireNonNull(scan, "scan");
+        this.importScannedAt = requireNonNull(at, "at");
+        this.importScanRevision = scan.revision();
+        this.importScanLanguages = scan.languages().toArray(String[]::new);
+        this.importScanFiles = scan.filesRead();
+        this.importScanLimit = scan.limit() == null || scan.limit().length() <= 300 ? scan.limit()
+                : scan.limit().substring(0, 299) + "…";
+    }
+
     private void forgetSbomImport() {
         this.sbomImportSource = null;
         this.sbomImportedAt = null;
+        // The scan read the old repository's code.
+        this.importScannedAt = null;
+        this.importScanRevision = null;
+        this.importScanLanguages = new String[0];
+        this.importScanFiles = null;
+        this.importScanLimit = null;
+    }
+
+    /** When the code was last scanned at an import from the repository; null when it never was (or the link moved). */
+    public Instant getImportScannedAt() {
+        return importScannedAt;
+    }
+
+    public String getImportScanRevision() {
+        return importScanRevision;
+    }
+
+    public List<String> getImportScanLanguages() {
+        return importScanLanguages == null ? List.of() : List.of(importScanLanguages);
+    }
+
+    public Integer getImportScanFiles() {
+        return importScanFiles;
+    }
+
+    /** Why the last scan stopped before reading everything; null when it read it all. */
+    public String getImportScanLimit() {
+        return importScanLimit;
     }
 
     public Instant getSbomImportedAt() {

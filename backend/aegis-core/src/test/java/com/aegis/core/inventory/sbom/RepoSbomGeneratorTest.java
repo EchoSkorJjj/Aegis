@@ -308,7 +308,7 @@ class RepoSbomGeneratorTest {
         generate(runner, "https://github.com/acme/widgets", null, "ghp_token");
 
         List<List<String>> git = runner.commandsStartingWith("git");
-        assertThat(git).hasSize(3);
+        assertThat(git).hasSize(5);
         assertThat(git.get(0)).contains("clone", "--filter=blob:none", "--no-checkout");
         String checkout = git.get(0).getLast();
         assertThat(git.get(1)).containsSequence("-C", checkout, "sparse-checkout", "set", "--no-cone", "/*")
@@ -322,6 +322,11 @@ class RepoSbomGeneratorTest {
         }
         assertThat(runner.envs.get(2)).containsEntry("AEGIS_GIT_TOKEN", "ghp_token")
                 .containsEntry("GIT_TERMINAL_PROMPT", "0");
+        // Then, for the code scan, only the local checkout is read: the links it records and the commit, no credential.
+        assertThat(git.get(3)).endsWith("-C", checkout, "ls-files", "-s", "-z");
+        assertThat(git.get(4)).endsWith("-C", checkout, "rev-parse", "HEAD");
+        assertThat(runner.envs.subList(4, 6)).allSatisfy(env -> assertThat(env).doesNotContainKey("AEGIS_GIT_TOKEN")
+                .doesNotContainKey("GIT_ASKPASS"));
         assertThat(runner.lastWorkingDir).doesNotExist();
     }
 

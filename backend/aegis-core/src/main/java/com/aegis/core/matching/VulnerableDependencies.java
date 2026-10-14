@@ -184,7 +184,7 @@ public class VulnerableDependencies {
                 .anyMatch(vulnerability -> vulnerability.confidence() == MatchConfidence.CONFIRMED)
                 ? MatchConfidence.CONFIRMED : MatchConfidence.POSSIBLE;
         return new VulnerableDependency(link.serviceId(), ComponentRef.from(component),
-                via == null ? null : ComponentRef.from(via), link.manifestPaths(), link.lockfilePaths(), confidence,
+                via == null ? null : ComponentRef.from(via), link.manifestPaths(), link.lockfilePaths(), link.fromRepository(), confidence,
                 vulnerabilities);
     }
 

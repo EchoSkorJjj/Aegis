@@ -7,6 +7,7 @@ import { ClipboardList, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { DataPagination } from "@/components/app/data-pagination";
+import { CodeUsageLine, ImportScanNote } from "@/components/app/responses/code-usage";
 import { TicketStatusBadge, UpgradeStatusBadge } from "@/components/app/responses/response-status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ApiError, ticketApi, upgradeApi } from "@/lib/api";
-import type { ImpactTier, UpgradeRecommendation } from "@/lib/types";
+import type { ImpactTier, ImportScanSummary, UpgradeRecommendation } from "@/lib/types";
 
 const TIER_CLASS: Record<ImpactTier, string> = {
   CRITICAL: "bg-red-500/10 text-red-600 dark:text-red-400",
@@ -44,11 +45,14 @@ export function RecommendedUpgrades({
   enabled,
   orgId,
   refreshSignal = 0,
+  importScan,
 }: {
   serviceId: string;
   enabled: boolean;
   orgId: string | null;
   refreshSignal?: number;
+  /** How the service's code was read at its last import from the repository; where each dependency is imported. */
+  importScan?: ImportScanSummary | null;
 }) {
   const [items, setItems] = useState<UpgradeRecommendation[] | null>(null);
   const [error, setError] = useState<"forbidden" | "error" | null>(null);
@@ -108,6 +112,7 @@ export function RecommendedUpgrades({
           Every dependency of this service a known advisory affects, and the version that fixes it. A response drafts
           its risk ticket and, where Aegis can automate it, the upgrade pull request.
         </p>
+        <ImportScanNote scan={importScan} />
       </div>
 
       {items && items.length > 0 && (
@@ -332,6 +337,7 @@ export function UpgradeSummary({
           </>
         )}
       </span>
+      <CodeUsageLine item={item} />
       {item.readiness === "READY" && item.overrideIn.length > 0 ? (
         <span className="mt-1 block text-xs text-muted-foreground">
           {item.via ? "Not declared, so " : "No manifest declares it, so "}Aegis overrides it in{" "}

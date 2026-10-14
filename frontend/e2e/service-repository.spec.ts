@@ -18,6 +18,7 @@ async function fixture(page: Page, role: Role, { assigned = false, linked = fals
     repositoryBranch: linked ? "develop" : null,
     sbomImportedAt: linked && source ? "2026-09-24T09:00:00Z" : null,
     sbomImportSource: linked && source ? source : null,
+    importScan: null,
     createdAt: "2026-09-24T00:00:00Z", updatedAt: "2026-09-24T00:00:00Z",
   };
   const writes: { method: string; path: string; body: unknown }[] = [];

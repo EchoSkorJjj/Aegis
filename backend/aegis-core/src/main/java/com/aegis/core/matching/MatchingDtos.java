@@ -134,7 +134,8 @@ public final class MatchingDtos {
     /**
      * A vulnerable component one service uses: directly ({@code via} null), or through the direct
      * dependency {@code via}. {@code manifestPaths} are the manifests declaring that direct dependency, and
-     * {@code lockfilePaths} the JavaScript lockfiles resolving it, where the SBOM import recorded them.
+     * {@code lockfilePaths} the JavaScript lockfiles resolving it, where the SBOM import recorded them;
+     * {@code fromRepository} whether an import from the repository linked that direct dependency.
      * {@code confidence} is CONFIRMED when any one vulnerability is.
      */
     public record VulnerableDependency(
@@ -143,6 +144,7 @@ public final class MatchingDtos {
             ComponentRef via,
             List<String> manifestPaths,
             List<String> lockfilePaths,
+            boolean fromRepository,
             MatchConfidence confidence,
             List<VulnerabilityRef> vulnerabilities) {
 

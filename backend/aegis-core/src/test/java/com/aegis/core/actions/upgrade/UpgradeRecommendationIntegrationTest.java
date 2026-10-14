@@ -14,8 +14,10 @@ import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
+import com.aegis.core.inventory.domain.ImportScan;
 import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.RepositoryUrl;
+import com.aegis.core.inventory.domain.SbomImportSource;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.matching.MatchingDtos.ComponentRef;
@@ -260,6 +262,60 @@ class UpgradeRecommendationIntegrationTest extends AbstractInventoryIntegrationT
                 .containsEntry("reason", "old-dep-" + tag + " comes in through old-" + tag + "; re-import the service's "
                         + "SBOM from its repository so Aegis can tell which lockfile resolves it and override it there, or "
                         + "upgrade old-" + tag + " or pin old-dep-" + tag + " to 1.1.0 by hand");
+    }
+
+    /**
+     * Each vulnerable dependency says where the service's code imports it (E11-3), from the code scan of the last import
+     * from the repository: imported, with each line linked at the commit read; not imported; or unknown, with why. One
+     * another package pulls in also says where the code imports what pulls it in.
+     */
+    @Test
+    void eachVulnerableDependencySaysWhereTheServicesCodeImportsIt() throws Exception {
+        String tag = Long.toHexString(Math.abs(UUID.randomUUID().getMostSignificantBits()));
+        String revision = "0123456789abcdef0123456789abcdef01234567";
+        BusinessService service = inventory.createBusinessService(
+                "Code " + tag, BusinessCriticality.CRITICAL, ServiceExposure.INTERNET_FACING);
+        inventory.linkServiceRepository(service.getId(),
+                RepositoryUrl.parse("https://gitlab.com/acme/code-" + tag, List.of("gitlab.com")), null);
+        SoftwareComponent used = inventory.createSoftwareComponent("npm", "used-" + tag, "1.0.0");
+        SoftwareComponent unused = inventory.createSoftwareComponent("npm", "unused-" + tag, "1.0.0");
+        SoftwareComponent byHand = inventory.createSoftwareComponent("npm", "hand-" + tag, "1.0.0");
+        SoftwareComponent deep = inventory.createSoftwareComponent("npm", "deep-" + tag, "1.0.0");
+        store.linkRepositoryComponent(service.getId(), used.getId(), List.of("package.json"), List.of("package-lock.json"));
+        store.linkRepositoryComponent(service.getId(), unused.getId(), List.of("package.json"), List.of("package-lock.json"));
+        inventory.addServiceComponent(service.getId(), byHand.getId());
+        inventory.addComponentDependency(used.getId(), deep.getId());
+        List<SoftwareComponent> vulnerable = List.of(used, unused, byHand, deep);
+        for (int index = 0; index < vulnerable.size(); index++) {
+            advisory("CVE-2099-" + tag + index, "8.1", AffectedProduct.ofPackage("npm", vulnerable.get(index).getName(), null,
+                    "1.0.0", null, null, "1.1.0"));
+        }
+        // What the import from the repository found the code importing.
+        BusinessService scanned = inventory.getBusinessService(service.getId());
+        scanned.recordSbomImport(SbomImportSource.PUBLIC, Instant.now());
+        scanned.recordImportScan(new ImportScan(revision, List.of("npm"), 4, null,
+                List.of()), Instant.now());
+        store.save(scanned);
+        store.replaceServiceImports(service.getId(), List.of(new ImportScan.ModuleImports(
+                "npm", "used-" + tag, 2, List.of(new ImportScan.Site("src/app.ts", 3),
+                        new ImportScan.Site("src/b.ts", 9)))));
+
+        Map<String, Map<String, Object>> byName = recommendations(service.getId(), as("ANALYST", UUID.randomUUID()))
+                .stream().collect(Collectors.toMap(item -> JsonPath.read(item, "$.component.name"), item -> item));
+
+        Map<String, Object> usedItem = byName.get("used-" + tag);
+        assertThat(JsonPath.<String>read(usedItem, "$.usage.status")).isEqualTo("IMPORTED");
+        assertThat(JsonPath.<Integer>read(usedItem, "$.usage.siteCount")).isEqualTo(2);
+        assertThat(JsonPath.<String>read(usedItem, "$.usage.sites[0].url"))
+                .isEqualTo("https://gitlab.com/acme/code-" + tag + "/-/blob/" + revision + "/src/app.ts#L3");
+        assertThat(JsonPath.<Object>read(usedItem, "$.viaUsage")).isNull();
+        assertThat(JsonPath.<String>read(byName.get("unused-" + tag), "$.usage.status")).isEqualTo("NOT_IMPORTED");
+        assertThat(JsonPath.<String>read(byName.get("hand-" + tag), "$.usage.status")).isEqualTo("UNKNOWN");
+        assertThat(JsonPath.<String>read(byName.get("hand-" + tag), "$.usage.reason"))
+                .startsWith("It was linked by hand or by an uploaded SBOM");
+        Map<String, Object> deepItem = byName.get("deep-" + tag);
+        assertThat(JsonPath.<String>read(deepItem, "$.usage.status")).isEqualTo("NOT_IMPORTED");
+        assertThat(JsonPath.<String>read(deepItem, "$.viaUsage.status")).isEqualTo("IMPORTED");
     }
 
     /** A repository on a host no pull-request provider serves gets a ticket saying so, not a PR that fails later. */

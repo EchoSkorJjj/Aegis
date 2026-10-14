@@ -10,6 +10,7 @@ import com.aegis.core.inventory.InventoryFilters.ComponentFilter;
 import com.aegis.core.inventory.InventoryFilters.NamedFilter;
 import com.aegis.core.inventory.InventoryFilters.ServiceFilter;
 import com.aegis.core.inventory.domain.BusinessService;
+import com.aegis.core.inventory.domain.ImportScan;
 import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
@@ -118,6 +119,23 @@ public interface InventoryStore {
     DependencyChanges recordServiceDependencies(
             UUID serviceId, Collection<ComponentDependencyLink> declared, boolean fromRepository);
 
+    /**
+     * Replace what the code scan of an import from the service's repository found its code importing (E11-3): each
+     * module, per language, with its sites. An empty list forgets them.
+     */
+    void replaceServiceImports(UUID serviceId, List<ImportScan.ModuleImports> modules);
+
+    /**
+     * The modules these services' code imports that are one of {@code keys} ({@code language:module}, such as
+     * {@code npm:hono} or {@code pypi:yaml}), or — for Python modules and Java packages — lie below one
+     * ({@code pypi:yaml.loader}), as their last code scans found them.
+     */
+    List<ServiceImport> findServiceImports(Collection<UUID> serviceIds, Collection<String> keys);
+
+    /** One module a service's code imports. */
+    record ServiceImport(UUID serviceId, ImportScan.ModuleImports imports) {
+    }
+
     /** What {@link #recordServiceDependencies} changed. */
     record DependencyChanges(int added, int removed) {
     }
@@ -125,9 +143,11 @@ public interface InventoryStore {
     /**
      * A service's direct edge to a component it uses — the traversal unit for component impact.
      * {@code manifestPaths} are the repository files declaring it, where known (empty otherwise);
-     * {@code lockfilePaths} the JavaScript lockfiles resolving it, where an import from the repository read them.
+     * {@code lockfilePaths} the JavaScript lockfiles resolving it, where an import from the repository read them;
+     * {@code fromRepository} whether an import from the repository linked it (not a person, or an uploaded SBOM).
      */
-    record ServiceComponentLink(UUID serviceId, UUID componentId, List<String> manifestPaths, List<String> lockfilePaths) {
+    record ServiceComponentLink(UUID serviceId, UUID componentId, List<String> manifestPaths, List<String> lockfilePaths,
+                                boolean fromRepository) {
 
         public ServiceComponentLink {
             manifestPaths = manifestPaths == null ? List.of() : List.copyOf(manifestPaths);
@@ -135,11 +155,11 @@ public interface InventoryStore {
         }
 
         public ServiceComponentLink(UUID serviceId, UUID componentId, List<String> manifestPaths) {
-            this(serviceId, componentId, manifestPaths, List.of());
+            this(serviceId, componentId, manifestPaths, List.of(), false);
         }
 
         public ServiceComponentLink(UUID serviceId, UUID componentId) {
-            this(serviceId, componentId, List.of(), List.of());
+            this(serviceId, componentId, List.of(), List.of(), false);
         }
     }
 

@@ -196,8 +196,47 @@ export interface BusinessService {
   /** When and how its SBOM was last imported; null until then, and again once the repository link changes. */
   sbomImportedAt: string | null;
   sbomImportSource: SbomImportSource | null;
+  /** The code scan of its last import from the repository; null until then, and again once the link changes. */
+  importScan: ImportScanSummary | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * How Aegis read a service's code at its last import from the repository (E11-3): when, at which commit, the
+ * languages it read files of (npm, pypi, maven), how many files, and why it stopped before reading everything.
+ */
+export interface ImportScanSummary {
+  scannedAt: string;
+  revision: string | null;
+  languages: string[];
+  filesRead: number | null;
+  /** Null when it read the whole repository. */
+  limit: string | null;
+}
+
+/**
+ * Whether a service's code imports a package: IMPORTED (with where), NOT_IMPORTED (nothing in code Aegis read
+ * completely imports a name it is sure of), or UNKNOWN — never shown as unused — with why.
+ */
+export type CodeUsageStatus = "IMPORTED" | "NOT_IMPORTED" | "UNKNOWN";
+
+/** One line importing a package, linked to it in the repository at the commit the scan read. */
+export interface CodeUsageSite {
+  path: string;
+  line: number;
+  url: string | null;
+}
+
+export interface CodeUsage {
+  status: CodeUsageStatus;
+  /** Why it isn't imported, or why that's unknown; null when imported. */
+  reason: string | null;
+  /** The names looked for: the npm package, the Python modules or Java packages. */
+  importedAs: string[];
+  siteCount: number;
+  /** The first twenty, by path and line. */
+  sites: CodeUsageSite[];
 }
 
 export interface BusinessServiceInput {
@@ -622,6 +661,10 @@ export interface UpgradeRecommendation {
    * empty when it bumps a declaration.
    */
   overrideIn: string[];
+  /** Where the service's code imports it. */
+  usage: CodeUsage;
+  /** Where the service's code imports what pulls it in; null for a direct dependency. */
+  viaUsage: CodeUsage | null;
   /** The current pull request that upgrades it, if any, and the response it belongs to (null: drafted on its own). */
   proposal: {
     id: string;

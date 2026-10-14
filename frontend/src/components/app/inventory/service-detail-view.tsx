@@ -257,6 +257,7 @@ export function ServiceDetailView({ serviceId }: { serviceId: string }) {
         enabled
         orgId={user?.orgId ?? null}
         refreshSignal={componentsRefresh}
+        importScan={service.importScan}
       />
 
       <RelationshipSection

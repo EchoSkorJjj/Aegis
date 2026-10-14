@@ -26,6 +26,7 @@ import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.InventoryStore.ComponentDependencyLink;
 import com.aegis.core.inventory.InventoryStore.ServiceComponentLink;
 import com.aegis.core.inventory.domain.BusinessService;
+import com.aegis.core.inventory.domain.ImportScan;
 import com.aegis.core.inventory.domain.InventoryEntity;
 import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.SoftwareComponent;
@@ -64,6 +65,7 @@ public class JpaInventoryStore implements InventoryStore {
     private final ServiceOwnerJpaRepository serviceOwners;
     private final ComponentDependencyJpaRepository componentDependencies;
     private final ServiceDependencyJpaRepository serviceDependencies;
+    private final ServiceImportJpaRepository serviceImports;
 
     public JpaInventoryStore(
             CurrentOrg currentOrg,
@@ -75,7 +77,8 @@ public class JpaInventoryStore implements InventoryStore {
             ServiceVendorJpaRepository serviceVendors,
             ServiceOwnerJpaRepository serviceOwners,
             ComponentDependencyJpaRepository componentDependencies,
-            ServiceDependencyJpaRepository serviceDependencies) {
+            ServiceDependencyJpaRepository serviceDependencies,
+            ServiceImportJpaRepository serviceImports) {
         this.currentOrg = currentOrg;
         this.services = services;
         this.components = components;
@@ -86,6 +89,7 @@ public class JpaInventoryStore implements InventoryStore {
         this.serviceOwners = serviceOwners;
         this.componentDependencies = componentDependencies;
         this.serviceDependencies = serviceDependencies;
+        this.serviceImports = serviceImports;
     }
 
     /**
@@ -499,7 +503,7 @@ public class JpaInventoryStore implements InventoryStore {
     public List<ServiceComponentLink> findServiceComponentLinks(Collection<UUID> componentIds) {
         return serviceComponents.findByComponentIdInAndOrgId(componentIds, scope()).stream()
                 .map(link -> new ServiceComponentLink(link.getBusinessServiceId(), link.getComponentId(),
-                        link.getManifestPaths(), link.getLockfilePaths()))
+                        link.getManifestPaths(), link.getLockfilePaths(), link.isFromRepository()))
                 .toList();
     }
 
@@ -507,7 +511,7 @@ public class JpaInventoryStore implements InventoryStore {
     public List<ServiceComponentLink> findServiceComponentLinksForServices(Collection<UUID> serviceIds) {
         return serviceComponents.findByBusinessServiceIdInAndOrgId(serviceIds, scope()).stream()
                 .map(link -> new ServiceComponentLink(link.getBusinessServiceId(), link.getComponentId(),
-                        link.getManifestPaths(), link.getLockfilePaths()))
+                        link.getManifestPaths(), link.getLockfilePaths(), link.isFromRepository()))
                 .toList();
     }
 
@@ -610,5 +614,44 @@ public class JpaInventoryStore implements InventoryStore {
 
     private static String like(String value) {
         return "%" + value.trim().toLowerCase(Locale.ROOT) + "%";
+    }
+
+    @Override
+    public void replaceServiceImports(UUID serviceId, List<ImportScan.ModuleImports> modules) {
+        UUID org = scope();
+        serviceImports.deleteForService(serviceId, org);
+        for (ImportScan.ModuleImports module : modules) {
+            entityManager.persist(new ServiceImportEntity(serviceId, module.language(), module.module(), org,
+                    module.count(), module.sites().stream().map(ImportScan.Site::encoded).toList()));
+        }
+        entityManager.flush();
+    }
+
+    @Override
+    public List<ServiceImport> findServiceImports(Collection<UUID> serviceIds, Collection<String> keys) {
+        UUID org = scope();
+        List<String> usable = keys.stream().filter(key -> key != null && !key.isBlank() && key.indexOf(',') < 0)
+                .distinct().toList();
+        if (serviceIds.isEmpty() || usable.isEmpty()) {
+            return List.of();
+        }
+        // A key is "language:module"; a Python module or Java package below one counts too (yaml.loader, a subpackage).
+        @SuppressWarnings("unchecked")
+        List<ServiceImportEntity> rows = entityManager.createNativeQuery("""
+                select si.* from {h-schema}service_imports si
+                where si.org_id = :org
+                  and si.business_service_id = any(cast(string_to_array(:services, ',') as uuid[]))
+                  and exists (select 1 from unnest(string_to_array(:keys, ',')) as k(key)
+                              where si.language || ':' || si.module = k.key
+                                 or (si.language <> 'npm' and starts_with(si.language || ':' || si.module, k.key || '.')))
+                """, ServiceImportEntity.class)
+                .setParameter("org", org)
+                .setParameter("services", serviceIds.stream().map(UUID::toString).distinct()
+                        .collect(Collectors.joining(",")))
+                .setParameter("keys", String.join(",", usable))
+                .getResultList();
+        return rows.stream().map(row -> new ServiceImport(row.getBusinessServiceId(), new ImportScan.ModuleImports(
+                row.getLanguage(), row.getModule(), row.getSiteCount(),
+                row.getSites().stream().map(ImportScan.Site::decode).toList()))).toList();
     }
 }
