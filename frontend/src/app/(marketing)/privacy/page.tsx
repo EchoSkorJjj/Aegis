@@ -90,7 +90,8 @@ export default async function PrivacyPage() {
             </li>
             <li>
               Through a connected installation, {name} reads a service&apos;s repository to import its software
-              bill of materials (SBOM). Only when a person approves an upgrade does it re-read the manifests it
+              bill of materials (SBOM) and to find where its code imports each package; it reads the code as text
+              and never runs it. Only when a person approves an upgrade does it re-read the manifests it
               edits, commit the version changes to an <code className="font-mono text-sm">aegis/</code> branch and
               open a draft pull request. It never merges.
             </li>
@@ -108,8 +109,9 @@ export default async function PrivacyPage() {
             </li>
             <li>The repository address and branch linked to each service.</li>
             <li>
-              From each SBOM import, the packages and versions found and which manifest declares each, never the
-              code. The repository is cloned into a temporary folder that is deleted when the import finishes.
+              From each SBOM import, the packages and versions found and which manifest declares each, and where the
+              code imports each package — the module names, file paths and line numbers, never the code itself. The
+              repository is cloned into a temporary folder that is deleted when the import finishes.
             </li>
             <li>An access token pasted for an import is used for that import only and never stored.</li>
           </ul>

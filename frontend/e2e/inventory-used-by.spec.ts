@@ -20,7 +20,7 @@ function component(id: string, name: string, version: string): SoftwareComponent
 function service(id: string, name: string, criticality: BusinessService["criticality"]): BusinessService {
   return {
     id, name, criticality, exposure: "INTERNAL", repositoryUrl: null, repositoryBranch: null,
-    sbomImportedAt: null, sbomImportSource: null, createdAt: AT, updatedAt: AT,
+    sbomImportedAt: null, sbomImportSource: null, importScan: null, createdAt: AT, updatedAt: AT,
   };
 }
 

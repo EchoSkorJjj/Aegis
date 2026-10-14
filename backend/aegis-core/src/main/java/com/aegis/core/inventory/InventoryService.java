@@ -86,7 +86,11 @@ public class InventoryService {
     @Transactional
     public BusinessService linkServiceRepository(UUID serviceId, RepositoryUrl url, String branch) {
         BusinessService value = getBusinessService(serviceId);
+        String before = value.getRepositoryUrl() + " " + value.getRepositoryBranch();
         value.linkRepository(url, branch);
+        if (!before.equals(value.getRepositoryUrl() + " " + value.getRepositoryBranch())) {
+            store.replaceServiceImports(serviceId, List.of()); // what the old repository's code imported
+        }
         return store.save(value);
     }
 
@@ -94,6 +98,7 @@ public class InventoryService {
     public void unlinkServiceRepository(UUID serviceId) {
         BusinessService value = getBusinessService(serviceId);
         value.unlinkRepository();
+        store.replaceServiceImports(serviceId, List.of());
         store.save(value);
     }
 

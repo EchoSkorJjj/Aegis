@@ -200,6 +200,32 @@ class SbomRepositoryImportIntegrationTest extends AbstractInventoryIntegrationTe
     }
 
     @Test
+    void anImportFromTheRepositoryRecordsWhereItsCodeImportsEachDependencyAndAMovedLinkForgetsIt() throws Exception {
+        String name = "pnpmapp-" + UUID.randomUUID();
+        BusinessService service = linked("https://github.com/acme/" + name, null);
+
+        mvc.perform(post(IMPORT, service.getId()).with(role("ANALYST"))).andExpect(status().isOk());
+
+        mvc.perform(get("/api/inventory/services/{id}", service.getId()).with(role("ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.importScan.revision").value(FakeGitAndSyft.REVISION))
+                .andExpect(jsonPath("$.importScan.languages[0]").value("npm"))
+                .andExpect(jsonPath("$.importScan.filesRead").value(1))
+                .andExpect(jsonPath("$.importScan.limit").value(org.hamcrest.Matchers.nullValue()));
+        // What the code imports, by package and line; the file the repository records as a link was never read.
+        List<String> keys = List.of("npm:" + name + "-next", "npm:" + name + "-react", "npm:" + name + "-sharp");
+        assertThat(store.findServiceImports(List.of(service.getId()), keys))
+                .extracting(found -> found.imports().module() + " " + found.imports().sites())
+                .containsExactlyInAnyOrder(
+                        name + "-next [Site[path=client/src/page.tsx, line=1]]",
+                        name + "-react [Site[path=client/src/page.tsx, line=2]]");
+
+        inventory.linkServiceRepository(service.getId(), github("https://github.com/acme/elsewhere-" + name), null);
+        assertThat(inventory.getBusinessService(service.getId()).getImportScannedAt()).isNull();
+        assertThat(store.findServiceImports(List.of(service.getId()), keys)).isEmpty();
+    }
+
+    @Test
     void theSameVersionDeclaredInTwoManifestsIsLinkedWithBoth() throws Exception {
         String name = "twolocks-" + UUID.randomUUID();
         BusinessService service = linked("https://github.com/acme/" + name, null);

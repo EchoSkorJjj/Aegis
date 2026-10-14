@@ -1,6 +1,7 @@
 package com.aegis.core.actions.upgrade;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -11,6 +12,7 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import com.aegis.core.inventory.CodeUsage;
 import com.aegis.core.inventory.InventoryFilters.ServiceFilter;
 import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.domain.BusinessService;
@@ -63,15 +65,18 @@ public class UpgradeRecommendations {
     private final UpgradeProposalStore proposals;
     private final ResponseDirectory responses;
     private final PullRequestHosts pullRequestHosts;
+    private final CodeUsage codeUsage;
 
     public UpgradeRecommendations(InventoryStore inventory, VulnerableDependencies vulnerable, ImpactScorer scorer,
-            UpgradeProposalStore proposals, ResponseDirectory responses, PullRequestHosts pullRequestHosts) {
+            UpgradeProposalStore proposals, ResponseDirectory responses, PullRequestHosts pullRequestHosts,
+            CodeUsage codeUsage) {
         this.inventory = inventory;
         this.vulnerable = vulnerable;
         this.scorer = scorer;
         this.proposals = proposals;
         this.responses = responses;
         this.pullRequestHosts = pullRequestHosts;
+        this.codeUsage = codeUsage;
     }
 
     /** Whether Aegis can draft the pull request now and, if not, what stands in the way. */
@@ -107,9 +112,10 @@ public class UpgradeRecommendations {
      * One recommended upgrade. {@code changeSignalId} is the vulnerability a response answers — the most severe
      * one a fixed version clears, else the most severe one — and {@code toVersion} clears every other advisory
      * with a fix too. {@code overrideIn} is where the pull request overrides a dependency no manifest declares
-     * (client/pnpm-workspace.yaml, pom.xml), empty when it bumps a declaration instead. {@code response} is the
-     * response already drafted for it: the one whose pull request upgrades this dependency, else the one for
-     * {@code changeSignalId} in this service.
+     * (client/pnpm-workspace.yaml, pom.xml), empty when it bumps a declaration instead. {@code usage} is where the
+     * service's code imports it (E11-3), and {@code viaUsage} where it imports what pulls it in (null for a direct
+     * dependency). {@code response} is the response already drafted for it: the one whose pull request upgrades this
+     * dependency, else the one for {@code changeSignalId} in this service.
      */
     public record Recommendation(
             UUID serviceId,
@@ -127,6 +133,8 @@ public class UpgradeRecommendations {
             Readiness readiness,
             String reason,
             List<String> overrideIn,
+            CodeUsage.Usage usage,
+            CodeUsage.Usage viaUsage,
             ProposalRef proposal,
             ResponseDirectory.ResponseRef response) {
     }
@@ -150,9 +158,17 @@ public class UpgradeRecommendations {
         Map<UUID, ResponseDirectory.ResponseRef> byTicket = new HashMap<>();
         byChange.values().forEach(response -> byTicket.put(response.ticketId(), response));
         Found found = vulnerable.find(services.keySet());
+        List<CodeUsage.Package> packages = new ArrayList<>();
+        for (VulnerableDependency dependency : found.dependencies()) {
+            packages.add(new CodeUsage.Package(dependency.component().ecosystem(), dependency.component().name()));
+            if (dependency.via() != null) {
+                packages.add(new CodeUsage.Package(dependency.via().ecosystem(), dependency.via().name()));
+            }
+        }
+        CodeUsage.Code code = codeUsage.read(services, packages);
         return found.dependencies().stream()
                 .map(dependency -> recommendation(dependency, services.get(dependency.serviceId()), current, found,
-                        byChange, byTicket))
+                        byChange, byTicket, code))
                 .sorted(Comparator.comparingDouble(Recommendation::score).reversed()
                         .thenComparing(Recommendation::readiness)
                         .thenComparing(Recommendation::serviceName, String.CASE_INSENSITIVE_ORDER)
@@ -163,7 +179,7 @@ public class UpgradeRecommendations {
     private Recommendation recommendation(VulnerableDependency dependency, BusinessService service,
             Map<String, ProposalRef> current, Found found,
             Map<ResponseDirectory.ServiceChange, ResponseDirectory.ResponseRef> byChange,
-            Map<UUID, ResponseDirectory.ResponseRef> byTicket) {
+            Map<UUID, ResponseDirectory.ResponseRef> byTicket, CodeUsage.Code code) {
         ComponentRef component = dependency.component();
         ScoreBreakdown breakdown = scorer.breakdown(SignalType.VULNERABILITY,
                 severityFactor(dependency.vulnerabilities().getFirst()), service.getExposure(),
@@ -243,8 +259,11 @@ public class UpgradeRecommendations {
         }
         return new Recommendation(service.getId(), service.getName(), component, dependency.via(),
                 dependency.manifestPaths(), dependency.confidence(), dependency.vulnerabilities(), score,
-                scorer.tier(score), scorer.material(score), toVersion, answered, readiness, reason, overrideIn, proposal,
-                response);
+                scorer.tier(score), scorer.material(score), toVersion, answered, readiness, reason, overrideIn,
+                code.usageOf(service.getId(), component.ecosystem(), component.name(), dependency.fromRepository()),
+                dependency.via() == null ? null : code.usageOf(service.getId(), dependency.via().ecosystem(),
+                        dependency.via().name(), dependency.fromRepository()),
+                proposal, response);
     }
 
     /** The severity term of the most severe vulnerability: its CVSS score, else its feed's severity word. */

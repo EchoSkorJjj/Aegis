@@ -68,6 +68,7 @@ function vulnerability(
       cvssVersion: "3.1", cvssBaseScore: 9.8, severity: "CRITICAL" }],
     score, tier: tierOf(score), material: true, toVersion: "1.0.1", changeSignalId: `signal-${index + 1}`,
     readiness: "READY", reason: null, overrideIn: [], proposal: null, response: null,
+    usage: { status: "UNKNOWN", reason: "The service's code hasn't been read yet: import the SBOM from its repository", importedAs: [], siteCount: 0, sites: [] }, viaUsage: null,
     ...overrides,
   };
   return {

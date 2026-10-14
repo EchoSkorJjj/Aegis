@@ -139,3 +139,10 @@ interface ServiceDependencyJpaRepository extends JpaRepository<ServiceDependency
 
     List<ServiceDependencyEntity> findByBusinessServiceIdAndOrgId(UUID businessServiceId, UUID orgId);
 }
+
+interface ServiceImportJpaRepository extends JpaRepository<ServiceImportEntity, ServiceImportEntity.Key> {
+
+    @Modifying(flushAutomatically = true)
+    @Query("delete from ServiceImportEntity e where e.businessServiceId = :serviceId and e.orgId = :orgId")
+    int deleteForService(@Param("serviceId") UUID serviceId, @Param("orgId") UUID orgId);
+}

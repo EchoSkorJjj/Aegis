@@ -64,9 +64,49 @@ class RowLevelSecurityIntegrationTest extends AbstractIntegrationTest {
         }
     }
 
-    private void service(String name, UUID org) {
+    @Test
+    void whereAServicesCodeImportsItsDependenciesIsItsOrganizationsAlone() throws SQLException {
+        UUID orgA = UUID.randomUUID();
+        UUID orgB = UUID.randomUUID();
+        String prefix = "rls-imports-" + UUID.randomUUID();
+        UUID serviceA = service(prefix + "-a", orgA);
+        UUID serviceB = service(prefix + "-b", orgB);
+        superuser.update("insert into core.service_imports (business_service_id, language, module, org_id, site_count, sites) "
+                + "values (?, 'npm', 'hono', ?, 1, '{src/a.ts:1}'), (?, 'npm', 'hono', ?, 1, '{src/b.ts:1}')",
+                serviceA, orgA, serviceB, orgB);
+
+        try (Connection connection = application.getConnection()) {
+            connection.setAutoCommit(false);
+            bind(connection, orgA);
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "select business_service_id from core.service_imports where business_service_id in (?, ?)")) {
+                statement.setObject(1, serviceA);
+                statement.setObject(2, serviceB);
+                List<UUID> seen = new ArrayList<>();
+                try (ResultSet rows = statement.executeQuery()) {
+                    while (rows.next()) {
+                        seen.add(rows.getObject(1, UUID.class));
+                    }
+                }
+                assertThat(seen).containsExactly(serviceA);
+            }
+            assertThatThrownBy(() -> {
+                try (PreparedStatement insert = connection.prepareStatement("insert into core.service_imports "
+                        + "(business_service_id, language, module, org_id, site_count) values (?, 'npm', 'x', ?, 1)")) {
+                    insert.setObject(1, serviceB);
+                    insert.setObject(2, orgB);
+                    insert.executeUpdate();
+                }
+            }).isInstanceOf(SQLException.class).hasMessageContaining("row-level security");
+            connection.rollback();
+        }
+    }
+
+    private UUID service(String name, UUID org) {
+        UUID id = UUID.randomUUID();
         superuser.update("insert into core.business_services (id, name, criticality, org_id) values (?, ?, 'LOW', ?)",
-                UUID.randomUUID(), name, org);
+                id, name, org);
+        return id;
     }
 
     private static void bind(Connection connection, UUID org) throws SQLException {

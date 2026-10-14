@@ -289,3 +289,71 @@ class ServiceDependencyEntity {
         }
     }
 }
+
+/**
+ * One module a service's code imports in one language, as the code scan of its last import from the repository found it
+ * (E11-3, V40): how many times, and the first sites, each {@code path:line}. Replaced whole at each such import.
+ */
+@Entity
+@Table(name = "service_imports")
+@IdClass(ServiceImportEntity.Key.class)
+class ServiceImportEntity {
+    @Id @Column(name = "business_service_id") private UUID businessServiceId;
+    @Id @Column(name = "language") private String language;
+    @Id @Column(name = "module") private String module;
+    @Column(name = "org_id", nullable = false) private UUID orgId;
+    @Column(name = "site_count", nullable = false) private int siteCount;
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "sites", nullable = false, columnDefinition = "text[]") private String[] sites = new String[0];
+
+    protected ServiceImportEntity() {
+    }
+
+    ServiceImportEntity(UUID businessServiceId, String language, String module, UUID orgId, int siteCount,
+            List<String> sites) {
+        this.businessServiceId = businessServiceId;
+        this.language = language;
+        this.module = module;
+        this.orgId = orgId;
+        this.siteCount = siteCount;
+        this.sites = sites.toArray(String[]::new);
+    }
+
+    UUID getBusinessServiceId() {
+        return businessServiceId;
+    }
+
+    String getLanguage() {
+        return language;
+    }
+
+    String getModule() {
+        return module;
+    }
+
+    int getSiteCount() {
+        return siteCount;
+    }
+
+    List<String> getSites() {
+        return sites == null ? List.of() : List.of(sites);
+    }
+
+    static final class Key implements Serializable {
+        private UUID businessServiceId;
+        private String language;
+        private String module;
+
+        public Key() {
+        }
+
+        @Override public boolean equals(Object o) {
+            return o instanceof Key key && Objects.equals(businessServiceId, key.businessServiceId)
+                    && Objects.equals(language, key.language) && Objects.equals(module, key.module);
+        }
+
+        @Override public int hashCode() {
+            return Objects.hash(businessServiceId, language, module);
+        }
+    }
+}

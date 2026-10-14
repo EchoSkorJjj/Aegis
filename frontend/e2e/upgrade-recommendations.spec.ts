@@ -17,6 +17,7 @@ function recommendation(overrides: Partial<UpgradeRecommendation>): UpgradeRecom
     ],
     score: 67.5, tier: "HIGH", material: true, toVersion: "1.15.0", changeSignalId: "signal-axios",
     readiness: "READY", reason: null, overrideIn: [], proposal: null, response: null, canDraft: true,
+    usage: { status: "UNKNOWN", reason: "The service's code hasn't been read yet: import the SBOM from its repository", importedAs: [], siteCount: 0, sites: [] }, viaUsage: null,
     ...overrides,
   };
 }
@@ -58,6 +59,10 @@ async function fakeBff(page: Page, role: Role, recommendations: UpgradeRecommend
     id: EDU, name: "EduHelper", criticality: "HIGH", exposure: "INTERNET_FACING",
     repositoryUrl: "https://github.com/acme/edu", repositoryBranch: null,
     sbomImportedAt: "2026-09-26T01:00:00Z", sbomImportSource: "PUBLIC",
+    importScan: {
+      scannedAt: "2026-09-26T01:00:00Z", revision: "0123456789abcdef0123456789abcdef01234567", languages: ["npm", "maven"],
+      filesRead: 214, limit: null,
+    },
     createdAt: "2026-09-24T00:00:00Z", updatedAt: "2026-09-24T00:00:00Z",
   };
   await page.context().addCookies([{ name: "um_refresh", value: "browser-fixture", url: "http://localhost:3000" }]);
@@ -172,6 +177,55 @@ test("a package another one pulls in is overridden where Aegis says, and one it 
   const followRedirects = vulnerable.getByRole("row").filter({ hasText: "follow-redirects" });
   await expect(followRedirects).toContainText("npm · through axios");
   await expect(followRedirects).toContainText(`Ticket only: ${TRANSITIVE_REASON}`);
+});
+
+test("each vulnerable dependency says where the service's code imports it, linked to the line", async ({ page }) => {
+  const imported = (count: number) => ({
+    status: "IMPORTED" as const, reason: null, importedAs: ["axios"], siteCount: count,
+    sites: [
+      { path: "src/api/client.ts", line: 4, url: "https://github.com/acme/edu/blob/0123456/src/api/client.ts#L4" },
+      { path: "src/api/upload.ts", line: 2, url: "https://github.com/acme/edu/blob/0123456/src/api/upload.ts#L2" },
+    ],
+  });
+  await fakeBff(page, "SERVICE_OWNER", [
+    recommendation({ serviceId: EDU, serviceName: "EduHelper", usage: imported(3) }),
+    recommendation({
+      serviceId: EDU, serviceName: "EduHelper", component: { id: "lodash", ecosystem: "npm", name: "lodash", version: "4.17.20" },
+      toVersion: "4.17.21", score: 30.2, tier: "MEDIUM",
+      usage: { status: "NOT_IMPORTED", reason: "Nothing in the code Aegis read imports lodash", importedAs: ["lodash"], siteCount: 0, sites: [] },
+    }),
+    recommendation({
+      serviceId: EDU, serviceName: "EduHelper", component: { id: "log4j", ecosystem: "maven", name: "org.apache.logging.log4j:log4j-core", version: "2.14.1" },
+      toVersion: "2.17.1", score: 20.1, tier: "LOW",
+      usage: {
+        status: "UNKNOWN", reason: "Nothing imports org.apache.logging.log4j, but Aegis doesn't know for sure which name org.apache.logging.log4j:log4j-core is imported as",
+        importedAs: ["org.apache.logging.log4j"], siteCount: 0, sites: [],
+      },
+    }),
+    recommendation({
+      serviceId: EDU, serviceName: "EduHelper", component: { id: "follow-redirects", ecosystem: "npm", name: "follow-redirects", version: "1.15.4" },
+      via: { id: "axios-165", ecosystem: "npm", name: "axios", version: "1.6.5" }, toVersion: "1.15.6", score: 9.0, tier: "LOW",
+      usage: { status: "NOT_IMPORTED", reason: "Nothing in the code Aegis read imports follow-redirects", importedAs: ["follow-redirects"], siteCount: 0, sites: [] },
+      viaUsage: imported(1),
+    }),
+  ]);
+  await page.goto(`/inventory/services/${EDU}`);
+  const vulnerable = page.getByRole("region", { name: "Vulnerable dependencies" });
+  await expect(vulnerable.getByText("Imports read from 214 files (JavaScript/TypeScript, Java/Kotlin) at commit 0123456"))
+    .toBeVisible();
+
+  const axios = vulnerable.getByRole("row").filter({ hasText: "axios 0.21.1" });
+  await axios.getByText("Imported in 3 places").click();
+  await expect(axios.getByRole("link", { name: "src/api/client.ts:4" }))
+    .toHaveAttribute("href", "https://github.com/acme/edu/blob/0123456/src/api/client.ts#L4");
+  await expect(axios.getByRole("listitem").filter({ hasText: "and 1 more" })).toBeVisible();
+
+  await expect(vulnerable.getByRole("row").filter({ hasText: "lodash" })).toContainText("Not imported by the service's code");
+  await expect(vulnerable.getByRole("row").filter({ hasText: "log4j-core" }))
+    .toContainText("Import unknown: Nothing imports org.apache.logging.log4j, but Aegis doesn't know for sure");
+  const followRedirects = vulnerable.getByRole("row").filter({ hasText: "follow-redirects" });
+  await expect(followRedirects).toContainText("Not imported by the service's code");
+  await expect(followRedirects).toContainText("axios, which pulls it in: imported in 1 place");
 });
 
 test("the header names where you are, as the sidebar does", async ({ page }) => {
