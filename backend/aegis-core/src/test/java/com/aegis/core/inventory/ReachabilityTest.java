@@ -47,7 +47,7 @@ class ReachabilityTest {
 
     private final BusinessService service = new BusinessService(UUID.randomUUID(), "Web", BusinessCriticality.HIGH);
     private final Map<String, SoftwareComponent> components = new LinkedHashMap<>();
-    private final Map<UUID, Set<UUID>> dependsOn = new HashMap<>();
+    private final Map<UUID, Set<UUID>> dependsOn = new LinkedHashMap<>();
     private final List<ServiceComponentLink> direct = new ArrayList<>();
 
     @BeforeEach
@@ -152,6 +152,39 @@ class ReachabilityTest {
     }
 
     @Test
+    void aPackageTheRepositoryLinksIsUnknownWhileOneLinkedByHandPullsItInToo() {
+        // The import from the repository linked qs; someone linked legacy by hand, and legacy pulls qs in too. The code
+        // read imports neither, but whatever uses legacy may not be in the repository Aegis read.
+        linked("qs", true);
+        linked("legacy", false);
+        dependsOn("legacy", "qs");
+
+        Verdict qs = verdict("qs");
+
+        assertThat(qs.status()).isEqualTo(Status.UNKNOWN);
+        assertThat(qs.through()).isEqualTo("legacy");
+        assertThat(qs.reason()).startsWith("Nothing imports qs itself, but it comes in through legacy, and whether the "
+                + "code imports that is unknown: it was linked by hand");
+    }
+
+    @Test
+    void twoVersionsOfOnePackageAboveItCountAsTheMoreReachableOfThem() {
+        // nuxt 13 linked by hand, nuxt 14 by the import from the repository, both pulling postcss in; the code read
+        // imports neither. Whichever version the walk meets first, postcss is unknown — never not imported.
+        for (List<String> order : List.of(List.of("nuxt@13", "nuxt@14"), List.of("nuxt@14", "nuxt@13"))) {
+            components.clear();
+            dependsOn.clear();
+            direct.clear();
+            linked("nuxt@13", false);
+            linked("nuxt@14", true);
+            order.forEach(parent -> dependsOn(parent, "postcss"));
+
+            assertThat(verdict("postcss")).as("walked from %s", order).extracting(Verdict::status, Verdict::through)
+                    .containsExactly(Status.UNKNOWN, "nuxt");
+        }
+    }
+
+    @Test
     void aPackagePulledInByOneWhoseImportsAreUnknownIsUnknownThroughIt() {
         Usage notImported = new Usage(Status.NOT_IMPORTED, "Nothing in the code Aegis read imports urllib3",
                 List.of("urllib3"), 0, List.of());
@@ -194,8 +227,13 @@ class ReachabilityTest {
         dependsOn.computeIfAbsent(component(name).getId(), id -> new LinkedHashSet<>()).add(component(dependency).getId());
     }
 
-    private SoftwareComponent component(String name) {
-        return components.computeIfAbsent(name, key -> new SoftwareComponent(UUID.randomUUID(), "npm", key, "1.0.0"));
+    /** The npm component {@code name}, or {@code name@version} for one of several versions of a package. */
+    private SoftwareComponent component(String key) {
+        return components.computeIfAbsent(key, ignored -> {
+            int at = key.lastIndexOf('@');
+            return at > 0 ? new SoftwareComponent(UUID.randomUUID(), "npm", key.substring(0, at), key.substring(at + 1))
+                    : new SoftwareComponent(UUID.randomUUID(), "npm", key, "1.0.0");
+        });
     }
 
     private UUID id(String name) {

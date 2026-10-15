@@ -51,11 +51,7 @@ public class Reachability {
     public record Verdict(Status status, String reason, String through, Usage usage) {
 
         /** Stronger evidence of reach first: imported, then unknown, then not imported. */
-        static final Comparator<Verdict> MOST_REACHABLE = Comparator.comparingInt(verdict -> switch (verdict.status()) {
-            case IMPORTED -> 0;
-            case UNKNOWN -> 1;
-            case NOT_IMPORTED -> 2;
-        });
+        static final Comparator<Verdict> MOST_REACHABLE = Comparator.comparingInt(verdict -> rank(verdict.status()));
     }
 
     /** For each service, whether its code reaches each of these components (ids by service). */
@@ -121,16 +117,17 @@ public class Reachability {
             if (serviceGraph == null || component == null || code == null) {
                 return UNREAD;
             }
-            boolean fromRepository = fromRepository(serviceGraph, componentId);
+            // Each package by what its own links let the code read speak for: one linked by hand may be used by
+            // code outside the repository read. Two versions of one package count as the more reachable of them.
             Map<String, Usage> above = new LinkedHashMap<>();
             serviceGraph.above(componentId).stream().map(components::get).filter(Objects::nonNull)
                     .sorted(Comparator.comparing(SoftwareComponent::getName, String.CASE_INSENSITIVE_ORDER)
                             .thenComparing(SoftwareComponent::getName))
-                    .forEach(parent -> above.putIfAbsent(parent.getName(), code.usageOf(serviceId,
-                            parent.getEcosystem(), parent.getName(), fromRepository)));
+                    .forEach(parent -> above.merge(parent.getName(), code.usageOf(serviceId, parent.getEcosystem(),
+                            parent.getName(), fromRepository(serviceGraph, parent.getId())), Reachability::moreReachable));
             above.remove(component.getName());
-            return Reachability.verdict(component.getName(),
-                    code.usageOf(serviceId, component.getEcosystem(), component.getName(), fromRepository), above);
+            return Reachability.verdict(component.getName(), code.usageOf(serviceId, component.getEcosystem(),
+                    component.getName(), fromRepository(serviceGraph, componentId)), above);
         }
 
         /**
@@ -201,6 +198,19 @@ public class Reachability {
         Set<UUID> above = serviceGraph.above(componentId);
         return serviceGraph.direct().stream().anyMatch(link -> link.fromRepository()
                 && (link.componentId().equals(componentId) || above.contains(link.componentId())));
+    }
+
+    /** Of two versions' imports under one name, the one that says more of the code may reach it. */
+    private static Usage moreReachable(Usage first, Usage second) {
+        return rank(second.status()) < rank(first.status()) ? second : first;
+    }
+
+    private static int rank(Status status) {
+        return switch (status) {
+            case IMPORTED -> 0;
+            case UNKNOWN -> 1;
+            case NOT_IMPORTED -> 2;
+        };
     }
 
     private static String join(List<String> names) {
