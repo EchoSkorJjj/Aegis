@@ -30,11 +30,11 @@ function impact(owners: OwnerRef[], material = true): ChangeImpactResponse {
       service: { id: SERVICE, name: "Payments API", criticality: "CRITICAL", exposure: "INTERNET_FACING" },
       score: material ? 100 : 4, tier: material ? "CRITICAL" : "NEGLIGIBLE", material, confidence: "CONFIRMED",
       breakdown: {
-        severityFactor: 1, exposure: "INTERNET_FACING", exposureFactor: 1, exposureApplies: true,
+        severityFactor: 1, exposure: "INTERNET_FACING", exposureFactor: 1, exposureApplies: true, reachability: "UNKNOWN", reachabilityFactor: 1, reachabilityApplies: true,
         criticality: "CRITICAL", criticalityFactor: 1, confidence: "CONFIRMED", confidenceFactor: 1,
       },
       factors: [factor("SEVERITY", "CVSS 3.1 base 10.0"), factor("EXPOSURE", "INTERNET_FACING"), factor("CRITICALITY", "CRITICAL")],
-      explanation: "Worst case.",
+      reachability: { status: "UNKNOWN", reason: "The service's code hasn't been read yet: import the SBOM from its repository", through: null, usage: null }, explanation: "Worst case.",
       owners,
       evidence: [{
         kind: "ADVISORY_COMPONENT", confidence: "CONFIRMED", explanation: "log4j-core is in range.", affectedProduct: null,

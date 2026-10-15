@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Locale;
 
+import com.aegis.core.inventory.CodeUsage;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.matching.MatchingDtos.MatchConfidence;
@@ -19,9 +20,10 @@ import org.springframework.stereotype.Component;
  * the same inputs always produce the same score and the whole model can be unit-tested without a
  * database or a feed.
  *
- * <p>{@code score = severity x exposure x criticality x confidence x 100}: how bad the vulnerability
- * is, how reachable this particular service is, how much this organization cares if it falls over, and
- * how sure we are the match applies. Each term is a multiplier in {@code [0,1]}, so the result is a
+ * <p>{@code score = severity x exposure x reachability x criticality x confidence x 100}: how bad the
+ * vulnerability is, how reachable this particular service is, whether its code reaches the vulnerable
+ * package at all (E11-4), how much this organization cares if it falls over, and how sure we are the
+ * match applies. Each term is a multiplier in {@code [0,1]}, so the result is a
  * 0-100 percentage of the worst case, and a service that is weak on any one axis cannot be pushed to
  * the top by the others. The confidence term defaults to 1.0, so the model reads as three factors
  * until a deployment configures a discount (see {@link ScoringProperties}).
@@ -90,6 +92,8 @@ public class ImpactScorer {
      * without discounting the score — see {@link ScoringProperties}. A deployment that lowers
      * {@code aegis.scoring.confidence.possible} gets the discount, and it shows up here as its own
      * term rather than hiding inside one of the other three.
+     *
+     * <p>Without a reachability, a vulnerability's is unknown — it scores like an imported one.
      */
     public ScoreBreakdown breakdown(
             SignalType signalType,
@@ -97,12 +101,33 @@ public class ImpactScorer {
             ServiceExposure exposure,
             BusinessCriticality criticality,
             MatchConfidence confidence) {
-        boolean exposureApplies = signalType == SignalType.VULNERABILITY;
+        return breakdown(signalType, severityFactor, exposure, criticality, confidence, null);
+    }
+
+    /**
+     * The breakdown with whether the service's code reaches the vulnerable package (E11-4). Only
+     * {@code NOT_IMPORTED} discounts the score; {@code UNKNOWN} (or null) scores like {@code IMPORTED}, so
+     * no score drops without evidence. Like exposure it applies to vulnerabilities only: an outage has no
+     * package, so its term is 1.0 and the breakdown says it was not applied.
+     */
+    public ScoreBreakdown breakdown(
+            SignalType signalType,
+            double severityFactor,
+            ServiceExposure exposure,
+            BusinessCriticality criticality,
+            MatchConfidence confidence,
+            CodeUsage.Status reachability) {
+        boolean vulnerability = signalType == SignalType.VULNERABILITY;
+        CodeUsage.Status reached = !vulnerability ? null
+                : reachability == null ? CodeUsage.Status.UNKNOWN : reachability;
         return new ScoreBreakdown(
                 clamp(severityFactor),
                 exposure,
-                exposureApplies ? weights.exposureFactor(exposure) : 1.0,
-                exposureApplies,
+                vulnerability ? weights.exposureFactor(exposure) : 1.0,
+                vulnerability,
+                reached,
+                weights.reachabilityFactor(reached),
+                vulnerability,
                 criticality,
                 weights.criticalityFactor(criticality),
                 confidence,
@@ -121,6 +146,7 @@ public class ImpactScorer {
     public double score(ScoreBreakdown breakdown) {
         BigDecimal product = BigDecimal.valueOf(clamp(breakdown.severityFactor()))
                 .multiply(BigDecimal.valueOf(clamp(breakdown.exposureFactor())))
+                .multiply(BigDecimal.valueOf(clamp(breakdown.reachabilityFactor())))
                 .multiply(BigDecimal.valueOf(clamp(breakdown.criticalityFactor())))
                 .multiply(BigDecimal.valueOf(clamp(breakdown.confidenceFactor())));
         return product.movePointRight(2).setScale(1, RoundingMode.HALF_UP).doubleValue();

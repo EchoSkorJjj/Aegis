@@ -69,7 +69,7 @@ class ScoringDeterminismTest {
         // the product worked out in exact decimal arithmetic. Floating point must never move a score
         // across a rounding boundary: 33.75 is 33.8, not 33.7, and never a different answer on a rerun.
         ImpactScorer discounting = new ImpactScorer(new ScoringProperties(
-                null, null, Map.of(MatchConfidence.POSSIBLE, 0.7), null, null, null, null, null));
+                null, null, Map.of(MatchConfidence.POSSIBLE, 0.7), null, null, null, null, null, null));
         for (ImpactScorer model : List.of(scorer, discounting)) {
             List<SeverityInput> severities = new ArrayList<>();
             for (int tenths = 0; tenths <= 100; tenths++) {

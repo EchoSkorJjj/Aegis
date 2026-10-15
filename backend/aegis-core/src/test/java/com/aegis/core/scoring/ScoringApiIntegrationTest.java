@@ -13,9 +13,13 @@ import com.aegis.core.incidents.VendorIncident;
 import com.aegis.core.incidents.VendorIncidentStore;
 import com.aegis.core.inventory.InventoryRoles;
 import com.aegis.core.inventory.InventoryService;
+import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
+import com.aegis.core.inventory.domain.ImportScan;
 import com.aegis.core.inventory.domain.Owner;
+import com.aegis.core.inventory.domain.RepositoryUrl;
+import com.aegis.core.inventory.domain.SbomImportSource;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
@@ -30,6 +34,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.endsWith;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -38,8 +43,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
 
+    private static final String REVISION = "0123456789abcdef0123456789abcdef01234567";
+
     @Autowired
     private InventoryService inventory;
+
+    @Autowired
+    private InventoryStore store;
 
     @Autowired
     private TestOwners owners;
@@ -98,6 +108,79 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.owners[0].impactedServiceCount").value(1))
                 .andExpect(jsonPath("$.owners[0].materialServiceCount").value(1))
                 .andExpect(jsonPath("$.owners[0].topService.id").value(portal.getId().toString()));
+    }
+
+    /**
+     * The reachability term (E11-4): one vulnerability in two services alike in every other way, one whose code imports
+     * the package and one whose code doesn't. The second scores a band lower, and each breakdown names the factor with
+     * what it rests on — the importing lines, linked at the commit read, or why nothing reaches it.
+     */
+    @Test
+    void scoresAPackageTheCodeNeverImportsLowerAndShowsTheLinesBehindEachVerdict() throws Exception {
+        String tag = Long.toHexString(Math.abs(UUID.randomUUID().getMostSignificantBits()));
+        String packageName = "reach-" + tag;
+        SoftwareComponent vulnerable = inventory.createSoftwareComponent("npm", packageName, "1.0.0");
+        BusinessService imports = scanned("imports-" + tag, vulnerable, true);
+        BusinessService ignores = scanned("ignores-" + tag, vulnerable, false);
+        Advisory advisory = advisories.upsert(new Advisory(null, "osv", "GHSA-reach-" + tag, "CVE-2099-" + tag,
+                "A flaw.", Instant.now(), Instant.now(), new Advisory.Cvss("3.1", null, new BigDecimal("9.0"), null),
+                List.of(AffectedProduct.ofPackage("npm", packageName, null, "1.0.0", null, null, "1.1.0"))));
+
+        mvc.perform(get("/api/scoring/change-signals/{id}", advisory.id()).with(role("ANALYST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.services.length()").value(2))
+                // Imported: the full 90.0, and the lines that import it.
+                .andExpect(jsonPath("$.services[0].service.id").value(imports.getId().toString()))
+                .andExpect(jsonPath("$.services[0].score").value(90.0))
+                .andExpect(jsonPath("$.services[0].tier").value("CRITICAL"))
+                .andExpect(jsonPath("$.services[0].breakdown.reachability").value("IMPORTED"))
+                .andExpect(jsonPath("$.services[0].breakdown.reachabilityFactor").value(1.0))
+                .andExpect(jsonPath("$.services[0].breakdown.reachabilityApplies").value(true))
+                .andExpect(jsonPath("$.services[0].factors[2].factor").value("REACHABILITY"))
+                .andExpect(jsonPath("$.services[0].factors[2].input").value("IMPORTED"))
+                .andExpect(jsonPath("$.services[0].factors[2].setting").value("aegis.scoring.reachability.imported"))
+                .andExpect(jsonPath("$.services[0].reachability.status").value("IMPORTED"))
+                .andExpect(jsonPath("$.services[0].reachability.usage.siteCount").value(2))
+                .andExpect(jsonPath("$.services[0].reachability.usage.sites[0].path").value("src/app.ts"))
+                .andExpect(jsonPath("$.services[0].reachability.usage.sites[0].line").value(4))
+                .andExpect(jsonPath("$.services[0].reachability.usage.sites[0].url").value(
+                        "https://github.com/acme/imports-" + tag + "/blob/" + REVISION + "/src/app.ts#L4"))
+                // Never imported: 72.0, HIGH rather than CRITICAL, with reachability as what holds it down.
+                .andExpect(jsonPath("$.services[1].service.id").value(ignores.getId().toString()))
+                .andExpect(jsonPath("$.services[1].score").value(72.0))
+                .andExpect(jsonPath("$.services[1].tier").value("HIGH"))
+                .andExpect(jsonPath("$.services[1].breakdown.reachability").value("NOT_IMPORTED"))
+                .andExpect(jsonPath("$.services[1].breakdown.reachabilityFactor").value(0.8))
+                .andExpect(jsonPath("$.services[1].factors[2].input").value("NOT_IMPORTED"))
+                .andExpect(jsonPath("$.services[1].factors[2].weight").value(0.8))
+                .andExpect(jsonPath("$.services[1].factors[2].headroom").value(18.0))
+                .andExpect(jsonPath("$.services[1].factors[2].limiting").value(true))
+                .andExpect(jsonPath("$.services[1].factors[2].setting").value("aegis.scoring.reachability.not-imported"))
+                .andExpect(jsonPath("$.services[1].reachability.status").value("NOT_IMPORTED"))
+                .andExpect(jsonPath("$.services[1].reachability.reason").value(
+                        "Nothing in the code Aegis read imports " + packageName))
+                .andExpect(jsonPath("$.services[1].explanation").value(
+                        containsString("x reachability 0.80 (NOT_IMPORTED)")));
+    }
+
+    /** A critical, internet-facing service whose repository import linked {@code component} and read the code. */
+    private BusinessService scanned(String name, SoftwareComponent component, boolean importsIt) {
+        BusinessService service = inventory.createBusinessService(
+                name, BusinessCriticality.CRITICAL, ServiceExposure.INTERNET_FACING);
+        inventory.linkServiceRepository(service.getId(),
+                RepositoryUrl.parse("https://github.com/acme/" + name, List.of("github.com")), null);
+        store.linkRepositoryComponent(service.getId(), component.getId(), List.of("package.json"),
+                List.of("package-lock.json"));
+        BusinessService read = inventory.getBusinessService(service.getId());
+        read.recordSbomImport(SbomImportSource.PUBLIC, Instant.now());
+        read.recordImportScan(new ImportScan(REVISION, List.of("npm"), 3, null, List.of()), Instant.now());
+        store.save(read);
+        if (importsIt) {
+            store.replaceServiceImports(service.getId(), List.of(new ImportScan.ModuleImports("npm",
+                    component.getName(), 2, List.of(new ImportScan.Site("src/app.ts", 4),
+                            new ImportScan.Site("src/b.ts", 9)))));
+        }
+        return service;
     }
 
     @Test
@@ -162,8 +245,13 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.services[0].breakdown.exposureApplies").value(false))
                 .andExpect(jsonPath("$.services[0].breakdown.exposureFactor").value(1.0))
                 // Every contributing factor, in model order, with what it cost the score (CS203-72):
-                // maxing one alone gives severity 80.0, criticality 75.0; exposure has nothing to give.
-                .andExpect(jsonPath("$.services[0].factors.length()").value(4))
+                // maxing one alone gives severity 80.0, criticality 75.0; exposure and reachability have
+                // nothing to give — an outage is neither an attack nor a package.
+                .andExpect(jsonPath("$.services[0].factors.length()").value(5))
+                .andExpect(jsonPath("$.services[0].factors[2].factor").value("REACHABILITY"))
+                .andExpect(jsonPath("$.services[0].factors[2].input").value("not applied to outages"))
+                .andExpect(jsonPath("$.services[0].breakdown.reachabilityApplies").value(false))
+                .andExpect(jsonPath("$.services[0].reachability").doesNotExist())
                 .andExpect(jsonPath("$.services[0].factors[0].factor").value("SEVERITY"))
                 .andExpect(jsonPath("$.services[0].factors[0].input").value("severity major"))
                 .andExpect(jsonPath("$.services[0].factors[0].weight").value(0.75))
@@ -175,11 +263,13 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.services[0].factors[1].headroom").value(0.0))
                 .andExpect(jsonPath("$.services[0].factors[1].limiting").value(false))
                 .andExpect(jsonPath("$.services[0].factors[1].setting").doesNotExist())
-                .andExpect(jsonPath("$.services[0].factors[2].factor").value("CRITICALITY"))
-                .andExpect(jsonPath("$.services[0].factors[2].headroom").value(15.0))
-                .andExpect(jsonPath("$.services[0].factors[2].limiting").value(false))
-                .andExpect(jsonPath("$.services[0].factors[3].factor").value("CONFIDENCE"))
-                .andExpect(jsonPath("$.services[0].factors[3].headroom").value(0.0))
+                .andExpect(jsonPath("$.services[0].factors[2].headroom").value(0.0))
+                .andExpect(jsonPath("$.services[0].factors[2].setting").doesNotExist())
+                .andExpect(jsonPath("$.services[0].factors[3].factor").value("CRITICALITY"))
+                .andExpect(jsonPath("$.services[0].factors[3].headroom").value(15.0))
+                .andExpect(jsonPath("$.services[0].factors[3].limiting").value(false))
+                .andExpect(jsonPath("$.services[0].factors[4].factor").value("CONFIDENCE"))
+                .andExpect(jsonPath("$.services[0].factors[4].headroom").value(0.0))
                 .andExpect(jsonPath("$.services[0].explanation").value(endsWith(
                         "; severity (severity major) holds it down most, costing 20.0 points")));
     }
@@ -278,10 +368,10 @@ class ScoringApiIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.services[1].materialSignalCount").value(1))
                 // Each headline number carries its own reasons: the hidden service's 12.5 is held
                 // down by its LOW tier (CRITICAL would make it 50.0) more than by its isolation.
-                .andExpect(jsonPath("$.services[1].topFactors.length()").value(4))
-                .andExpect(jsonPath("$.services[1].topFactors[2].factor").value("CRITICALITY"))
-                .andExpect(jsonPath("$.services[1].topFactors[2].headroom").value(37.5))
-                .andExpect(jsonPath("$.services[1].topFactors[2].limiting").value(true))
+                .andExpect(jsonPath("$.services[1].topFactors.length()").value(5))
+                .andExpect(jsonPath("$.services[1].topFactors[3].factor").value("CRITICALITY"))
+                .andExpect(jsonPath("$.services[1].topFactors[3].headroom").value(37.5))
+                .andExpect(jsonPath("$.services[1].topFactors[3].limiting").value(true))
                 .andExpect(jsonPath("$.services[1].topExplanation").value(
                         endsWith("; criticality (LOW) holds it down most, costing 37.5 points")))
                 // The worst case has nothing to blame, so no factor is limiting.

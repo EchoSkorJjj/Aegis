@@ -316,6 +316,22 @@ class UpgradeRecommendationIntegrationTest extends AbstractInventoryIntegrationT
         Map<String, Object> deepItem = byName.get("deep-" + tag);
         assertThat(JsonPath.<String>read(deepItem, "$.usage.status")).isEqualTo("NOT_IMPORTED");
         assertThat(JsonPath.<String>read(deepItem, "$.viaUsage.status")).isEqualTo("IMPORTED");
+
+        // The score counts whether the code reaches each (E11-4): only the one nothing reaches is discounted, so it
+        // ranks last — what the code imports, or might, keeps the full 8.1 x 1 x 1 = 81.0.
+        assertThat(JsonPath.<String>read(usedItem, "$.reachability.status")).isEqualTo("IMPORTED");
+        assertThat(JsonPath.<Double>read(usedItem, "$.score")).isEqualTo(81.0);
+        assertThat(JsonPath.<String>read(byName.get("unused-" + tag), "$.reachability.status")).isEqualTo("NOT_IMPORTED");
+        assertThat(JsonPath.<Double>read(byName.get("unused-" + tag), "$.score")).isEqualTo(64.8);
+        assertThat(JsonPath.<String>read(byName.get("hand-" + tag), "$.reachability.status")).isEqualTo("UNKNOWN");
+        assertThat(JsonPath.<Double>read(byName.get("hand-" + tag), "$.score")).isEqualTo(81.0);
+        assertThat(JsonPath.<String>read(deepItem, "$.reachability.status")).isEqualTo("UNKNOWN");
+        assertThat(JsonPath.<String>read(deepItem, "$.reachability.through")).isEqualTo("used-" + tag);
+        assertThat(JsonPath.<String>read(deepItem, "$.reachability.reason")).isEqualTo("deep-" + tag
+                + " isn't imported itself, but it comes in through used-" + tag + ", which the code imports");
+        assertThat(JsonPath.<Double>read(deepItem, "$.score")).isEqualTo(81.0);
+        assertThat(recommendations(service.getId(), as("ANALYST", UUID.randomUUID())).getLast())
+                .containsEntry("score", 64.8);
     }
 
     /** A repository on a host no pull-request provider serves gets a ticket saying so, not a PR that fails later. */

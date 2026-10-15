@@ -239,6 +239,21 @@ export interface CodeUsage {
   sites: CodeUsageSite[];
 }
 
+/**
+ * Whether a service's code reaches a vulnerable package (E11-4): IMPORTED when it imports the package itself;
+ * NOT_IMPORTED only when it imports neither the package nor anything that pulls it in; UNKNOWN otherwise — scored
+ * like IMPORTED, so no score drops without evidence.
+ */
+export interface Reachability {
+  status: CodeUsageStatus;
+  /** Why it isn't imported, or why that's unknown; null when imported. */
+  reason: string | null;
+  /** The package pulling it in that the verdict rests on (one the code imports, or whose imports are unknown). */
+  through: string | null;
+  /** That package's imports — or the package's own when `through` is null — with the lines; null when not read. */
+  usage: CodeUsage | null;
+}
+
 export interface BusinessServiceInput {
   name: string;
   criticality: BusinessCriticality;
@@ -460,8 +475,8 @@ export type ImpactTier = "NEGLIGIBLE" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 /** Where the severity multiplier came from: a published CVSS score, a feed's severity word, or neither. */
 export type SeveritySource = "CVSS" | "SEVERITY_LABEL" | "NONE";
 
-/** The terms of score = severity × exposure × criticality × confidence × 100, in that order. */
-export type ScoreFactorKind = "SEVERITY" | "EXPOSURE" | "CRITICALITY" | "CONFIDENCE";
+/** The terms of score = severity × exposure × reachability × criticality × confidence × 100, in that order. */
+export type ScoreFactorKind = "SEVERITY" | "EXPOSURE" | "REACHABILITY" | "CRITICALITY" | "CONFIDENCE";
 
 export interface SeverityInput {
   source: SeveritySource;
@@ -478,6 +493,11 @@ export interface ScoreBreakdown {
   exposureFactor: number;
   /** False for a vendor outage: exposure is attack reach, and an outage is not an attack. */
   exposureApplies: boolean;
+  /** Whether the service's code imports the vulnerable package; null for an outage, which has none. */
+  reachability: CodeUsageStatus | null;
+  /** Only NOT_IMPORTED discounts: unknown scores like imported. */
+  reachabilityFactor: number;
+  reachabilityApplies: boolean;
   criticality: BusinessCriticality | null;
   criticalityFactor: number;
   confidence: MatchConfidence | null;
@@ -507,6 +527,8 @@ export interface ScoredService {
   confidence: MatchConfidence;
   breakdown: ScoreBreakdown;
   factors: ScoreFactor[];
+  /** What the reachability factor rests on, with the lines; null for an outage. */
+  reachability: Reachability | null;
   explanation: string;
   owners: OwnerRef[];
   /** Matching's evidence chains for this service — why the change reaches it at all. */
@@ -665,6 +687,8 @@ export interface UpgradeRecommendation {
   usage: CodeUsage;
   /** Where the service's code imports what pulls it in; null for a direct dependency. */
   viaUsage: CodeUsage | null;
+  /** Whether the code reaches it at all, through anything that pulls it in too — the score counts it. */
+  reachability: Reachability;
   /** The current pull request that upgrades it, if any, and the response it belongs to (null: drafted on its own). */
   proposal: {
     id: string;

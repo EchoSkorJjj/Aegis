@@ -4,6 +4,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import com.aegis.core.inventory.CodeUsage;
+import com.aegis.core.inventory.Reachability;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.matching.MatchingDtos.ChangeRef;
@@ -58,11 +60,35 @@ class DraftEvidenceTest {
         assertThat(evidence).contains("Direct dependency is affected.", "A second dependency path is affected.",
                 "Affected service: Payments (" + SERVICE + "), HIGH criticality, INTERNAL.",
                 "Service owners: 1 assigned (personal details omitted).", "Match confidence: POSSIBLE.",
-                "Score calculation: severity 0.9 x exposure 0.9 x criticality 0.8 x confidence 1 x 100 = 64.8"
+                "Score calculation: severity 0.9 x exposure 0.9 x reachability 1 x criticality 0.8 x confidence 1"
+                        + " x 100 = 64.8"
                         + " (rounded to one decimal).",
                 "Score factor CRITICALITY: HIGH; weight 0.8; limiting factor; setting aegis.scoring.criticality.high.");
         assertThat(evidence).anySatisfy(line -> assertThat(line).startsWith("Impact score 64.8 (MEDIUM, material)."));
         assertThat(String.join("\n", evidence)).doesNotContain("Alice", USER.toString());
+    }
+
+    @Test
+    void evidenceSaysWhetherTheCodeReachesThePackageButNeverWhere() {
+        ScoredService base = scored(true);
+        Reachability.Verdict imported = new Reachability.Verdict(CodeUsage.Status.IMPORTED, null, null,
+                new CodeUsage.Usage(CodeUsage.Status.IMPORTED, null, List.of("axios"), 3, List.of(new CodeUsage.Site(
+                        "src/billing/charge.ts", 4, "https://github.com/acme/payments/blob/abc/src/billing/charge.ts#L4"))));
+        Reachability.Verdict notImported = new Reachability.Verdict(CodeUsage.Status.NOT_IMPORTED,
+                "Nothing in the code Aegis read imports axios", null, null);
+
+        List<String> reached = DraftEvidence.service(withReachability(base, imported));
+
+        assertThat(reached).contains("Code reachability: IMPORTED. The service's code imports it in 3 places.");
+        // The files and lines stay in Aegis: a draft goes to the AI and to the issue tracker.
+        assertThat(String.join("\n", reached)).doesNotContain("charge.ts", "github.com/acme");
+        assertThat(DraftEvidence.service(withReachability(base, notImported)))
+                .contains("Code reachability: NOT_IMPORTED. Nothing in the code Aegis read imports axios.");
+    }
+
+    private static ScoredService withReachability(ScoredService base, Reachability.Verdict reachability) {
+        return new ScoredService(base.service(), base.score(), base.tier(), base.material(), base.confidence(),
+                base.breakdown(), base.factors(), reachability, base.explanation(), base.owners(), base.evidence());
     }
 
     @Test
@@ -74,7 +100,7 @@ class DraftEvidenceTest {
                 new OwnerRef(UUID.randomUUID(), UUID.randomUUID(), "Ann"),
                 new OwnerRef(UUID.randomUUID(), UUID.randomUUID(), "李明"));
         ScoredService withOwners = new ScoredService(base.service(), base.score(), base.tier(), base.material(),
-                base.confidence(), base.breakdown(), base.factors(), base.explanation(), owners,
+                base.confidence(), base.breakdown(), base.factors(), base.reachability(), base.explanation(), owners,
                 List.of(new EvidenceChain(EvidenceKind.ADVISORY_COMPONENT, MatchConfidence.POSSIBLE,
                                 "CVE-1 affects Annotation 1.0; dependency path Annotation reaches service Payments; owners: "
                                         + "Alice Smith, Alice, Ann (possible match — version is unknown, review before acting)",
@@ -112,9 +138,11 @@ class DraftEvidenceTest {
         return new ScoredService(new ServiceRef(SERVICE, "Payments", BusinessCriticality.HIGH, ServiceExposure.INTERNAL),
                 exposureApplies ? 64.8 : 72.0, ImpactTier.MEDIUM, true, MatchConfidence.POSSIBLE,
                 new ScoreBreakdown(0.9, ServiceExposure.INTERNAL, exposureApplies ? 0.9 : 1,
-                        exposureApplies, BusinessCriticality.HIGH, 0.8, MatchConfidence.POSSIBLE, 1),
+                        exposureApplies, exposureApplies ? CodeUsage.Status.UNKNOWN : null, 1, exposureApplies,
+                        BusinessCriticality.HIGH, 0.8, MatchConfidence.POSSIBLE, 1),
                 List.of(new ScoreFactor(ScoreFactorKind.CRITICALITY, "HIGH", 0.8, 16.2, true,
                         "aegis.scoring.criticality.high")),
+                null,
                 "Aegis found an affected dependency in this service.", List.of(new OwnerRef(UUID.randomUUID(), USER, "Alice")),
                 List.of(new EvidenceChain(EvidenceKind.ADVISORY_COMPONENT, MatchConfidence.POSSIBLE,
                                 "Direct dependency is affected.", null, List.of(), null),

@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 
+import com.aegis.core.inventory.CodeUsage;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.ServiceExposure;
@@ -35,6 +36,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * what it is live in {@code SCORING-CALIBRATION.md}; {@code ScoringCalibrationTest} enforces them, so
  * a retune that breaks one fails the build rather than quietly re-ranking the queue.
  *
+ * <p><b>Reachability (E11-4).</b> A vulnerability in a package the service's code never imports, nor anything that
+ * pulls it in, is discounted by {@code reachability.not-imported}. An unknown reachability always scores like
+ * {@code reachability.imported} — no score drops without evidence — so it has no weight of its own, and not imported
+ * can never weigh more than imported.
+ *
  * <p><b>Validation.</b> Absent values take the default. A present value that is out of range is
  * handled by its kind: a single weight or threshold has a safe reading, so it is clamped into range
  * and logged (a stray {@code 5.0} multiplier becomes {@code 1.0}, not a silent score of infinity).
@@ -51,7 +57,8 @@ public record ScoringProperties(
         Double unknownSeverityFactor,
         Tiers tiers,
         Double materialityThreshold,
-        Rollup rollup) {
+        Rollup rollup,
+        Map<CodeUsage.Status, Double> reachability) {
 
     private static final Logger log = LoggerFactory.getLogger(ScoringProperties.class);
 
@@ -74,11 +81,12 @@ public record ScoringProperties(
         if (rollup == null) {
             rollup = new Rollup(null, null);
         }
+        reachability = reachabilityFactors(reachability);
     }
 
     /** The shipped weighting — what an empty {@code aegis.scoring} block binds to. */
     public static ScoringProperties defaults() {
-        return new ScoringProperties(null, null, null, null, null, null, null, null);
+        return new ScoringProperties(null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -99,6 +107,34 @@ public record ScoringProperties(
                 merged.put(key, clampFactor(value, "aegis.scoring." + name + "." + key));
             }
         });
+        return Map.copyOf(merged);
+    }
+
+    /**
+     * The reachability table: imported and not imported, merged like the others. Unknown has no weight of its own (it
+     * scores like imported), so a configured one is ignored; not imported weighing more than imported would rank the
+     * code that never reaches a package above the code that does, so it is held at imported's weight.
+     */
+    private static Map<CodeUsage.Status, Double> reachabilityFactors(Map<CodeUsage.Status, Double> overrides) {
+        Map<CodeUsage.Status, Double> weighted = new EnumMap<>(CodeUsage.Status.class);
+        if (overrides != null) {
+            overrides.forEach((status, value) -> {
+                if (status == CodeUsage.Status.UNKNOWN) {
+                    log.warn("aegis.scoring.reachability.unknown is ignored: an unknown reachability scores like "
+                            + "aegis.scoring.reachability.imported");
+                } else if (status != null && value != null) {
+                    weighted.put(status, value);
+                }
+            });
+        }
+        Map<CodeUsage.Status, Double> merged = new EnumMap<>(CodeUsage.Status.class);
+        merged.putAll(mergedFactors(defaultReachability(), weighted, CodeUsage.Status.class, "reachability"));
+        double imported = merged.get(CodeUsage.Status.IMPORTED);
+        if (merged.get(CodeUsage.Status.NOT_IMPORTED) > imported) {
+            log.warn("aegis.scoring.reachability.not-imported = {} is above imported ({}); using {}",
+                    merged.get(CodeUsage.Status.NOT_IMPORTED), imported, imported);
+            merged.put(CodeUsage.Status.NOT_IMPORTED, imported);
+        }
         return Map.copyOf(merged);
     }
 
@@ -269,6 +305,19 @@ public record ScoringProperties(
     }
 
     /**
+     * How much of a vulnerability's score is kept when the service's code never imports the package, nor anything that
+     * pulls it in (E11-4). 0.8 is the largest discount that still costs at most one band, like a step on either of the
+     * service's own axes (P2): a critical CVE (90) not imported reads HIGH (72), never MEDIUM. Imported is the full
+     * score, and an unknown reachability scores like it.
+     */
+    private static Map<CodeUsage.Status, Double> defaultReachability() {
+        Map<CodeUsage.Status, Double> weights = new EnumMap<>(CodeUsage.Status.class);
+        weights.put(CodeUsage.Status.IMPORTED, 1.0);
+        weights.put(CodeUsage.Status.NOT_IMPORTED, 0.8);
+        return Map.copyOf(weights);
+    }
+
+    /**
      * Severity factor for a signal with no CVSS, keyed by the feed's severity word (lower-cased). Two
      * vocabularies are shipped — NVD's {@code critical/high/medium/low} and Statuspage's
      * {@code critical/major/minor/none}, plus a few near-synonyms — and a deployment ingesting a feed
@@ -307,6 +356,14 @@ public record ScoringProperties(
 
     double confidenceFactor(MatchConfidence value) {
         return value == null ? 1.0 : confidence.getOrDefault(value, 1.0);
+    }
+
+    /** Not applied (null) is 1.0; unknown scores like imported, so no score drops without evidence. */
+    double reachabilityFactor(CodeUsage.Status value) {
+        if (value == null) {
+            return 1.0;
+        }
+        return reachability.getOrDefault(value == CodeUsage.Status.UNKNOWN ? CodeUsage.Status.IMPORTED : value, 1.0);
     }
 
     /** The configured factor for a severity word (already lower-cased), or null when it is unrecognised. */

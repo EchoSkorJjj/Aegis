@@ -4,6 +4,8 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
+import com.aegis.core.inventory.CodeUsage;
+import com.aegis.core.inventory.Reachability;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.matching.MatchingDtos.ChangeRef;
@@ -63,8 +65,10 @@ public final class ScoringDtos {
      *
      * <p>{@code breakdown} is the arithmetic (every multiplier, enough to reproduce the score by hand);
      * {@code factors} is the same terms explained — what each was read from, where it is configured,
-     * and which one is holding the score down. {@code evidence} is matching's evidence chains for this
-     * service — why the change reaches it at all.
+     * and which one is holding the score down. {@code reachability} is what the reachability term rests on
+     * (E11-4): whether the service's code imports the vulnerable package, or what pulls it in, with the files and
+     * lines — null for a vendor outage, which has no package. {@code evidence} is matching's evidence chains for
+     * this service — why the change reaches it at all.
      */
     public record ScoredService(
             ServiceRef service,
@@ -74,6 +78,7 @@ public final class ScoringDtos {
             MatchConfidence confidence,
             ScoreBreakdown breakdown,
             List<ScoreFactor> factors,
+            Reachability.Verdict reachability,
             String explanation,
             List<OwnerRef> owners,
             List<EvidenceChain> evidence) {
@@ -81,12 +86,14 @@ public final class ScoringDtos {
 
     /**
      * One term of the score, explained. A scored row lists every term in model order (severity,
-     * exposure, criticality, confidence), so a client can render "why this number" without knowing the
-     * model's shape.
+     * exposure, reachability, criticality, confidence), so a client can render "why this number" without
+     * knowing the model's shape.
      *
      * @param factor   which term of the model this is
      * @param input    what the multiplier was read from — the published CVSS score or severity word,
-     *                 or the exposure / criticality declared on the service, or the match confidence
+     *                 or the exposure / criticality declared on the service, whether the service's code
+     *                 imports the package ({@code IMPORTED}, {@code NOT_IMPORTED}, {@code UNKNOWN}), or the
+     *                 match confidence
      * @param weight   the multiplier itself, in {@code [0,1]}
      * @param headroom how many points higher the score would be if this factor alone were at its
      *                 maximum (1.0) and the others stayed where they are — what this factor is costing
@@ -102,28 +109,40 @@ public final class ScoringDtos {
             ScoreFactorKind factor, String input, double weight, double headroom, boolean limiting, String setting) {
     }
 
-    /** The terms of {@code score = severity x exposure x criticality x confidence x 100}, in that order. */
+    /**
+     * The terms of {@code score = severity x exposure x reachability x criticality x confidence x 100}, in that
+     * order.
+     */
     public enum ScoreFactorKind {
         SEVERITY,
         EXPOSURE,
+        REACHABILITY,
         CRITICALITY,
         CONFIDENCE
     }
 
     /**
-     * Every term in {@code score = severity x exposure x criticality x confidence x 100}, with the
-     * input each factor was read from. Reproducing the score by hand from this record is the point;
-     * {@code confidenceFactor} is 1.0 unless a deployment configured a discount.
+     * Every term in {@code score = severity x exposure x reachability x criticality x confidence x 100},
+     * with the input each factor was read from. Reproducing the score by hand from this record is the
+     * point; {@code confidenceFactor} is 1.0 unless a deployment configured a discount.
      *
      * <p>{@code exposureApplies} is false for a vendor outage: exposure is inbound attack reach, and an
      * outage is not an attack — it takes an internal service down as surely as an internet-facing one.
      * {@code exposure} still reports what the service declared; {@code exposureFactor} is then 1.0.
+     *
+     * <p>{@code reachability} is whether the service's code imports the vulnerable package (E11-4);
+     * {@code reachabilityFactor} discounts only {@code NOT_IMPORTED}, since an unknown reachability scores
+     * like an imported one. An outage has no package, so {@code reachabilityApplies} is false,
+     * {@code reachability} null and the factor 1.0.
      */
     public record ScoreBreakdown(
             double severityFactor,
             ServiceExposure exposure,
             double exposureFactor,
             boolean exposureApplies,
+            CodeUsage.Status reachability,
+            double reachabilityFactor,
+            boolean reachabilityApplies,
             BusinessCriticality criticality,
             double criticalityFactor,
             MatchConfidence confidence,

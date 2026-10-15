@@ -18,6 +18,7 @@ function recommendation(overrides: Partial<UpgradeRecommendation>): UpgradeRecom
     score: 67.5, tier: "HIGH", material: true, toVersion: "1.15.0", changeSignalId: "signal-axios",
     readiness: "READY", reason: null, overrideIn: [], proposal: null, response: null, canDraft: true,
     usage: { status: "UNKNOWN", reason: "The service's code hasn't been read yet: import the SBOM from its repository", importedAs: [], siteCount: 0, sites: [] }, viaUsage: null,
+    reachability: { status: "UNKNOWN", reason: "The service's code hasn't been read yet: import the SBOM from its repository", through: null, usage: null },
     ...overrides,
   };
 }

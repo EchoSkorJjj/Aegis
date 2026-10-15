@@ -55,7 +55,7 @@ class ScoringServiceTest {
     @BeforeEach
     void setUp() {
         scoring = new ScoringService(
-                matching, signals, advisories, new ImpactScorer(ScoringProperties.defaults()));
+                matching, signals, advisories, new ImpactScorer(ScoringProperties.defaults()), MockedEstate.unread());
     }
 
     @Test
@@ -108,11 +108,11 @@ class ScoringServiceTest {
         // internet-facing 25.0 — so the business tier, not the exposure, is what keeps it low.
         assertThat(scored.score()).isEqualTo(12.5);
         assertThat(scored.factors()).extracting(ScoreFactor::factor).containsExactly(
-                ScoreFactorKind.SEVERITY, ScoreFactorKind.EXPOSURE,
+                ScoreFactorKind.SEVERITY, ScoreFactorKind.EXPOSURE, ScoreFactorKind.REACHABILITY,
                 ScoreFactorKind.CRITICALITY, ScoreFactorKind.CONFIDENCE);
         assertThat(scored.factors()).extracting(ScoreFactor::input)
-                .containsExactly("CVSS 3.1 base 10", "ISOLATED", "LOW", "CONFIRMED");
-        assertThat(scored.factors()).extracting(ScoreFactor::headroom).containsExactly(0.0, 12.5, 37.5, 0.0);
+                .containsExactly("CVSS 3.1 base 10", "ISOLATED", "UNKNOWN", "LOW", "CONFIRMED");
+        assertThat(scored.factors()).extracting(ScoreFactor::headroom).containsExactly(0.0, 12.5, 0.0, 37.5, 0.0);
         assertThat(scored.factors()).filteredOn(ScoreFactor::limiting)
                 .extracting(ScoreFactor::factor)
                 .containsExactly(ScoreFactorKind.CRITICALITY);

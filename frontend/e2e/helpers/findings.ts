@@ -22,10 +22,10 @@ const IMPACT: ChangeImpactResponse = {
   change: CHANGE, matchedComponentCount: 0, matchedVendorCount: 1,
   severity: { source: "SEVERITY_LABEL", cvssVersion: null, cvssBaseScore: null, label: "major", factor: 0.75 },
   services: [{ service: SERVICE, score: 75, tier: "HIGH", material: true, confidence: "CONFIRMED", owners: [OWNER],
-    breakdown: { severityFactor: 0.75, exposure: "INTERNET_FACING", exposureFactor: 1, exposureApplies: false,
+    breakdown: { severityFactor: 0.75, exposure: "INTERNET_FACING", exposureFactor: 1, exposureApplies: false, reachability: null, reachabilityFactor: 1, reachabilityApplies: false,
       criticality: "CRITICAL", criticalityFactor: 1, confidence: "CONFIRMED", confidenceFactor: 1 },
     factors: [{ factor: "SEVERITY", input: "severity major", weight: 0.75, headroom: 25, limiting: true, setting: null }],
-    explanation: "A major outage reaches Payments API.", evidence: [{ kind: "VENDOR_DEPENDENCY", confidence: "CONFIRMED",
+    reachability: null, explanation: "A major outage reaches Payments API.", evidence: [{ kind: "VENDOR_DEPENDENCY", confidence: "CONFIRMED",
       explanation: "Payments API depends on Acme Pay.", affectedProduct: null, componentPath: [], vendor: { id: "vendor-1", name: "Acme Pay" } }],
   }], owners: [],
 };
@@ -69,6 +69,7 @@ function vulnerability(
     score, tier: tierOf(score), material: true, toVersion: "1.0.1", changeSignalId: `signal-${index + 1}`,
     readiness: "READY", reason: null, overrideIn: [], proposal: null, response: null,
     usage: { status: "UNKNOWN", reason: "The service's code hasn't been read yet: import the SBOM from its repository", importedAs: [], siteCount: 0, sites: [] }, viaUsage: null,
+    reachability: { status: "UNKNOWN", reason: "The service's code hasn't been read yet: import the SBOM from its repository", through: null, usage: null },
     ...overrides,
   };
   return {

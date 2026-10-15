@@ -67,7 +67,7 @@ class ScoringRollupTest {
     @BeforeEach
     void setUp() {
         scoring = new ScoringService(
-                matching, signals, advisories, new ImpactScorer(ScoringProperties.defaults()));
+                matching, signals, advisories, new ImpactScorer(ScoringProperties.defaults()), MockedEstate.unread());
     }
 
     @Test
@@ -122,7 +122,7 @@ class ScoringRollupTest {
         ServiceRollup reporting = rollup.services().getFirst();
         assertThat(reporting.topSignal().externalId()).isEqualTo("CVE-2099-1");
         assertThat(reporting.topFactors()).extracting(ScoreFactor::input)
-                .containsExactly("CVSS 3.1 base 10", "ISOLATED", "LOW", "CONFIRMED");
+                .containsExactly("CVSS 3.1 base 10", "ISOLATED", "UNKNOWN", "LOW", "CONFIRMED");
         // 1.0 x 0.5 x 0.25 = 12.5; CRITICAL would make it 50.0, the most any one factor could add.
         assertThat(reporting.topFactors()).filteredOn(ScoreFactor::limiting)
                 .extracting(ScoreFactor::factor)
@@ -204,8 +204,8 @@ class ScoringRollupTest {
     @Test
     void clampsACallersLimitToTheConfiguredCeiling() {
         ImpactScorer bounded = new ImpactScorer(new ScoringProperties(
-                null, null, null, null, null, null, null, new ScoringProperties.Rollup(5, null)));
-        ScoringService small = new ScoringService(matching, signals, advisories, bounded);
+                null, null, null, null, null, null, null, new ScoringProperties.Rollup(5, null), null));
+        ScoringService small = new ScoringService(matching, signals, advisories, bounded, MockedEstate.unread());
         when(signals.findPage(any(), any())).thenReturn(new PageImpl<>(List.of()));
 
         EstateRollupResponse rollup = small.rollUpEstate(ChangeSignalFilter.NONE, 10_000);

@@ -9,6 +9,7 @@ import java.util.UUID;
 
 import com.aegis.core.advisories.Advisory;
 import com.aegis.core.advisories.AdvisoryStore;
+import com.aegis.core.inventory.Reachability;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.matching.MatchingDtos.ChangeMatchResponse;
@@ -24,6 +25,7 @@ import com.aegis.core.signals.ChangeSignalStore;
 import org.springframework.data.domain.PageImpl;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -40,7 +42,14 @@ final class MockedEstate {
     final AdvisoryStore advisories = mock(AdvisoryStore.class);
 
     ScoringService scoring(ImpactScorer scorer) {
-        return new ScoringService(matching, signals, advisories, scorer);
+        return new ScoringService(matching, signals, advisories, scorer, unread());
+    }
+
+    /** Reachability that read no code: every vulnerability's is unknown, so it scores like an imported one. */
+    static Reachability unread() {
+        Reachability reachability = mock(Reachability.class);
+        lenient().when(reachability.of(any())).thenReturn(Reachability.Reached.NONE);
+        return reachability;
     }
 
     /** A vulnerability signal backed by one NVD advisory with the given CVSS 3.1 base score. */

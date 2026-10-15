@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.aegis.core.inventory.CodeUsage;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.matching.MatchingDtos.MatchConfidence;
@@ -40,6 +41,7 @@ class ScoringPropertiesBindingTest {
                         "aegis.scoring.exposure.internet-facing=0.8",
                         "aegis.scoring.exposure.isolated=0.1",
                         "aegis.scoring.confidence.possible=0.5",
+                        "aegis.scoring.reachability.not-imported=0.6",
                         "aegis.scoring.severity-label.critical=0.99",
                         "aegis.scoring.severity-label.sev1=0.9",
                         "aegis.scoring.unknown-severity-factor=0.3",
@@ -57,6 +59,9 @@ class ScoringPropertiesBindingTest {
                     assertThat(properties.exposureFactor(ServiceExposure.INTERNET_FACING)).isEqualTo(0.8);
                     assertThat(properties.exposureFactor(ServiceExposure.ISOLATED)).isEqualTo(0.1);
                     assertThat(properties.confidenceFactor(POSSIBLE)).isEqualTo(0.5);
+                    assertThat(properties.reachabilityFactor(CodeUsage.Status.NOT_IMPORTED)).isEqualTo(0.6);
+                    // Unknown has no weight of its own: it scores like imported.
+                    assertThat(properties.reachabilityFactor(CodeUsage.Status.UNKNOWN)).isEqualTo(1.0);
                     // A shipped word can be re-weighted and a feed's own word added, both from config.
                     assertThat(properties.severityLabelFactor("critical")).isEqualTo(0.99);
                     assertThat(properties.severityLabelFactor("sev1")).isEqualTo(0.9);
@@ -97,18 +102,22 @@ class ScoringPropertiesBindingTest {
             for (ServiceExposure exposure : ServiceExposure.values()) {
                 for (BusinessCriticality criticality : BusinessCriticality.values()) {
                     for (MatchConfidence confidence : MatchConfidence.values()) {
-                        Scenario scenario = new Scenario(label, exposure, criticality, confidence, null);
-                        for (ScoreFactor factor : scenario.factors(shipped)) {
-                            if (factor.setting() != null) {
-                                bySetting.putIfAbsent(factor.setting(), scenario.blaming(factor.factor()));
+                        for (CodeUsage.Status reachability : CodeUsage.Status.values()) {
+                            Scenario scenario = new Scenario(label, exposure, criticality, confidence, reachability,
+                                    null);
+                            for (ScoreFactor factor : scenario.factors(shipped)) {
+                                if (factor.setting() != null) {
+                                    bySetting.putIfAbsent(factor.setting(), scenario.blaming(factor.factor()));
+                                }
                             }
                         }
                     }
                 }
             }
         }
-        // Severity word, the unknown fallback, 3 exposures, 4 criticalities, 2 confidences.
-        assertThat(bySetting).hasSize(11);
+        // Severity word, the unknown fallback, 3 exposures, 4 criticalities, 2 confidences, and reachability's
+        // imported and not imported (unknown points at imported's).
+        assertThat(bySetting).hasSize(13);
 
         bySetting.forEach((setting, scenario) -> runner.withPropertyValues(setting + "=0.123").run(context -> {
             ImpactScorer retuned = new ImpactScorer(context.getBean(ScoringProperties.class));
@@ -126,15 +135,17 @@ class ScoringPropertiesBindingTest {
             ServiceExposure exposure,
             BusinessCriticality criticality,
             MatchConfidence confidence,
+            CodeUsage.Status reachability,
             ScoreFactorKind kind) {
 
         Scenario blaming(ScoreFactorKind factor) {
-            return new Scenario(severityLabel, exposure, criticality, confidence, factor);
+            return new Scenario(severityLabel, exposure, criticality, confidence, reachability, factor);
         }
 
         List<ScoreFactor> factors(ImpactScorer scorer) {
             SeverityInput severity = scorer.severityFromLabel(severityLabel);
-            ScoreBreakdown breakdown = scorer.breakdown(VULNERABILITY, severity.factor(), exposure, criticality, confidence);
+            ScoreBreakdown breakdown = scorer.breakdown(VULNERABILITY, severity.factor(), exposure, criticality,
+                    confidence, reachability);
             return new ScoreExplainer(scorer).factors(severity, breakdown);
         }
     }

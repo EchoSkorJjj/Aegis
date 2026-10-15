@@ -191,6 +191,29 @@ class DependencyGraphTest {
     }
 
     @Test
+    void aboveAComponentIsEverythingThatPullsItInInThatServicesGraphAndACycleEnds() {
+        UUID service = UUID.randomUUID();
+        UUID other = UUID.randomUUID();
+        UUID app = UUID.randomUUID();
+        UUID framework = UUID.randomUUID();
+        UUID middle = UUID.randomUUID();
+        UUID leaf = UUID.randomUUID();
+        link(service, app);
+        link(service, framework);
+        declares(service, app, middle);
+        declares(service, framework, middle);
+        declares(service, middle, leaf);
+        declares(service, leaf, middle); // a cycle
+        declares(other, app, leaf);      // another service's resolution, never this one's
+
+        ServiceGraph graph = this.graph.graphsOf(List.of(service)).get(service);
+
+        assertThat(graph.above(leaf)).containsExactlyInAnyOrder(middle, app, framework);
+        assertThat(graph.above(middle)).containsExactlyInAnyOrder(leaf, app, framework);
+        assertThat(graph.above(app)).isEmpty();
+    }
+
+    @Test
     void aComponentNothingUsesHasNoUsesAndAServiceWithoutComponentsAnEmptyGraph() {
         UUID lonely = UUID.randomUUID();
         UUID empty = UUID.randomUUID();

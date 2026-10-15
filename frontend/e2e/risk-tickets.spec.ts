@@ -31,11 +31,11 @@ function impact(owners: OwnerRef[]): ChangeImpactResponse {
       service: { id: SERVICE, name: "Payments API", criticality: "CRITICAL", exposure: "INTERNET_FACING" },
       score: 75, tier: "HIGH", material: true, confidence: "CONFIRMED",
       breakdown: {
-        severityFactor: 0.75, exposure: "INTERNET_FACING", exposureFactor: 1, exposureApplies: false,
+        severityFactor: 0.75, exposure: "INTERNET_FACING", exposureFactor: 1, exposureApplies: false, reachability: null, reachabilityFactor: 1, reachabilityApplies: false,
         criticality: "CRITICAL", criticalityFactor: 1, confidence: "CONFIRMED", confidenceFactor: 1,
       },
       factors: [factor("SEVERITY", "severity major"), factor("EXPOSURE", "INTERNET_FACING"), factor("CRITICALITY", "CRITICAL")],
-      explanation: "A major outage at a vendor a critical service depends on.",
+      reachability: null, explanation: "A major outage at a vendor a critical service depends on.",
       owners,
       evidence: [{
         kind: "VENDOR_DEPENDENCY", confidence: "CONFIRMED", explanation: "Payments API depends on Acme Pay.",

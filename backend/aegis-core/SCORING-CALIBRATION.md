@@ -2,7 +2,7 @@
 
 How the impact model's shipped weights were chosen, what they were checked against, and how to
 change them without silently re-ranking every organization's queue. The model itself — `score =
-severity x exposure x criticality x confidence x 100` — is described in the [README](README.md#impact-scoring-epic-7-stories-1-2);
+severity x exposure x reachability x criticality x confidence x 100` — is described in the [README](README.md#impact-scoring-epic-7-stories-1-2);
 this document is about the numbers.
 
 **Enforced by** [`ScoringCalibrationTest`](src/test/java/com/aegis/core/scoring/ScoringCalibrationTest.java),
@@ -48,9 +48,10 @@ anchor, and the numbers follow from them.
 |---|---|---|
 | **P1** | On a worst-case service (CRITICAL, INTERNET_FACING) the impact tier **is** the published CVSS v3.1 rating: 9.0+ CRITICAL, 7.0+ HIGH, 4.0+ MEDIUM, 1.0+ LOW. Below 1.0 the score is under the materiality threshold (10.0), so it is NEGLIGIBLE rather than LOW. **P1b:** the same for a feed's severity word — *critical* → CRITICAL, *high/major* → HIGH, *medium/minor* → MEDIUM, *low* → LOW, *none/maintenance* → NEGLIGIBLE. | When nothing about the service mitigates, the standard's rating is the right answer. The model's job is to discount for context, never to invent urgency — a queue where every 7.5 reads CRITICAL teaches people to ignore CRITICAL. |
 | **P2** | Each step below the worst case on either axis costs **at most one band**. | A service one notch less critical, or one notch less exposed, is a mitigation — not a reason for a critical CVE to vanish into MEDIUM. |
-| **P3** | A Critical-rated CVE (9.0+) is **never immaterial**, on any service. | "Isolated" and "low tier" are business declarations that can be wrong. A 9.8 must at least reach the queue. |
+| **P3** | A Critical-rated CVE (9.0+) is **never immaterial**, on any service, while the service's code imports the package or Aegis can't tell. | "Isolated" and "low tier" are business declarations that can be wrong. A 9.8 must at least reach the queue. Code that provably never imports the package, nor anything pulling it in, is a third mitigation stacked on two, observed rather than declared — see P6. |
 | **P4** | A Medium-rated CVE on the lowest-value service (LOW, ISOLATED) **is** immaterial. | The noise control has to control noise, or the queue fills with it. |
 | **P5** | Exposure does **not** discount an outage. | Exposure is inbound attack reach. An outage is not an attack: when AWS is down, an internal service is down exactly as surely as an internet-facing one. |
+| **P6** | A vulnerability in a package the service's code **never imports**, nor anything that pulls it in, **ranks below** the same one imported — and **costs at most one band**, on every profile at every band edge. An **unknown** reachability scores exactly like imported. (E11-4) | "Fix what is actually exposed first" needs any discount at all; "at most one band" is P2's rule for a step of context, applied to a step Aegis observed in the code. Unknown is not evidence, so it moves nothing. |
 
 ### Reference judgments — concrete demo cases a reviewer signed off on
 
@@ -103,8 +104,19 @@ The pre-calibration defaults (criticality 1.0/0.75/0.5/0.25, exposure 1.0/0.6/0.
 | `aegis.scoring.exposure.internal` | 0.6 | **0.9** | R1 (value from CVSS Adjacent) |
 | `aegis.scoring.exposure.isolated` | 0.4 | **0.5** | P3 (centred in the P3/P4 window) |
 | `aegis.scoring.severity-label.none / maintenance / informational` | 0.1 | **0.05** | R4, P1b |
+| `aegis.scoring.reachability.not-imported` (E11-4) | — | **0.8** | P6 |
 | exposure on vendor outages | applied | **not applied** | P5, R3 |
 | everything else | — | unchanged | |
+
+**Reachability (E11-4)** added a term rather than moving one. P6 boxes `not-imported` into `[0.78, 1)`: below
+1.0 so the code that never imports a package ranks it lower, and at least 0.78 so a critical CVE (90 on a
+worst-case service) lands no lower than HIGH (70). **0.8** is the largest discount in that window on the 0.05 grid
+the other weights use, with two points of margin at the CRITICAL/HIGH edge (72). P3 could not stay universal: kept
+for not imported, it forces `not-imported >= 0.89` (a 9.0 on Internal Reporting is 11.25 before the term), a
+discount too small to reorder anything. So P3 now covers what the code imports or might, and a critical CVE in a
+package nothing in a LOW, ISOLATED service's code reaches can leave the queue (9.0); it stays listed on the service.
+`imported` stays 1.0 and `unknown` has no weight of its own, so every pair the demo can produce today — the seed
+reads no code, so its reachability is unknown — scores exactly as before, and the table below is unchanged.
 
 ISOLATED is deliberately harsher than CVSS's Local vector (which would be ~0.86): with CVSS's value an
 isolated service would be barely discounted at all, and the P3/P4 noise window is what an
@@ -154,13 +166,16 @@ no-impact notice and non-critical CVEs on the isolated, lowest-value tool.
 ## Known limits — what calibration cannot fix
 
 - **No exploitability signal.** The model has no "exploited in the wild" input (CISA KEV, EPSS), so
-  Log4Shell ranks level with any other 10.0. That is a missing factor, not a mis-weighted one; the
-  README reserves reachability for the AI *assess* step.
+  Log4Shell ranks level with any other 10.0. That is a missing factor, not a mis-weighted one.
+- **Reachability is an import, not a call.** The reachability term (E11-4) reads whether the code imports
+  the package, statically: code that imports a library but never calls its vulnerable function still
+  scores as imported. Whether that function is called is the AI *assess* step's question (E11-5), and its
+  answer is a suggestion beside the score, never a term in it.
 - **MEDIUM is broad.** 13 of 27 demo pairs land in MEDIUM. Order within a tier comes from the score,
   which is always shown — the tier is a routing band, not the ranking.
 - **Exposure is coarse by design.** Three levels that can be declared confidently; CVSS's
   Adjacent/Local ratios vary by vector (0.81-0.90 for Adjacent), and 0.9 takes the critical-vector end.
-- **The demo is small.** Five services and a few dozen pairs anchor the model; the principles (P1-P5)
+- **The demo is small.** Five services and a few dozen pairs anchor the model; the principles (P1-P6)
   are what keep it honest beyond them, which is why they are tested on the full grid of service
   profiles rather than only on the demo.
 
