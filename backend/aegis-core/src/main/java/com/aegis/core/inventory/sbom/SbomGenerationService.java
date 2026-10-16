@@ -1,16 +1,12 @@
 package com.aegis.core.inventory.sbom;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.RepositoryUrl;
 import com.aegis.core.inventory.domain.SbomImportSource;
-import com.aegis.core.inventory.sbom.RepositoryReadAccess.ReadGrant;
 import com.aegis.core.platform.common.ApiExceptions;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
@@ -33,15 +29,15 @@ public class SbomGenerationService {
     private final RepoSbomGenerator generator;
     private final SbomImportService importer;
     private final SbomGenerationProperties properties;
-    private final List<RepositoryReadAccess> integrations;
+    private final RepositoryAccess access;
 
-    public SbomGenerationService(InventoryService inventory, RepoSbomGenerator generator, SbomImportService importer,
-            SbomGenerationProperties properties, ObjectProvider<RepositoryReadAccess> integrations) {
+    SbomGenerationService(InventoryService inventory, RepoSbomGenerator generator, SbomImportService importer,
+            SbomGenerationProperties properties, RepositoryAccess access) {
         this.inventory = inventory;
         this.generator = generator;
         this.importer = importer;
         this.properties = properties;
-        this.integrations = integrations.orderedStream().toList();
+        this.access = access;
     }
 
     public SbomImportResult importFromRepository(UUID serviceId, String token, String username) {
@@ -51,29 +47,12 @@ public class SbomGenerationService {
         }
         // Re-validated against the current allow-list: a host removed since the link was saved is refused.
         RepositoryUrl repository = RepositoryUrl.parse(service.getRepositoryUrl(), properties.allowedHosts());
-        CloneAccess access = access(repository, token, username);
+        CloneAccess access = this.access.access(repository, token, username);
         RepoSbomGenerator.RepositoryScan scan = generator.read(repository, service.getRepositoryBranch(), access);
         return importer.importRepository(serviceId, scan.layout(), switch (access.source()) {
             case TOKEN -> SbomImportSource.TOKEN;
             case INTEGRATION -> SbomImportSource.INTEGRATION;
             case ANONYMOUS -> SbomImportSource.PUBLIC;
         }, scan.imports());
-    }
-
-    private CloneAccess access(RepositoryUrl repository, String token, String username) {
-        if (token != null && !token.isBlank()) {
-            return CloneAccess.token(CloneCredential.forToken(repository.host(), token, username));
-        }
-        List<String> unavailable = new ArrayList<>();
-        for (RepositoryReadAccess integration : integrations) {
-            ReadGrant grant = integration.grant(repository);
-            if (grant.credential() != null) {
-                return CloneAccess.integration(grant.credential(), grant.via());
-            }
-            if (grant.unavailable() != null) {
-                unavailable.add(grant.unavailable());
-            }
-        }
-        return CloneAccess.anonymous(unavailable.isEmpty() ? null : String.join("; ", unavailable));
     }
 }

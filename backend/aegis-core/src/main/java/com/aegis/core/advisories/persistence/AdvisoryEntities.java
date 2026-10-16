@@ -2,6 +2,7 @@ package com.aegis.core.advisories.persistence;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import jakarta.persistence.Column;
@@ -10,8 +11,10 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.SourceType;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 import org.springframework.data.domain.Persistable;
 
 /**
@@ -37,6 +40,13 @@ class AdvisoryEntity {
 
     @Column(name = "description", columnDefinition = "text")
     private String description;
+
+    @Column(name = "details", columnDefinition = "text")
+    private String details;
+
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "fix_commits", nullable = false, columnDefinition = "text[]")
+    private String[] fixCommits = new String[0];
 
     @Column(name = "published_at")
     private Instant publishedAt;
@@ -94,6 +104,14 @@ class AdvisoryEntity {
         return description;
     }
 
+    String getDetails() {
+        return details;
+    }
+
+    List<String> getFixCommits() {
+        return fixCommits == null ? List.of() : List.of(fixCommits);
+    }
+
     Instant getPublishedAt() {
         return publishedAt;
     }
@@ -126,7 +144,9 @@ class AdvisoryEntity {
             String cvssVersion,
             String cvssVector,
             BigDecimal cvssBaseScore,
-            String cvssSeverity) {
+            String cvssSeverity,
+            String details,
+            List<String> fixCommits) {
         this.canonicalId = canonicalId;
         this.description = description;
         this.publishedAt = publishedAt;
@@ -135,6 +155,8 @@ class AdvisoryEntity {
         this.cvssVector = cvssVector;
         this.cvssBaseScore = cvssBaseScore;
         this.cvssSeverity = cvssSeverity;
+        this.details = details;
+        this.fixCommits = fixCommits.toArray(String[]::new);
     }
 }
 

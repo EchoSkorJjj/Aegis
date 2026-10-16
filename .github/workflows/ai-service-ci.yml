@@ -70,10 +70,11 @@ jobs:
 
           assert Path(ai_service.__file__).is_relative_to(Path(sys.prefix))
           prompts = files("ai_service").joinpath("prompts")
-          for name in ("assess.system.md", "assess.user.md", "draft.system.md", "draft.user.md"):
+          for name in ("assess.system.md", "assess.user.md", "look_for.system.md", "look_for.user.md",
+                       "draft.system.md", "draft.user.md"):
               assert prompts.joinpath(name).read_text(encoding="utf-8").strip(), name
           from ai_service.evaluation.cases import load_corpus
-          assert len(load_corpus().cases) == 20
+          assert len(load_corpus().cases) == 33
           assert files("ai_service.evaluation").joinpath("rubric.md").read_text(encoding="utf-8").strip()
           PY
           "$RUNNER_TEMP/ai-service-installed/bin/python" -m ai_service.evaluation --provider golden --output "$RUNNER_TEMP/draft-evaluation-installed"

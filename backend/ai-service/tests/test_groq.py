@@ -10,6 +10,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from ai_service.capabilities.assess import ASSESS_OUTPUT_TOKENS
 from ai_service.core.config import Settings
 from ai_service.llm.groq import GroqLlmClient, retry_after_seconds
 from ai_service.llm.metrics import ATTEMPTS, REQUESTS, TOKENS
@@ -18,14 +19,16 @@ from ai_service.main import create_app
 TOKEN = {"X-Service-Token": "test-token"}
 PAYLOAD = {
     "finding_id": "opaque-finding",
-    "advisory_text": "Fictional advisory: example-lib before 2.0 is affected.",
-    "service_context": "Fictional service uses example-lib 1.0.",
+    "advisory_text": "Fictional advisory: example-lib before 2.0 is affected through parse().",
+    "package": {"ecosystem": "npm", "name": "example-lib"},
+    "excerpts": [{"id": "E1", "path": "src/app.js", "start_line": 3,
+                  "text": "const { parse } = require('example-lib');\nparse(input);", "kind": "use"}],
 }
 VALID_OUTPUT = {
-    "material": True,
-    "rationale": "The supplied advisory applies to the example service.",
-    "suggested_severity": "HIGH",
-    "cited_passage_ids": ["A1", "S1"],
+    "verdict": "CALLED",
+    "rationale": "The excerpt calls parse, the function the advisory names.",
+    "checks": [],
+    "cited_passage_ids": ["A1", "E1"],
 }
 
 
@@ -108,19 +111,20 @@ def test_request_contract_usage_metrics_and_safe_logging(make_client, caplog):
     input_before = TOKENS.labels(*labels, "input")._value.get()
     output_before = TOKENS.labels(*labels, "output")._value.get()
     attempts_before = ATTEMPTS.labels(*labels, "assess")._value.get()
-    requests_before = REQUESTS.labels(*labels, "assess", "assess.v2", "success")._value.get()
+    requests_before = REQUESTS.labels(*labels, "assess", "assess.v6", "success")._value.get()
     client, http = make_client(handler)
     with caplog.at_level(logging.INFO):
         response = client.post("/v1/assess", headers=TOKEN, json=PAYLOAD)
     assert response.status_code == 200
-    assert response.json()["citations"] == [PAYLOAD["advisory_text"], PAYLOAD["service_context"]]
+    assert response.json()["cited_excerpts"] == ["E1"]
     assert len(calls) == 1
     request = calls[0]
     assert str(request.url) == "https://api.groq.com/openai/v1/chat/completions"
     assert request.headers["authorization"] == "Bearer offline-test-credential"
     body = json.loads(request.content)
     assert body["model"] == labels[1]
-    assert body["max_completion_tokens"] == 1500
+    # An assessment's answer is short: it asks for fewer tokens than the configured cap.
+    assert body["max_completion_tokens"] == ASSESS_OUTPUT_TOKENS
     assert body["temperature"] == 0.1
     assert body["reasoning_effort"] == "low"
     assert body["include_reasoning"] is False
@@ -134,10 +138,10 @@ def test_request_contract_usage_metrics_and_safe_logging(make_client, caplog):
     assert TOKENS.labels(*labels, "input")._value.get() - input_before == 123
     assert TOKENS.labels(*labels, "output")._value.get() - output_before == 45
     assert ATTEMPTS.labels(*labels, "assess")._value.get() - attempts_before == 1
-    assert REQUESTS.labels(*labels, "assess", "assess.v2", "success")._value.get() - (
+    assert REQUESTS.labels(*labels, "assess", "assess.v6", "success")._value.get() - (
         requests_before
     ) == 1
-    assert "template=assess.v2" in caplog.text
+    assert "template=assess.v6" in caplog.text
     assert "offline-test-credential" not in caplog.text
     assert PAYLOAD["advisory_text"] not in caplog.text
     assert VALID_OUTPUT["rationale"] not in caplog.text
@@ -289,7 +293,9 @@ def test_retry_is_admitted_through_request_limiter(make_client, retry_delays):
 
     client, _ = make_client(handler, llm_max_requests_per_minute=1)
     response = client.post("/v1/assess", headers=TOKEN, json=PAYLOAD)
-    assert_error(response, 503)
+    # The local per-minute limit is full: a 429 saying when it will have room, not an outage.
+    assert_error(response, 429)
+    assert int(response.headers["Retry-After"]) >= 1
     assert "request rate limit" in response.json()["message"]
     assert len(calls) == 1
 

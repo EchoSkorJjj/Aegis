@@ -51,7 +51,9 @@ class JpaAdvisoryStore implements AdvisoryStore {
                 cvss == null ? null : cvss.version(),
                 cvss == null ? null : cvss.vectorString(),
                 cvss == null ? null : cvss.baseScore(),
-                cvss == null ? null : cvss.severity());
+                cvss == null ? null : cvss.severity(),
+                advisory.details(),
+                advisory.fixCommits());
         AdvisoryEntity saved = advisories.save(entity);
 
         // Replace wholesale: a revision may drop or re-scope ranges, so merging would strand stale rows.
@@ -142,7 +144,9 @@ class JpaAdvisoryStore implements AdvisoryStore {
                 entity.getPublishedAt(),
                 entity.getLastModifiedAt(),
                 cvss,
-                affected == null ? List.of() : new ArrayList<>(affected));
+                affected == null ? List.of() : new ArrayList<>(affected),
+                entity.getDetails(),
+                entity.getFixCommits());
     }
 
     private static AffectedProduct toAffectedProduct(AffectedProductEntity entity) {

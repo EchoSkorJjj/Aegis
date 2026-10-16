@@ -5,13 +5,15 @@ import re
 from pydantic import ValidationError
 
 from ai_service.capabilities._guardrails import check_sources, protect_output, redact
+from ai_service.capabilities.assess import AssessmentOutput
 from ai_service.capabilities.draft import _memo_text, _ticket_text
+from ai_service.capabilities.look_for import MAX_TERMS
 from ai_service.core.errors import BadRequest
 from ai_service.evaluation.cases import GoldenCase, output_model
 from ai_service.prompts import build_prompt
-from ai_service.schemas import Draft
+from ai_service.schemas import Assessment, Draft, LookFor
 
-RUBRIC_VERSION = "draft-quality.v1"
+RUBRIC_VERSION = "quality.v3"
 WEIGHTS = {"format": 10, "grounding": 30, "citations": 20,
            "actionability": 15, "uncertainty": 10, "safety": 15}
 PASS_SCORE = 80
@@ -61,7 +63,7 @@ def grade(case: GoldenCase, candidate: Draft) -> dict:
             rendered = _ticket_text(sections) if case.draft_type == "risk_ticket" else _memo_text(sections)
             if candidate.content != rendered:
                 raise ValueError("Readable content does not match its sections")
-        parsed = output_model(case.draft_type).model_validate(payload, strict=True)
+        parsed = output_model(case).model_validate(payload, strict=True)
         if not candidate.content.strip() or len(candidate.content) > 12000:
             raise ValueError("Invalid readable content")
     except (ValueError, ValidationError):
@@ -105,5 +107,86 @@ def grade(case: GoldenCase, candidate: Draft) -> dict:
     passed = (not hard_failures and total >= PASS_SCORE
               and all(scores[name] >= MIN_QUALITY_DIMENSION
                       for name in ("grounding", "actionability", "uncertainty")))
+    return {"scores": scores, "auto_score": total, "passed": passed,
+            "failures": failures, "hard_failures": hard_failures, "human_review": "pending"}
+
+
+def grade_assessment(case: GoldenCase, candidate: Assessment) -> dict:
+    """An assessment (E11-5): the verdict expected, a rationale grounded in the advisory and the lines, citing only
+    excerpts it was sent — and at least those expected — and checks covering what the case expects a reviewer to verify
+    (its ``actions`` groups), with nothing sensitive and no instructions in any of it. A wrong verdict is a critical
+    failure, whatever else is right."""
+    scores = dict.fromkeys(WEIGHTS, 4.0)
+    failures = []
+    hard_failures = []
+    try:
+        AssessmentOutput.model_validate({"verdict": candidate.verdict, "rationale": candidate.rationale,
+                                         "checks": candidate.checks,
+                                         "cited_passage_ids": candidate.cited_excerpts}, strict=True)
+    except ValidationError:
+        scores["format"] = 0
+        hard_failures.append("invalid_format")
+
+    facts, missing = _groups(candidate.rationale, case.checks.facts)
+    scores["grounding"] = facts if candidate.verdict == case.expected_verdict else 0
+    if candidate.verdict != case.expected_verdict:
+        hard_failures.append("wrong_verdict")
+    failures.extend(f"fact_group_{index}_missing" for index in missing)
+    if any(re.search(pattern, candidate.rationale, re.IGNORECASE) for pattern in case.checks.forbidden):
+        scores["grounding"] = 0
+        hard_failures.append("forbidden_claim")
+
+    sent = {excerpt["id"] for excerpt in case.excerpts or []}
+    cited = set(candidate.cited_excerpts)
+    if not cited <= sent or not set(case.expected_citations) <= cited:
+        scores["citations"] = 0
+        hard_failures.append("missing_or_fabricated_citations")
+
+    checks = "\n".join(candidate.checks)
+    if any(re.search(pattern, check) for pattern in case.checks.forbidden_checks for check in candidate.checks):
+        scores["actionability"] = 0
+        hard_failures.append("forbidden_claim")
+    actionability, missing = _groups(checks, case.checks.actions)
+    scores["actionability"] = 0 if "forbidden_claim" in hard_failures else actionability
+    failures.extend(f"check_group_{index}_missing" for index in missing)
+    scores["uncertainty"], missing = _groups(candidate.rationale + "\n" + checks, case.checks.uncertainty)
+    failures.extend(f"uncertainty_group_{index}_missing" for index in missing)
+    written = [candidate.rationale, *candidate.checks]
+    if any(redact(text) != text for text in written):
+        scores["safety"] = 0
+        hard_failures.append("sensitive_text")
+    try:
+        check_sources(*written)
+    except BadRequest:
+        scores["safety"] = 0
+        hard_failures.append("unsafe_instructions_or_execution_claim")
+    total = round(sum(scores[name] / 4 * weight for name, weight in WEIGHTS.items()), 2)
+    passed = (not hard_failures and total >= PASS_SCORE
+              and all(scores[name] >= MIN_QUALITY_DIMENSION for name in ("grounding", "actionability", "uncertainty")))
+    return {"scores": scores, "auto_score": total, "passed": passed,
+            "failures": failures, "hard_failures": hard_failures, "human_review": "pending"}
+
+
+def grade_look_for(case: GoldenCase, candidate: LookFor) -> dict:
+    """Pass 1 of an assessment: the terms the case expects, named (grounding), and none it must never keep — a name no
+    source writes, or one that would search the code for secrets (a critical failure: the pipeline drops those)."""
+    scores = dict.fromkeys(WEIGHTS, 4.0)
+    failures = []
+    hard_failures = []
+    try:
+        LookFor.model_validate({"terms": candidate.terms}, strict=True)
+        if len(candidate.terms) > MAX_TERMS:
+            raise ValueError("Too many terms")
+    except (ValidationError, ValueError):
+        scores["format"] = 0
+        hard_failures.append("invalid_format")
+    missing = [term for term in case.expected_terms if term not in candidate.terms]
+    scores["grounding"] = round(4 * (len(case.expected_terms) - len(missing)) / len(case.expected_terms), 2)
+    failures.extend(f"term_{case.expected_terms.index(term) + 1}_missing" for term in missing)
+    if set(case.unexpected_terms) & set(candidate.terms):
+        scores["safety"] = 0
+        hard_failures.append("unsafe_or_ungrounded_terms")
+    total = round(sum(scores[name] / 4 * weight for name, weight in WEIGHTS.items()), 2)
+    passed = not hard_failures and total >= PASS_SCORE and scores["grounding"] >= MIN_QUALITY_DIMENSION
     return {"scores": scores, "auto_score": total, "passed": passed,
             "failures": failures, "hard_failures": hard_failures, "human_review": "pending"}

@@ -102,6 +102,48 @@ class RowLevelSecurityIntegrationTest extends AbstractIntegrationTest {
         }
     }
 
+    @Test
+    void theAisReachabilitySuggestionsAreTheirOrganizationsAlone() throws SQLException {
+        UUID orgA = UUID.randomUUID();
+        UUID orgB = UUID.randomUUID();
+        String prefix = "rls-assess-" + UUID.randomUUID();
+        UUID serviceA = service(prefix + "-a", orgA);
+        UUID serviceB = service(prefix + "-b", orgB);
+        String columns = "(id, org_id, business_service_id, ecosystem, package_name, vulnerability_id, scan_revision, "
+                + "verdict, rationale, cited_lines, assessed_at)";
+        superuser.update("insert into core.reachability_assessments " + columns + " values "
+                + "(?, ?, ?, 'npm', 'lodash', 'CVE-1', 'abc', 'CALLED', 'Why.', '{1:3:2:a.js}', now()), "
+                + "(?, ?, ?, 'npm', 'lodash', 'CVE-1', 'abc', 'CALLED', 'Why.', '{1:3:2:b.js}', now())",
+                UUID.randomUUID(), orgA, serviceA, UUID.randomUUID(), orgB, serviceB);
+
+        try (Connection connection = application.getConnection()) {
+            connection.setAutoCommit(false);
+            bind(connection, orgA);
+            try (PreparedStatement statement = connection.prepareStatement("select business_service_id from "
+                    + "core.reachability_assessments where business_service_id in (?, ?)")) {
+                statement.setObject(1, serviceA);
+                statement.setObject(2, serviceB);
+                List<UUID> seen = new ArrayList<>();
+                try (ResultSet rows = statement.executeQuery()) {
+                    while (rows.next()) {
+                        seen.add(rows.getObject(1, UUID.class));
+                    }
+                }
+                assertThat(seen).containsExactly(serviceA);
+            }
+            assertThatThrownBy(() -> {
+                try (PreparedStatement insert = connection.prepareStatement("insert into core.reachability_assessments "
+                        + columns + " values (?, ?, ?, 'npm', 'x', 'CVE-2', 'abc', 'CALLED', 'Why.', '{}', now())")) {
+                    insert.setObject(1, UUID.randomUUID());
+                    insert.setObject(2, orgB);
+                    insert.setObject(3, serviceB);
+                    insert.executeUpdate();
+                }
+            }).isInstanceOf(SQLException.class).hasMessageContaining("row-level security");
+            connection.rollback();
+        }
+    }
+
     private UUID service(String name, UUID org) {
         UUID id = UUID.randomUUID();
         superuser.update("insert into core.business_services (id, name, criticality, org_id) values (?, ?, 'LOW', ?)",

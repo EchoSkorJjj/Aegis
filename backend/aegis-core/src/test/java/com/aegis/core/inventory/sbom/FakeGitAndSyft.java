@@ -36,10 +36,16 @@ public class FakeGitAndSyft implements CommandRunner {
 
     private final List<Clone> clones = Collections.synchronizedList(new ArrayList<>());
     private final Map<String, String> scans = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, String>> holds = new ConcurrentHashMap<>();
 
     /** From now on syft reports {@code sbom} for the repository named {@code name}: the repository changed. */
     public void willScan(String name, String sbom) {
         scans.put(name, sbom);
+    }
+
+    /** The repository named {@code name} holds {@code content} at {@code path} (what {@code git show} reads, E11-5). */
+    public void willHold(String name, String path, String content) {
+        holds.computeIfAbsent(name, key -> new ConcurrentHashMap<>()).put(path, content);
     }
 
     @Override
@@ -48,6 +54,13 @@ public class FakeGitAndSyft implements CommandRunner {
         if (command.get(0).equals("git") && !command.contains("clone")) {
             if (command.contains("rev-parse")) {
                 return new CommandResult(0, REVISION + "\n", "", false);
+            }
+            if (command.contains("show")) {
+                Path checkout = Path.of(command.get(command.indexOf("-C") + 1));
+                String spec = command.getLast();
+                Path file = checkout.resolve(spec.substring(spec.indexOf(':') + 1));
+                return Files.isRegularFile(file) ? new CommandResult(0, Files.readString(file), "", false)
+                        : new CommandResult(128, "", "fatal: path does not exist in '" + REVISION + "'", false);
             }
             if (command.contains("ls-files")) {
                 Path checkout = Path.of(command.get(command.indexOf("-C") + 1));
@@ -73,6 +86,11 @@ public class FakeGitAndSyft implements CommandRunner {
             Files.createDirectories(checkout);
             String name = url.substring(url.lastIndexOf('/') + 1).replace(".git", "");
             Files.writeString(checkout.resolve("repository-name"), name);
+            for (Map.Entry<String, String> held : holds.getOrDefault(name, Map.of()).entrySet()) {
+                Path file = checkout.resolve(held.getKey());
+                Files.createDirectories(file.getParent());
+                Files.writeString(file, held.getValue());
+            }
             if (name.contains("pnpmapp")) {
                 Files.createDirectories(checkout.resolve("client/src"));
                 Files.writeString(checkout.resolve("client/pnpm-lock.yaml"), pnpmLockfile(name));

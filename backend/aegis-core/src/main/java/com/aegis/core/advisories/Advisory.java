@@ -19,6 +19,10 @@ import java.util.UUID;
  * same real-world vulnerability reported by different feeds share a {@code canonicalId}, which the
  * change-signals feed dedups on and matching expands a signal back to.
  *
+ * <p>{@code description} is what the feed shows (OSV's one-line summary, NVD's description); {@code details} is the rest
+ * of the text when the feed has more (OSV's {@code details}), and {@code fixCommits} the commits among its references
+ * ({@link CommitUrl}) — what an assessment reads to tell whether a service's code uses the vulnerable part (E11-5).
+ *
  * <p>{@code id} is null on a freshly parsed advisory — the store assigns it on first write.
  */
 public record Advisory(
@@ -30,11 +34,30 @@ public record Advisory(
         Instant publishedAt,
         Instant lastModifiedAt,
         Cvss cvss,
-        List<AffectedProduct> affected) {
+        List<AffectedProduct> affected,
+        String details,
+        List<String> fixCommits) {
 
     public Advisory {
         canonicalId = canonicalId == null || canonicalId.isBlank() ? externalId : canonicalId;
         affected = affected == null ? List.of() : List.copyOf(affected);
+        details = details == null || details.isBlank() ? null : details;
+        fixCommits = fixCommits == null ? List.of() : List.copyOf(fixCommits);
+    }
+
+    /** An advisory with no more text than its description and no fix commits. */
+    public Advisory(
+            UUID id,
+            String sourceId,
+            String externalId,
+            String canonicalId,
+            String description,
+            Instant publishedAt,
+            Instant lastModifiedAt,
+            Cvss cvss,
+            List<AffectedProduct> affected) {
+        this(id, sourceId, externalId, canonicalId, description, publishedAt, lastModifiedAt, cvss, affected, null,
+                List.of());
     }
 
     /** For single-identity feeds (NVD) whose external id already is the canonical (CVE) id. */
@@ -47,7 +70,8 @@ public record Advisory(
             Instant lastModifiedAt,
             Cvss cvss,
             List<AffectedProduct> affected) {
-        this(id, sourceId, externalId, externalId, description, publishedAt, lastModifiedAt, cvss, affected);
+        this(id, sourceId, externalId, externalId, description, publishedAt, lastModifiedAt, cvss, affected, null,
+                List.of());
     }
 
     /**

@@ -11,7 +11,7 @@ from typing import TypeVar
 from pydantic import BaseModel, ValidationError
 
 from ai_service.core.config import Settings
-from ai_service.core.errors import BadGateway, ServiceUnavailable
+from ai_service.core.errors import BadGateway, RateLimited, ServiceUnavailable
 from ai_service.llm.base import InvalidProviderOutput, LlmClient, RetryableProviderError
 from ai_service.llm.limits import CostLimiter
 from ai_service.llm.metrics import ATTEMPTS, LATENCY, REQUESTS, TOKENS
@@ -46,6 +46,12 @@ def strict_schema(model: type[BaseModel]) -> dict:
     return transform(model.model_json_schema())
 
 
+def estimate_tokens(system: str, user: str, output_model: type[BaseModel], max_output_tokens: int) -> int:
+    """What a call reserves of the token budgets before its usage is known: its templates, escaped passages and schema
+    at about four characters a token, and every output token it may spend."""
+    return math.ceil((len(system) + len(user) + len(json.dumps(strict_schema(output_model)))) / 4) + max_output_tokens
+
+
 class StructuredGenerator:
     def __init__(self, settings: Settings, client: LlmClient, limiter: CostLimiter | None = None):
         self.settings = settings
@@ -55,7 +61,9 @@ class StructuredGenerator:
     async def generate(
         self, *, system: str, user: str, template_id: str, capability: str,
         output_model: type[T], validate: Callable[[T], None] | None = None,
+        max_output_tokens: int | None = None,
     ) -> T:
+        """``max_output_tokens`` lowers the configured output cap for a capability whose answer is short."""
         labels = (self.client.provider, self.client.model, capability, template_id)
         started, outcome = time.monotonic(), "error"
         try:
@@ -63,6 +71,8 @@ class StructuredGenerator:
             async with asyncio.timeout(self.settings.llm_timeout_seconds):
                 result = await self._generate(
                     system, user, output_model, validate, capability,
+                    min(max_output_tokens or self.settings.llm_max_output_tokens,
+                        self.settings.llm_max_output_tokens),
                 )
             outcome = "success"
             return result
@@ -71,6 +81,9 @@ class StructuredGenerator:
             raise ServiceUnavailable("LLM generation timed out") from None
         except BadGateway:
             outcome = "invalid_output"
+            raise
+        except RateLimited:
+            outcome = "rate_limited"
             raise
         except ServiceUnavailable:
             outcome = "unavailable"
@@ -83,12 +96,10 @@ class StructuredGenerator:
                 *labels, outcome,
             )
 
-    async def _generate(self, system, user, output_model, validate, capability):
+    async def _generate(self, system, user, output_model, validate, capability, max_output_tokens):
         schema = strict_schema(output_model)
         # Include templates, escaped passages and schema overhead in admission estimates.
-        estimate = math.ceil((len(system) + len(user) + len(json.dumps(schema))) / 4) + (
-            self.settings.llm_max_output_tokens
-        )
+        estimate = estimate_tokens(system, user, output_model, max_output_tokens)
         status_retries, validation_retries = 0, 0
         while True:
             try:
@@ -103,7 +114,7 @@ class StructuredGenerator:
             try:
                 result = await self.client.generate_json(
                     system=system, user=user, schema_name=output_model.__name__,
-                    json_schema=schema, max_output_tokens=self.settings.llm_max_output_tokens,
+                    json_schema=schema, max_output_tokens=max_output_tokens,
                 )
                 self.limiter.reconcile(reservation, result.input_tokens + result.output_tokens)
                 for direction, amount in (

@@ -47,7 +47,7 @@ final class ImportScanner {
     static final long MAX_TOTAL_BYTES = 128L * 1024 * 1024;
     static final int MAX_MODULES = 5_000;
 
-    private static final Map<String, String> LANGUAGE_BY_EXTENSION = Map.ofEntries(
+    static final Map<String, String> LANGUAGE_BY_EXTENSION = Map.ofEntries(
             Map.entry("js", "npm"), Map.entry("jsx", "npm"), Map.entry("mjs", "npm"), Map.entry("cjs", "npm"),
             Map.entry("ts", "npm"), Map.entry("tsx", "npm"), Map.entry("mts", "npm"), Map.entry("cts", "npm"),
             Map.entry("vue", "npm"), Map.entry("svelte", "npm"),
@@ -55,7 +55,7 @@ final class ImportScanner {
             Map.entry("java", "maven"), Map.entry("kt", "maven"));
 
     /** Folders that hold someone else's code or what a build made of the repository's, never what it imports. */
-    private static final Set<String> SKIPPED_DIRECTORIES = Set.of(".git", "node_modules", "bower_components", "jspm_packages",
+    static final Set<String> SKIPPED_DIRECTORIES = Set.of(".git", "node_modules", "bower_components", "jspm_packages",
             "vendor", ".venv", "venv", "site-packages", "__pycache__", ".tox", ".nox", ".mypy_cache", ".pytest_cache",
             "dist", "build", "target", "out", ".next", ".nuxt", ".svelte-kit", ".output", ".turbo", ".parcel-cache",
             "coverage", ".gradle", ".idea", ".vscode", ".yarn", ".pnpm-store");
@@ -385,25 +385,25 @@ final class ImportScanner {
 
     // --- helpers ---------------------------------------------------------------------------------------------------
 
-    private static String language(Path file) {
+    static String language(Path file) {
         String name = file.getFileName().toString();
         int dot = name.lastIndexOf('.');
         return dot < 0 ? null : LANGUAGE_BY_EXTENSION.get(name.substring(dot + 1).toLowerCase(Locale.ROOT));
     }
 
-    private static boolean secretLooking(Path file) {
+    static boolean secretLooking(Path file) {
         String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
         return SECRET_WORDS.stream().anyMatch(name::contains);
     }
 
     /** A minified or bundled file: what a build made, never the code's own imports. */
-    private static boolean generated(Path file) {
+    static boolean generated(Path file) {
         String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
         return name.contains(".min.") || name.contains(".bundle.") || name.endsWith(".chunk.js");
     }
 
     /** The file's text, or null when it isn't UTF-8 text. */
-    private static String read(Path file) {
+    static String read(Path file) {
         try {
             byte[] bytes = Files.readAllBytes(file);
             return StandardCharsets.UTF_8.newDecoder()
@@ -418,7 +418,7 @@ final class ImportScanner {
         }
     }
 
-    private static String relative(Path checkout, Path file) {
+    static String relative(Path checkout, Path file) {
         return checkout.relativize(file).toString().replace('\\', '/');
     }
 

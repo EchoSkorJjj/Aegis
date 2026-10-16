@@ -137,36 +137,14 @@ class RepoSbomGenerator {
     // --- steps ------------------------------------------------------------------------------------
 
     private void clone(RepositoryUrl repo, String branch, CloneAccess access, Path checkout, Path work) {
-        // With a credential, put its NON-secret username in the URL and hand the secret to git via
-        // GIT_ASKPASS (read from the environment) — it never lands in argv or .git/config.
-        CloneCredential credential = access.credential();
-        String token = credential == null ? null : credential.secret();
-        String cloneUrl = credential == null ? repo.canonical() + ".git"
-                : "https://" + credential.username() + "@" + repo.host() + "/" + repo.path() + ".git";
-
-        Map<String, String> env = new HashMap<>(Map.of(
-                "GIT_TERMINAL_PROMPT", "0", // never hang on a prompt; askpass (if any) supplies the credential
-                "GIT_CONFIG_NOSYSTEM", "1",
-                "GIT_CONFIG_GLOBAL", "/dev/null",
-                "HOME", work.toString()));
-        if (token != null) {
-            env.put("GIT_ASKPASS", writeAskpass(work).toString());
-            env.put("AEGIS_GIT_TOKEN", token);
-        }
+        String token = token(access);
+        Map<String, String> env = gitEnv(work, token);
         // One deadline for all three steps: the clone timeout covers getting the files, however it's done.
         Instant deadline = Instant.now().plus(properties.cloneTimeout());
 
         // The file tree only: contents come with the checkout, and only for what syft can read. A host that
         // can't filter sends everything, as a plain shallow clone would.
-        List<String> command = git("clone", "--depth", "1", "--single-branch", "--no-tags", "--filter=blob:none",
-                "--no-checkout");
-        if (branch != null) {
-            command.add("--branch");
-            command.add(branch);
-        }
-        command.add(cloneUrl);
-        command.add(checkout.toString());
-        runGit(command, work, env, deadline, repo, branch, access, token);
+        cloneTree(repo, branch, access, checkout, work, env, deadline);
 
         List<String> sparse = git("-C", checkout.toString(), "sparse-checkout", "set", "--no-cone");
         sparse.addAll(SPARSE_PATTERNS);
@@ -176,6 +154,106 @@ class RepoSbomGenerator {
         if (!Files.isDirectory(checkout)) {
             throw cloneFailure("", repo, branch, access);
         }
+    }
+
+    /**
+     * The repository at {@code revision}, with only the files {@code patterns} keep (E11-5): the file tree without
+     * contents, that commit fetched when the branch has moved on since, then a sparse checkout of those patterns — one
+     * batch, nothing else fetched. Same hardening, credential handling and deadline as {@link #read}; the caller closes
+     * it, which deletes it. A repository it can't clone fails as an import would, and a commit the host no longer has
+     * with {@link CommitGone}.
+     */
+    Checkout checkout(RepositoryUrl repo, String ref, String revision, List<String> patterns, CloneAccess access) {
+        String branch = RepositoryUrl.normalizeRef(ref);
+        Path work;
+        try {
+            work = Files.createTempDirectory("aegis-code-");
+        } catch (IOException ex) {
+            throw new IllegalStateException("Could not create a workspace to read the code", ex);
+        }
+        try {
+            Path root = work.resolve("repo");
+            String token = token(access);
+            Map<String, String> env = gitEnv(work, token);
+            Instant deadline = Instant.now().plus(properties.cloneTimeout());
+            cloneTree(repo, branch, access, root, work, env, deadline);
+            if (!revision.equals(revision(root, work))) {
+                try {
+                    runGit(git("-C", root.toString(), "fetch", "--depth", "1", "--no-tags", "origin", revision),
+                            work, env, deadline, repo, branch, access, token);
+                } catch (ApiExceptions.BadRequest gone) {
+                    throw new CommitGone();
+                }
+            }
+            List<String> sparse = git("-C", root.toString(), "sparse-checkout", "set", "--no-cone");
+            sparse.addAll(patterns);
+            runGit(sparse, work, env, deadline, repo, branch, access, token);
+            runGit(git("-C", root.toString(), "checkout", "--quiet", "--detach", revision), work, env, deadline, repo,
+                    branch, access, token);
+            if (!Files.isDirectory(root)) {
+                throw cloneFailure("", repo, branch, access);
+            }
+            enforceSizeCap(root);
+            return new Checkout(work, root, symbolicLinks(root, work));
+        } catch (RuntimeException failed) {
+            deleteRecursively(work);
+            throw failed;
+        }
+    }
+
+    /** A checkout {@link #checkout} made: its files under {@code root}; closing it deletes it. */
+    record Checkout(Path work, Path root, Set<String> links) implements AutoCloseable {
+
+        @Override
+        public void close() {
+            deleteRecursively(work);
+        }
+    }
+
+    /** The commit an import read is no longer one the host serves: the history was rewritten. */
+    static final class CommitGone extends RuntimeException {
+        CommitGone() {
+            super(null, null, false, false);
+        }
+    }
+
+    /**
+     * {@code git clone} of the file tree without contents, shallow and single-branch: the credential's NON-secret
+     * username in the URL, its secret to git through {@code GIT_ASKPASS} from the environment — never in argv or
+     * {@code .git/config}.
+     */
+    private void cloneTree(RepositoryUrl repo, String branch, CloneAccess access, Path checkout, Path work,
+            Map<String, String> env, Instant deadline) {
+        CloneCredential credential = access.credential();
+        String cloneUrl = credential == null ? repo.canonical() + ".git"
+                : "https://" + credential.username() + "@" + repo.host() + "/" + repo.path() + ".git";
+        List<String> command = git("clone", "--depth", "1", "--single-branch", "--no-tags", "--filter=blob:none",
+                "--no-checkout");
+        if (branch != null) {
+            command.add("--branch");
+            command.add(branch);
+        }
+        command.add(cloneUrl);
+        command.add(checkout.toString());
+        runGit(command, work, env, deadline, repo, branch, access, token(access));
+    }
+
+    private static String token(CloneAccess access) {
+        return access.credential() == null ? null : access.credential().secret();
+    }
+
+    /** git's environment: no prompts, no system or global config, and the askpass helper when there's a secret. */
+    private static Map<String, String> gitEnv(Path work, String token) {
+        Map<String, String> env = new HashMap<>(Map.of(
+                "GIT_TERMINAL_PROMPT", "0", // never hang on a prompt; askpass (if any) supplies the credential
+                "GIT_CONFIG_NOSYSTEM", "1",
+                "GIT_CONFIG_GLOBAL", "/dev/null",
+                "HOME", work.toString()));
+        if (token != null) {
+            env.put("GIT_ASKPASS", writeAskpass(work).toString());
+            env.put("AEGIS_GIT_TOKEN", token);
+        }
+        return env;
     }
 
     /** The commit checked out, so a link to a line points at what was read; null when git can't say. */

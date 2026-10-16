@@ -4,14 +4,15 @@ import type {
   BusinessService,
   BusinessServiceInput,
   ChangeImpactResponse,
-  ChangePasswordInput,
   ChangeMatchResponse,
+  ChangePasswordInput,
   ChangeSignal,
   ChangeSignalFacets,
   CreateOrgInput,
   DecisionAction,
   DecisionRecord,
   DecisionSubject,
+  DirectoryMember,
   ForgotPasswordInput,
   GitHubConnectResult,
   GitHubIntegration,
@@ -23,13 +24,13 @@ import type {
   Membership,
   MfaChallenge,
   MfaStatus,
-  DirectoryMember,
-  Owner,
   OwnedService,
+  Owner,
   OwnerNotification,
   PackageUsage,
   Page,
   Passkey,
+  ReachabilityAssessmentItem,
   RecoveryCodes,
   RegisterInput,
   RegulatorMemo,
@@ -581,6 +582,23 @@ export interface EvidenceFile {
 }
 
 /** aegis-core impact scoring (Epic 7) — read-only, recomputed per request. */
+/**
+ * The AI's suggestion on whether each service's code calls the vulnerable function (E11-5). Reading is any domain
+ * role; asking is an analyst or the service's owners, and reads a few lines around each import from the repository.
+ * A suggestion: it never changes the score.
+ */
+export const assessmentApi = {
+  list(changeSignalId: string) {
+    return bffFetch<ReachabilityAssessmentItem[]>(`/api/actions/reachability-assessments${qs({ changeSignalId })}`);
+  },
+  ask(input: { serviceId: string; changeSignalId: string }) {
+    return bffFetch<ReachabilityAssessmentItem[]>("/api/actions/reachability-assessments", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+};
+
 export const scoringApi = {
   scoreChange(signalId: string) {
     return bffFetch<ChangeImpactResponse>(`/api/scoring/change-signals/${signalId}`);

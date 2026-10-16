@@ -4,6 +4,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import com.aegis.core.actions.assess.ReachabilityAssessment;
+import com.aegis.core.actions.assess.ReachabilityAssessments;
 import com.aegis.core.inventory.CodeUsage;
 import com.aegis.core.inventory.Reachability;
 import com.aegis.core.inventory.domain.BusinessCriticality;
@@ -84,6 +86,30 @@ class DraftEvidenceTest {
         assertThat(String.join("\n", reached)).doesNotContain("charge.ts", "github.com/acme");
         assertThat(DraftEvidence.service(withReachability(base, notImported)))
                 .contains("Code reachability: NOT_IMPORTED. Nothing in the code Aegis read imports axios.");
+    }
+
+    @Test
+    void theAisReachabilitySuggestionIsStatedWithoutTheLinesItRead() {
+        UUID service = UUID.randomUUID();
+        List<String> lines = DraftEvidence.assessments(List.of(
+                new ReachabilityAssessments.Item(service, "npm", "lodash", ReachabilityAssessments.Status.ASSESSED,
+                        ReachabilityAssessment.Verdict.CALLED, "The excerpt calls template with request input",
+                        List.of(new ReachabilityAssessments.CitedLines("src/app.ts", 1, 11, 6,
+                                "https://github.com/acme/web/blob/abc/src/app.ts#L6")),
+                        List.of("Whether the view name can come from a request", "Whether lodash is below 4.17.21"),
+                        List.of(new ReachabilityAssessment.Searched("template", 2, 1)), Instant.now(), null, true),
+                new ReachabilityAssessments.Item(service, "npm", "postcss", ReachabilityAssessments.Status.NOT_ASSESSED,
+                        null, null, List.of(), List.of(), List.of(), null,
+                        "postcss comes in through next, which the code imports", false)));
+
+        assertThat(lines).containsExactly(
+                "AI reachability suggestion for lodash: the code uses the vulnerable part. The excerpt calls template"
+                        + " with request input."
+                        + " To check: Whether the view name can come from a request; Whether lodash is below 4.17.21."
+                        + " A suggestion: it doesn't change the score.",
+                "AI reachability suggestion for postcss: not assessed. postcss comes in through next, which the code"
+                        + " imports.");
+        assertThat(String.join("\n", lines)).doesNotContain("src/app.ts", "github.com");
     }
 
     private static ScoredService withReachability(ScoredService base, Reachability.Verdict reachability) {

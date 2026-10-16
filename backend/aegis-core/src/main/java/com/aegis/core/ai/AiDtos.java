@@ -16,26 +16,98 @@ public final class AiDtos {
     private AiDtos() {
     }
 
-    /** "Assess this finding": is it real signal for this service, and why. */
-    public record AssessmentRequest(
+    /**
+     * Pass 1 of "does this code use the vulnerable part?" (E11-5): from the advisory, the package and what its fix
+     * changed, the names to search the service's code for. Nothing from the service. Redacted here.
+     */
+    public record LookForRequest(
             @JsonProperty("finding_id") String findingId,
             @JsonProperty("advisory_text") String advisoryText,
-            @JsonProperty("service_context") String serviceContext) {
-        public AssessmentRequest {
+            @JsonProperty("package") PackageRef pkg,
+            @JsonProperty("fix_summary") String fixSummary) {
+        public LookForRequest {
             advisoryText = SensitiveText.redact(advisoryText);
-            serviceContext = SensitiveText.redact(serviceContext);
+            fixSummary = SensitiveText.redact(fixSummary);
         }
     }
 
+    /** The names the advisory or its fix writes, for aegis-core to search the code for; each checked by the ai-service. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record LookFor(List<String> terms) {
+        public LookFor {
+            terms = terms == null ? List.of() : List.copyOf(terms);
+        }
+    }
+
+    /**
+     * Pass 2 (E11-5): the advisory, the package, what its fix changed, the search of the code for pass 1's names, and a
+     * few lines of the code — where it imports the package, uses what it imports, or names a searched name — nothing
+     * else from the repository. Every text field is redacted here, before it can leave Aegis.
+     */
+    public record AssessmentRequest(
+            @JsonProperty("finding_id") String findingId,
+            @JsonProperty("advisory_text") String advisoryText,
+            @JsonProperty("package") PackageRef pkg,
+            @JsonProperty("fix_summary") String fixSummary,
+            List<Search> searches,
+            List<CodeExcerpt> excerpts) {
+        public AssessmentRequest {
+            advisoryText = SensitiveText.redact(advisoryText);
+            fixSummary = SensitiveText.redact(fixSummary);
+            searches = searches == null ? List.of() : List.copyOf(searches);
+            excerpts = excerpts == null ? List.of() : List.copyOf(excerpts);
+        }
+    }
+
+    /** The package the code imports. */
+    public record PackageRef(String ecosystem, String name) {
+    }
+
+    /** What the search of the service's code for one name found: counts, never code. */
+    public record Search(
+            String term,
+            @JsonProperty("files_searched") int filesSearched,
+            @JsonProperty("files_matched") int filesMatched,
+            @JsonProperty("lines_matched") int linesMatched,
+            boolean complete) {
+        public Search {
+            term = SensitiveText.redact(term);
+        }
+    }
+
+    /**
+     * Lines of the service's code from {@code startLine}; {@code id} ({@code E1}–{@code E6}) is what a citation names,
+     * {@code kind} why they were sent ({@code import}, {@code use}, {@code match}) and {@code term} what a match found.
+     */
+    public record CodeExcerpt(
+            String id,
+            String path,
+            @JsonProperty("start_line") int startLine,
+            String text,
+            String kind,
+            String term) {
+        public CodeExcerpt {
+            path = SensitiveText.redact(path);
+            text = SensitiveText.redact(text);
+            term = SensitiveText.redact(term);
+        }
+    }
+
+    /**
+     * The AI's suggestion: {@code verdict} is {@code CALLED}, {@code NOT_CALLED} or {@code CANT_TELL}, {@code checks}
+     * what a reviewer should verify that the code it read can't show, and {@code citedExcerpts} the IDs of the excerpts
+     * it rests on — the model never writes citation text.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Assessment(
-            boolean material,
+            String verdict,
             String rationale,
-            @JsonProperty("suggested_severity") String suggestedSeverity,
-            List<String> citations) {
+            List<String> checks,
+            @JsonProperty("cited_excerpts") List<String> citedExcerpts) {
         public Assessment {
             rationale = SensitiveText.redact(rationale);
-            citations = SensitiveText.redact(citations);
+            checks = checks == null ? List.of() : SensitiveText.redact(checks);
+            citedExcerpts = citedExcerpts == null ? List.of() : List.copyOf(citedExcerpts);
         }
     }
 

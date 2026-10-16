@@ -5,7 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 
 /**
- * The integration suite's repository host and AI drafter: in-memory, deterministic, never on the network.
+ * The integration suite's repository host, AI drafter and AI assessor: in-memory, deterministic, never on the network.
  * Imported once by {@link AbstractIntegrationTest}, so every integration test keeps sharing one context.
  */
 @TestConfiguration(proxyBeanMethods = false)
@@ -20,6 +20,12 @@ public class ActionsTestConfig {
     @Primary
     public FakeAiDrafter fakeAiDrafter() {
         return new FakeAiDrafter();
+    }
+
+    @Bean
+    @Primary
+    public FakeAiAssessor fakeAiAssessor() {
+        return new FakeAiAssessor();
     }
 
     @Bean

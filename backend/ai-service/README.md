@@ -6,7 +6,8 @@ route; only `aegis-core` shares its Docker network. On AWS, its security group a
 
 **Status: built, and used by aegis-core's responses.** aegis-core's `HttpAiClient` calls `/v1/draft`
 for an upgrade pull request's rationale (`upgrade`), a risk ticket's narrative (`risk_ticket`) and a
-DORA memo's sections (`memo`). `/v1/assess` is implemented and tested, but nothing calls it yet. The
+DORA memo's sections (`memo`), and `/v1/assess/look-for` then `/v1/assess` when a person asks whether a
+service's code uses a vulnerable package's vulnerable function, feature or condition (E11-5). The
 service supports an offline stub and a Groq provider, versioned prompts, strict output validation,
 source-resolved citations, and local rate/token controls. The default remains `stub`, so development
 and tests need no API key. There is no RAG yet: the service is stateless. It returns only proposed
@@ -20,11 +21,12 @@ and a person approves before anything is filed or opened.
 | GET | `/actuator/health` | Public | Liveness |
 | GET | `/actuator/prometheus` | Public | HTTP and LLM metrics |
 | GET | `/v1/ping` | `X-Service-Token` | Connectivity check, called by aegis-core's `/api/ai/ping` |
-| POST | `/v1/assess` | `X-Service-Token` | `{finding_id, advisory_text, service_context?}` → `{material, rationale, suggested_severity, citations}` |
+| POST | `/v1/assess/look-for` | `X-Service-Token` | `{finding_id, advisory_text, package: {ecosystem, name}, fix_summary?}` → `{terms}` |
+| POST | `/v1/assess` | `X-Service-Token` | `{finding_id, advisory_text, package, fix_summary?, searches: [{term, files_searched, files_matched, lines_matched, complete}], excerpts: [{id, path, start_line, text, kind, term?}]}` → `{verdict, rationale, checks, cited_excerpts}` |
 | POST | `/v1/draft` | `X-Service-Token` | `{finding_id, draft_type, context?}` → `{draft_type, content, ticket?, memo?, citations}` |
 
 `finding_id` is an opaque string; aegis-core sends the id of the proposal, ticket or memo it is
-drafting. Draft types are `risk_ticket`, `upgrade`, and `memo`; other values return 400. Snake-case
+drafting, or the service and change an assessment is for. Draft types are `risk_ticket`, `upgrade`, and `memo`; other values return 400. Snake-case
 fields and response shapes continue to mirror core's `AiDtos`. FastAPI serves the OpenAPI
 specification at `/openapi.json` and Swagger UI at `/docs`.
 
@@ -33,6 +35,44 @@ returns `ticket` (`summary`, `risk`, `impact`, `actions`), and a `memo` returns 
 `impact`, `measures`, `next_steps`). aegis-core assembles those documents itself: every fact,
 priority and deadline around the sections is its own, and the model writes only the narrative.
 
+An assessment is two calls, with aegis-core's search of the service's code between them; it is an AI
+suggestion from targeted excerpts, not call-graph reachability.
+
+- **Pass 1, `/v1/assess/look-for`:** the advisory (≤ 2,500 characters), the package and what the advisory's
+  fix commit changed (`fix_summary`, ≤ 1,200: each changed source file and the functions its diff names)
+  → up to five `terms` to search the code for. A term is kept only if one of those sources writes it as a
+  whole name, it is 4–64 characters of `[A-Za-z0-9_$.:/@-]`, it isn't the package's own name, and it names
+  no secret (`password`, `secret`, `token`, `credential`, `api_key`, `private_key`…); anything else is
+  dropped, not refused. The model labels each name `application` (what a service's code writes to reach
+  the vulnerable part: an API, a type it binds, a setting) or `internal` (the package's own code — most
+  of a fix commit's names); only application names are returned, because a text search of a service's
+  code can never find the package's internals. A name may also join words the advisory writes as prose
+  (`cacheComponents` from "Cache Component"). Its output cap is 400 tokens.
+- **Pass 2, `/v1/assess`:** the same advisory and fix summary, the search's findings per term (`searches`)
+  and one to six code excerpts (`E1`–`E6`, ≤ 600 characters, `path` ≤ 300; `kind` `import`, `use` or
+  `match`, a match naming its `term`). It answers `verdict` `CALLED`, `NOT_CALLED` or `CANT_TELL` (first,
+  so the offline stub says it), a `rationale`, up to three `checks` (≤ 200 characters: what a reviewer
+  should verify that the code shown can't, e.g. "Whether the server runs on Windows") and `cited_excerpts`.
+  Passages: `A` advisory, `P1` package, `F1` the fix, `S1` the searches, `E*` the excerpts. The model first
+  reads what triggers the vulnerability (a call, the shape of bound data, a setting or default, or the
+  package's own server or framework code under a condition); `CALLED` means the excerpts show the
+  trigger. `CALLED` must cite an excerpt; `NOT_CALLED` an excerpt or `S1` (a complete search for the
+  names an application writes that found none — never the package's internals being absent, the whole
+  package passed on, a missing setting when the advisory's vulnerable case is "without" it, or a
+  remaining deployment condition such as the operating system); a trigger the code can't show is
+  `CANT_TELL`, with checks. A check about a name a complete search found nowhere — written as the name or
+  as its words — is dropped as settled; for Maven, a complete search finding no qualified type tells the
+  model no class can use it. The model picks passage
+  ids and the service resolves them, so an answer citing anything it wasn't sent is refused (502). Its
+  output cap is 1,100 tokens.
+- **Budget:** both passes, at their largest, fit the default 7,000 tokens a minute together (a test guards
+  it), but one assessment uses most of a minute's budget: the next call within the minute gets a 429 with
+  `Retry-After`, which aegis-core waits out once. Raise `LLM_MAX_TOKENS_PER_MINUTE` on a provider tier
+  that allows more.
+
+The answer is a suggestion: aegis-core shows it beside the score and never lets it change the score or
+decide anything. Offline, the stub names no terms and no checks and always answers `CANT_TELL`.
+
 ## Provider, prompts, and validation
 
 Capabilities depend on a structured-generation helper and the `LlmClient` port. Groq is an HTTP
@@ -40,9 +80,10 @@ adapter using the existing `httpx` dependency; no Groq SDK or optional package e
 The `anthropic` provider remains explicitly unimplemented, including when the reserved `llm` extra
 is installed. Unknown providers or Groq without a key fail at startup.
 
-Prompts are package resources, loaded with `importlib.resources` and identified as `assess.v1`,
+Prompts are package resources, loaded with `importlib.resources` and identified as `assess.v6`, `look_for.v2`,
 `draft.v1` (the upgrade rationale), `draft_risk_ticket.v1` and `draft_memo.v1`. Untrusted advisory
-and service text is placed in numbered, escaped data blocks. Embedded delimiters cannot close those
+and service text is placed in numbered, escaped data blocks; each code excerpt is its own passage,
+headed by its path and line range. Embedded delimiters cannot close those
 blocks. Prompts instruct the model to treat their content as data, and never to perform matching,
 final scoring, decisions, or execution. The risk-ticket and memo prompts present aegis-core's
 computed facts as final and limit each section's length; the memo prompt also forbids classifying
@@ -50,8 +91,9 @@ an incident as major or stating a figure the context doesn't give.
 
 The model returns an internal Pydantic schema with citation IDs. A schema transformer makes every
 object closed (`additionalProperties: false`) and every property required for strict structured
-output. Responses are validated locally too: malformed JSON, forbidden fields, invalid severity,
-unknown citation IDs, and material assessments without citations are rejected. Citations are
+output. Responses are validated locally too: malformed JSON, forbidden fields, an unknown verdict,
+unknown citation IDs, a `CALLED` assessment citing no code excerpt and a `NOT_CALLED` one citing neither an
+excerpt nor the search are rejected. Citations are
 resolved from the redacted input snippets sent to the model, each at most 1,000 characters; the model
 does not supply citation text. The public contract continues to return those snippets as strings.
 
@@ -63,7 +105,11 @@ Errors use the existing `{timestamp, status, error, message, path}` shape:
 - **400:** invalid request or oversized input; text is never silently truncated.
 - **400:** recognisable source control instructions; no provider call and no source text in the error.
 - **502:** invalid provider output after the validation retry.
-- **503:** exhausted local limits/budget, timeout, or provider unavailability.
+- **429:** a local per-minute limit (requests or tokens) is full now, with `Retry-After` — the seconds
+  until enough of the rolling minute frees for this call. aegis-core waits that long (up to a minute)
+  and asks once more.
+- **503:** the daily budget exhausted, a call larger than a whole minute's budget, a timeout, or provider
+  unavailability.
 
 Logs contain operational metadata, including prompt version, rather than prompts, keys, generated
 text, or raw provider error bodies. Metrics record requests by provider/model/capability/outcome,
@@ -171,16 +217,18 @@ With the local server running, send a stub assessment from another PowerShell te
 ```powershell
 $assessment = @{
   finding_id = 'demo-1'
-  advisory_text = 'Demo advisory: package example-lib versions before 2.0.0 are affected.'
-  service_context = 'Fictional demo service uses example-lib 1.0.0.'
-} | ConvertTo-Json
+  advisory_text = 'Demo advisory: example-lib before 2.0.0 runs commands through render().'
+  package = @{ ecosystem = 'npm'; name = 'example-lib' }
+  excerpts = @(@{ id = 'E1'; path = 'src/app.ts'; start_line = 1; kind = 'use'
+    text = "import { parse } from 'example-lib';`nexport const read = (s) => parse(s);" })
+} | ConvertTo-Json -Depth 4
 $headers = @{ 'X-Service-Token' = 'dev-internal-token-change-me' }
 Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8083/v1/assess' `
   -Headers $headers -ContentType 'application/json' -Body $assessment
 ```
 
 Use your configured service token if it differs. The default stub returns a deterministic,
-schema-valid result, not a real security judgment.
+schema-valid result (`CANT_TELL`, no checks, citing nothing), not a real security judgment.
 
 ## Enable Groq and smoke-test manually
 
@@ -197,7 +245,7 @@ there is no new browser route, published port, or automatic assessment pipeline.
 
 For a local manual API check, place those settings in `backend/ai-service/.env` instead, restart the
 local Uvicorn server, and send the example assessment above. Verify the response has the documented
-fields and each citation equals an input passage. You can also send
+fields, each draft citation equals an input passage, and each cited excerpt is one you sent. You can also send
 `{"finding_id":"demo-1","draft_type":"risk_ticket","context":"Fictional demo evidence."}` to
 `/v1/draft`. Use only public or fictional material for this smoke test and avoid saving real-key
 outputs in the repository.
@@ -209,13 +257,22 @@ Provider references: [Groq structured outputs](https://console.groq.com/docs/str
 and [reasoning parameters](https://console.groq.com/docs/reasoning). Other compatible servers or
 models must accept this adapter's structured-output and reasoning fields.
 
-## Draft quality evaluation (E8 story 9 → E14)
+## Draft and assessment quality evaluation (E8 story 9, E11-5 → E14)
 
 The standalone harness evaluates the AI narratives for risk tickets, upgrade rationales and
-regulator memos. It uses 20 versioned synthetic golden cases: direct/transitive vulnerabilities,
-vendor outages, Maven/npm/PyPI upgrades, missing fixes/context, multiple affected services,
-long evidence, redaction and injection. It calls the same guarded draft capability and structured
-generator as the API, with no database, core workflow action, or running stack required.
+regulator memos, and its reachability assessments. It uses 33 versioned synthetic golden cases:
+20 drafts (direct/transitive vulnerabilities, vendor outages, Maven/npm/PyPI upgrades, missing
+fixes/context, multiple affected services, long evidence, redaction and injection), 8 assessments
+(`capability: "assess"`: called, not called, not called on a search that found nothing, can't tell,
+a condition code can't show with what to check, a data-shape trigger absent and present, and an
+instruction hidden in a code comment, which must be refused) and 5 look-for cases
+(`capability: "look_for"`: a named function, the type an application binds kept while the fix's
+internal class is dropped, a framework setting kept while its internals are dropped, a secret-ish
+name dropped, an instruction in the fix summary refused). It calls the same
+guarded capabilities and structured generator as the API, with no database, core workflow action, or
+running stack required. An assessment is graded on its verdict (a wrong one is a critical failure),
+on citing the excerpts it should and only those it was sent, and on its checks; a look-for answer on
+naming the expected terms and none it must never keep.
 
 The [rubric](src/ai_service/evaluation/rubric.md) defines weighted format, grounding, citations,
 actionability, uncertainty and safety criteria. Automated anchor checks produce quality **proxies**,

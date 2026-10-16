@@ -41,7 +41,7 @@ and the modules are cycle-free.
 | `inventory`  | Services and their repository links, components, vendors, SBOM dependencies, ownership — the map. Each service has its own dependency graph (`DependencyGraph`, V29): the one walk behind matching, the upgrade recommendations and "Used by" |
 | `matching`   | Advisory package + version range → components → impacted services/owners + evidence chains |
 | `scoring`    | Deterministic impact score per service and owner, with a "why" breakdown |
-| `actions`    | Responses: what to respond to next (the triage queue, `triage`, E9 story 1), the draft-PR port + GitHub App adapter and safe-upgrade proposals (`pr`, `upgrade`, E8 story 4), the issue-tracker port + Jira adapter and risk tickets (`tracker`, `ticket`, story 5), and DORA regulator memos (`memo`, story 6) |
+| `actions`    | Responses: what to respond to next (the triage queue, `triage`, E9 story 1), the draft-PR port + GitHub App adapter and safe-upgrade proposals (`pr`, `upgrade`, E8 story 4), the issue-tracker port + Jira adapter and risk tickets (`tracker`, `ticket`, story 5), DORA regulator memos (`memo`, story 6), and the AI's suggestion on whether the code calls a vulnerable function (`assess`, E11-5) |
 | `notifications` | Owner notifications (E9 story 5): a scheduled job tells each service owner once — in the app and by email through identity-service — about every triage item in their services that needs a decision |
 | `audit`      | The decision audit trail (E10 story 1): every step a response takes, with who took it, when, why and the response as it stood then; append-only |
 | `ai`         | **Port** to the Python ai-service: `AiAssessor` / `AiDrafter` + DTOs + `HttpAiClient` |
@@ -468,6 +468,95 @@ submits it through the competent authority's own channel.
   materially affected; `/responses/memos/{id}` shows the timeline, the services and the whole memo, takes
   the decision, and downloads the final memo as Markdown.
 
+## The AI's reachability suggestion (E11-5)
+
+Reachability in the score (E11-4) says whether the code *imports* a vulnerable package. Whether it *reaches* the
+vulnerable part — by calling a function, by the type of data it binds, by a setting, or not at all because the
+package's own server code runs it — is a question for a reader, so `actions.assess` asks the AI, when someone asks,
+and shows its answer beside the score as a suggestion: **uses it** (`CALLED`), **doesn't use it** (`NOT_CALLED`) or
+**can't tell**, why, the lines it read, what the code was searched for, and up to three things a reviewer should
+still check. It never changes
+the score, tier, materiality, ranking, readiness or any decision (`ImpactScorer`, `ScoringProperties` and
+`Reachability` don't read it), and it isn't a decision-trail step.
+
+**What it is and isn't.** The industry's function-level reachability (Snyk, Endor Labs, Mend, `govulncheck`) walks a
+call graph from the service's entry points to vulnerable functions curated from each fix commit; CVE-specific
+applicability checks (JFrog's contextual analysis, Semgrep Supply Chain) are written by researchers. This is lighter: an
+AI suggestion from targeted excerpts — the fix commit, a search for the names the advisory and its fix write, and a few
+lines where the code uses what it imports — not call-graph reachability. A call graph per language is a story of its own.
+
+| Method | Path | Who | Purpose |
+|---|---|---|---|
+| GET | `/api/actions/reachability-assessments?changeSignalId=` | the inventory's readers | Every impacted service's vulnerable packages for the change: the answer kept for each, or `NOT_ASSESSED` with `reason` and whether asking could answer it (`assessable`). Reads only; never calls the AI |
+| POST | `/api/actions/reachability-assessments` | an analyst, or the service's assigned owners (`AssessRoles.ASK`, as for drafting a response) | `{serviceId, changeSignalId}` → reads the code and asks the AI now, for each of the service's packages the change matches; the answers or why not |
+
+How one package is assessed (`ReachabilityAssessments.run`):
+
+1. **Only a package the code imports itself** (`Reachability` verdict `IMPORTED`, not `through` another package) at a
+   recorded scan commit. A package reached only through another one, one the code doesn't import, or one whose
+   imports are unknown is not assessed, with the verdict's reason.
+2. **The advisory's full text and fix commits** (V42): `advisories.details` (OSV's `details`, which ingestion used to
+   drop — the AI saw only the one-line summary) and `advisories.fix_commits` (the commits among the references, on
+   github.com / gitlab.com, at most five — GHSA marks them `WEB`, not `FIX`; `advisories.CommitUrl`), filled by the
+   OSV and NVD parsers and backfilled from the newest raw payload. The AI gets title + description + details, cut to
+   2,500 characters.
+3. **What the fix changed** (`FixCommits`, `FixDiffs`, `HttpDiffSource`): up to three commits fetched as diffs
+   (`…/commit/{sha}.diff`, rebuilt from validated parts, no redirect, 10 s, 1 MB, cached), summarised per changed
+   source file — the functions the host's hunk headers name, else a few changed lines; tests, docs and release notes
+   left out; 1,200 characters. Public library code. `aegis.assess.fix-commits.enabled`
+   (`AEGIS_ASSESS_FIX_COMMITS_ENABLED`, on; tests pin it off); a failed fetch is just no summary.
+4. **Pass 1** (`AiAssessor.lookFor` → `/v1/assess/look-for`): from the advisory, the package and the fix summary — nothing
+   from the service — up to five names to search the code for, each labelled by the AI as one an application writes
+   (an API it calls, a type it declares or binds, a setting) or the package's own (most of a fix commit's names). Only
+   application names are searched: a service never writes the package's internals, so not finding them would prove
+   nothing. The ai-service keeps only names written in those sources, plain and naming no secret; `RepositoryCode`
+   checks again. If pass 1's answer can't be used (502), the code
+   is still assessed, without a search; any other failure is "not assessed".
+5. **Reading the code** (`inventory.sbom.RepositoryCode`): one checkout of only the package language's source files at
+   the scan's commit (`import_scan_revision`, fetched if the branch has moved on) — `RepoSbomGenerator.checkout`, the
+   import's hardened git, deadline and access chain (`RepositoryAccess`: the org's GitHub App installation, then
+   anonymous; a token pasted for an import is never kept, so a private repository needs the App) — walked with the
+   import scan's rules and deleted when done. Up to six excerpts (`Code.read`), each ±3 lines and ≤ 600 characters — a
+   file that short is sent whole, since a config is often telling for what it leaves out:
+   first where the code **uses** what each import binds (`ImportBindings`: JS/TS default, named, namespace, `require`
+   and destructuring; Python `import`/`from`; Java/Kotlin class or static member; a type-only import binds nothing;
+   followed one hop to a variable or field assigned to or declared as it — `objectMapper.writeValueAsString(…)` —; a
+   file using nothing shows its **import**), one file each for half of them; then where it **names** each searched
+   term (whole name, comments blanked; a qualified type also through its package's wildcard import, so finding none
+   rules out a field of that type; a name of several words in any spelling — `CacheComponent` finds
+   `cacheComponents` and `CACHE_COMPONENT`; a match on an import is followed to where that file uses it), files not yet shown
+   first, three a term; then more uses. Each term's search reports files searched and matched, lines matched and
+   whether every file was read.
+6. **Pass 2** (`AiAssessor.assess` → `/v1/assess`): the advisory, the package, the fix summary, the searches and the
+   excerpts (`E1`–`E6`, each tagged import / use / match) → verdict, rationale, up to three checks, the excerpt ids it
+   cites. The AI first reads what triggers the vulnerability (a call, the shape of bound data, a setting or default,
+   or the package's own server code under a condition such as the operating system). Uses it cites the code; doesn't
+   use it may rest on a complete search for application names that found nothing — never on the package's internals
+   being absent; a trigger code can't show is can't tell, with checks. `SensitiveText` redacts
+   every field in the request records (`AiDtos`) and the ai-service screens and redacts again; an instruction in the
+   code (a comment, say) is refused there (400).
+7. **What is kept** (`reachability_assessments`, V41 + V43; org-scoped with RLS through `current_org()`): the verdict,
+   the rationale (redacted, 4,000 characters at most), the checks, the searches (`lines:files:term`), the cited
+   `path:start–end` line ranges and who asked, keyed by service, package, canonical vulnerability id and scan commit.
+   Never the code. A re-import that reads a new commit shows the item as not assessed again; asking again replaces it.
+
+- **Not assessed, with why**: nobody asked yet; the code not read (no SBOM import from the repository, or reading
+  switched off; an ecosystem Aegis doesn't read); the commit or the lines gone; the repository unreadable now (private,
+  with no GitHub App); the AI service unavailable, refusing the request, or its answer unusable.
+- **In a drafted ticket.** Drafting a vulnerability's risk ticket uses the answer kept for each package, or asks for one
+  if there is none, and states it in the evidence (`DraftEvidence.assessments`) — the verdict, the rationale and what to
+  check, in words ("the code doesn't use the vulnerable part"), never the lines, since drafts go to the AI provider
+  and to Jira. A failure there only says "not assessed"; it
+  never blocks the draft.
+- **Cost.** A larger checkout and two AI calls: roughly 20–60 seconds per package, sized so both calls fit the
+  ai-service's default per-minute token budget (7,000) — which one assessment mostly uses, so a call within the next
+  minute (another assessment, a draft) gets a 429 with `Retry-After`. `HttpAiClient` waits that out once (up to a
+  minute) for every AI call — each is someone's request they're waiting on — and if it is still refused the item says
+  "The AI is at its per-minute limit…; ask again in a minute", not that the AI is down. Nothing asks on page load.
+- **In the UI**: an **AI suggestion** block under each service's "Why this score" on the change-impact page and the item
+  detail (`components/app/advisories/ai-suggestion.tsx`), "does the code reach the vulnerable part?": uses it / doesn't
+  use it / can't tell, why, the cited lines, "Searched the code for …" and a "To check" list, with **Ask the AI** / **Ask again** for whoever may draft a response for the service.
+
 ## The AI boundary
 
 The AI logic is **not** in this service. `ai` holds only the seam: the domain depends on the
@@ -509,6 +598,7 @@ domain. See `ARCHITECTURE.md` for the topology.
 | `AEGIS_NOTIFICATIONS_ENABLED` | `false` | Owner notifications (E9 story 5); needs `IDENTITY_SERVICE_TOKEN` |
 | `AEGIS_NOTIFICATIONS_INTERVAL` | `PT5M` | How often the notification job looks for items that need a decision |
 | `AI_SERVICE_URI` | `http://localhost:8083` | The internal ai-service base URL |
+| `AEGIS_ASSESS_FIX_COMMITS_ENABLED` | `true` | The AI's reachability suggestion (E11-5) reads what an advisory's fix commits changed, fetched as public diffs from github.com / gitlab.com |
 | `AI_SERVICE_TOKEN` | `dev-internal-token-change-me` | Shared service token sent to the ai-service |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | SPA origins allowed in dev |
 | `ZIPKIN_ENDPOINT` | `http://localhost:9411/api/v2/spans` | Trace collector |
@@ -1129,6 +1219,7 @@ is weak on any one axis cannot be pushed to the top by the others. Same read rol
   pulling it in that the verdict rests on, if any) and `usage` (that package's imports, with each line
   linked at the commit read) — and so does each upgrade recommendation, which the triage queue and each
   service's vulnerable dependencies rank by. Drafts state the verdict and its reason, never the files.
+  The AI's suggestion on whether the vulnerable function is called (E11-5, above) never changes it.
 - **criticality** — the service's business tier (`CRITICAL` 1.0 → `LOW` 0.25).
 
 Each scored service carries the full `breakdown` (every multiplier, enough to reproduce the score by
