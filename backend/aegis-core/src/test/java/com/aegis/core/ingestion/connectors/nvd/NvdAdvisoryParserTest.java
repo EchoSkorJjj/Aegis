@@ -129,6 +129,20 @@ class NvdAdvisoryParserTest {
     }
 
     @Test
+    void keepsTheFixCommitsAmongTheReferencesAndNoDetailsBesideItsFullDescription() {
+        Advisory advisory = parser.parse("""
+                {"id": "CVE-2021-23337", "descriptions": [{"lang": "en", "value": "Lodash before 4.17.21 ... template."}],
+                 "references": [
+                   {"url": "https://github.com/lodash/lodash/commit/3469357cff396a26c363f8c1b5a91dde28ba4b1c", "tags": ["Patch"]},
+                   {"url": "https://snyk.io/vuln/SNYK-JS-LODASH-1040724", "tags": ["Third Party Advisory"]}]}
+                """);
+
+        assertThat(advisory.details()).isNull();
+        assertThat(advisory.fixCommits()).containsExactly(
+                "https://github.com/lodash/lodash/commit/3469357cff396a26c363f8c1b5a91dde28ba4b1c");
+    }
+
+    @Test
     void rejectsADocumentWithNoCveId() {
         assertThatThrownBy(() -> parser.parse("{\"descriptions\":[]}"))
                 .isInstanceOf(IllegalArgumentException.class)

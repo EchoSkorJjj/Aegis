@@ -11,6 +11,7 @@ import java.util.Set;
 
 import com.aegis.core.advisories.Advisory;
 import com.aegis.core.advisories.AffectedProduct;
+import com.aegis.core.advisories.CommitUrl;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
@@ -18,8 +19,9 @@ import tools.jackson.databind.ObjectReader;
 
 /**
  * Turns one OSV vulnerability document into a normalised {@link Advisory}: the summary, a severity
- * label, a canonical (CVE) id from the record's aliases, and purl-shaped affected products drawn from
- * each package's version ranges.
+ * label, a canonical (CVE) id from the record's aliases, purl-shaped affected products drawn from
+ * each package's version ranges, and — for an assessment to read (E11-5) — the details beside the summary
+ * and the commits among the references.
  *
  * <p>Like the NVD parser it is deliberately lossy and never compares versions — matching owns
  * ecosystem-specific ordering. Anything dropped is recoverable from the raw-event store.
@@ -65,7 +67,11 @@ class OsvAdvisoryParser {
                 parseInstant(vuln.published()),
                 parseInstant(vuln.modified()),
                 cvss(vuln),
-                affectedProducts(vuln));
+                affectedProducts(vuln),
+                details(vuln),
+                CommitUrl.among(vuln.references() == null ? null
+                        : vuln.references().stream().filter(reference -> reference != null)
+                                .map(OsvJson.Reference::url).toList()));
     }
 
     /** The CVE this is — its own id or the first CVE alias — else its own id (GHSA/PYSEC/…). */
@@ -92,6 +98,14 @@ class OsvAdvisoryParser {
             return vuln.summary().trim();
         }
         return vuln.details() == null || vuln.details().isBlank() ? null : vuln.details().trim();
+    }
+
+    /** The details beside a summary; with no summary, the details already are the description. */
+    private static String details(OsvJson.Vulnerability vuln) {
+        if (vuln.summary() == null || vuln.summary().isBlank() || vuln.details() == null || vuln.details().isBlank()) {
+            return null;
+        }
+        return vuln.details().trim();
     }
 
     /** OSV carries the CVSS vector (not a base score) plus, for GHSA-sourced records, a label severity. */

@@ -8,7 +8,7 @@ import pytest
 from pydantic import BaseModel
 
 from ai_service.core.config import Settings
-from ai_service.core.errors import BadGateway, ServiceUnavailable
+from ai_service.core.errors import BadGateway, RateLimited, ServiceUnavailable
 from ai_service.llm.base import LlmResult
 from ai_service.llm.limits import CostLimiter
 from ai_service.llm.structured import StructuredGenerator
@@ -51,6 +51,36 @@ def test_token_limit_reconciles_reported_usage_and_keeps_failed_estimates():
     budget.reserve(80)  # failed/unknown calls deliberately remain charged
     with pytest.raises(ServiceUnavailable, match="token rate"):
         budget.reserve(1)
+
+
+def test_a_full_minute_says_when_it_will_have_room():
+    # One assessment is two calls; the second can find the minute full. Saying when it frees lets the caller wait.
+    clock = Clock()
+    budget = limiter(clock, llm_max_tokens_per_minute=100, llm_max_requests_per_minute=3)
+    budget.reserve(60)
+    clock.tick(10)
+    budget.reserve(30)
+    with pytest.raises(RateLimited, match="token rate") as tokens:
+        budget.reserve(20)
+    assert tokens.value.retry_after == 50  # the first reservation leaves the window then
+    budget.reserve(5)
+    with pytest.raises(RateLimited, match="request rate") as requests:
+        budget.reserve(1)
+    assert requests.value.retry_after == 50
+
+
+def test_what_could_never_fit_a_minute_and_the_daily_budget_are_no_wait():
+    clock = Clock()
+    clock.now = datetime(2026, 9, 24, 12, 0, tzinfo=UTC)
+    budget = limiter(clock, llm_max_tokens_per_minute=100, llm_daily_token_budget=150)
+    with pytest.raises(ServiceUnavailable) as never:
+        budget.reserve(101)
+    assert not isinstance(never.value, RateLimited)
+    budget.reserve(100)
+    clock.tick(61)  # a new minute, the same UTC day
+    with pytest.raises(ServiceUnavailable, match="daily token budget") as daily:
+        budget.reserve(60)
+    assert not isinstance(daily.value, RateLimited)
 
 
 def test_actual_usage_above_estimate_blocks_further_calls():

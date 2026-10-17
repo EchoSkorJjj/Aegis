@@ -56,6 +56,35 @@ class OsvAdvisoryParserTest {
     }
 
     @Test
+    void keepsTheDetailsBesideTheSummaryAndTheFixCommitsAmongTheReferences() {
+        Advisory advisory = parser.parse("""
+                {"id": "GHSA-wjgm-6hv5-3cvf", "modified": "2026-09-28T20:30:05Z", "aliases": ["CVE-2026-19032"],
+                 "summary": "jackson-databind: Path Deserialization Missing Scheme Allowlist",
+                 "details": "### Summary\\n\\nA `java.nio.file.Path` field bound from untrusted JSON...  ",
+                 "references": [
+                   {"type": "WEB", "url": "https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-wjgm-6hv5-3cvf"},
+                   {"type": "WEB", "url": "https://github.com/FasterXML/jackson-databind/commit/cc6756b61ed90b6b9227f670e0408d5d9bd48551"},
+                   {"type": "FIX", "url": "https://github.com/FasterXML/jackson-databind/pull/6129"},
+                   {"type": "PACKAGE", "url": "https://github.com/FasterXML/jackson-databind"}]}
+                """);
+
+        // The summary stays the description the feed shows; the details are what an assessment reads (E11-5).
+        assertThat(advisory.description()).isEqualTo("jackson-databind: Path Deserialization Missing Scheme Allowlist");
+        assertThat(advisory.details()).isEqualTo("### Summary\n\nA `java.nio.file.Path` field bound from untrusted JSON...");
+        // GHSA marks its fix commits WEB, not FIX: every commit among the references counts.
+        assertThat(advisory.fixCommits()).containsExactly(
+                "https://github.com/FasterXML/jackson-databind/commit/cc6756b61ed90b6b9227f670e0408d5d9bd48551");
+    }
+
+    @Test
+    void detailsThatAreAlreadyTheDescriptionAreNotKeptTwice() {
+        Advisory advisory = parser.parse("{\"id\": \"PYSEC-1\", \"details\": \"Only details.\"}");
+        assertThat(advisory.description()).isEqualTo("Only details.");
+        assertThat(advisory.details()).isNull();
+        assertThat(advisory.fixCommits()).isEmpty();
+    }
+
+    @Test
     void rejectsADocumentWithNoId() {
         assertThatThrownBy(() -> parser.parse("{\"modified\":\"2024-01-01T00:00:00Z\"}"))
                 .isInstanceOf(IllegalArgumentException.class);

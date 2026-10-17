@@ -254,6 +254,49 @@ export interface Reachability {
   usage: CodeUsage | null;
 }
 
+/** The AI's suggestion on whether the code calls the vulnerable function (E11-5): it does, it doesn't, or can't tell. */
+export type ReachabilityVerdict = "CALLED" | "NOT_CALLED" | "CANT_TELL";
+
+/** Lines the AI's answer cites, linked at the commit the code was read at. */
+export interface CitedLines {
+  path: string;
+  startLine: number;
+  endLine: number;
+  /** The use, match or import the lines surround; the link points at it. */
+  line: number;
+  url: string | null;
+}
+
+/** A name the code was searched for (one the advisory or its fix writes), and how often it was found. */
+export interface ReachabilitySearch {
+  term: string;
+  lines: number;
+  files: number;
+}
+
+/**
+ * One package of a vulnerability in one service: the AI's suggestion on whether the code uses the vulnerable function,
+ * feature or condition, with the lines it cites, what a reviewer should check and what the code was searched for — a
+ * suggestion that changes no score — or, not assessed, why.
+ */
+export interface ReachabilityAssessmentItem {
+  serviceId: string;
+  ecosystem: string;
+  packageName: string;
+  status: "ASSESSED" | "NOT_ASSESSED";
+  verdict: ReachabilityVerdict | null;
+  rationale: string | null;
+  citedLines: CitedLines[];
+  /** What a reviewer should verify that the lines the AI read can't show. */
+  checks: string[];
+  searches: ReachabilitySearch[];
+  assessedAt: string | null;
+  /** Why it isn't assessed. */
+  reason: string | null;
+  /** Whether asking the AI can answer it (the code imports the package itself). */
+  assessable: boolean;
+}
+
 export interface BusinessServiceInput {
   name: string;
   criticality: BusinessCriticality;

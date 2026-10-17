@@ -6,9 +6,12 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import com.aegis.core.actions.assess.ReachabilityAssessment;
+import com.aegis.core.actions.assess.ReachabilityAssessments;
 import com.aegis.core.matching.MatchingDtos.ChangeRef;
 import com.aegis.core.matching.MatchingDtos.EvidenceChain;
 import com.aegis.core.matching.MatchingDtos.OwnerRef;
@@ -100,6 +103,36 @@ public final class DraftEvidence {
             protectedLines = lines.stream().map(line -> names.matcher(line).replaceAll(SensitiveText.REDACTED)).toList();
         }
         return SensitiveText.redact(protectedLines);
+    }
+
+    /**
+     * The AI's suggestion on whether the service's code uses the vulnerable part of a package (E11-5), one line per
+     * package — its answer, rationale and what a reviewer should check, or why there is none — and never the files or
+     * lines it read: drafts go to the AI provider and to the issue tracker.
+     */
+    private static final Map<ReachabilityAssessment.Verdict, String> VERDICT_WORDS = Map.of(
+            ReachabilityAssessment.Verdict.CALLED, "the code uses the vulnerable part",
+            ReachabilityAssessment.Verdict.NOT_CALLED, "the code doesn't use the vulnerable part",
+            ReachabilityAssessment.Verdict.CANT_TELL, "can't tell whether the code uses the vulnerable part");
+
+    public static List<String> assessments(List<ReachabilityAssessments.Item> items) {
+        List<String> lines = new ArrayList<>();
+        for (ReachabilityAssessments.Item item : items) {
+            String subject = "AI reachability suggestion for " + item.packageName() + ": ";
+            String checks = item.checks().isEmpty() ? ""
+                    : " To check: " + sentence(String.join("; ", item.checks().stream().map(String::strip)
+                            .map(check -> check.replaceAll("[.;]+$", "")).toList()));
+            lines.add(item.status() == ReachabilityAssessments.Status.ASSESSED
+                    ? subject + VERDICT_WORDS.get(item.verdict()) + ". " + sentence(item.rationale()) + checks
+                            + " A suggestion: it doesn't change the score."
+                    : subject + "not assessed. " + sentence(item.reason()));
+        }
+        return SensitiveText.redact(lines);
+    }
+
+    private static String sentence(String text) {
+        String stripped = text == null ? "" : text.strip();
+        return stripped.isEmpty() || stripped.matches(".*[.!?…]$") ? stripped : stripped + ".";
     }
 
     /** A quoted source passage must remain text when the memo is downloaded as Markdown. */
