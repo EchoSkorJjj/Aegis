@@ -1,10 +1,10 @@
 package com.usermgmt.identity.auth.mfa.webauthn;
 
-import org.springframework.data.jpa.repository.JpaRepository;
-
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+
+import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface WebauthnCredentialRepository extends JpaRepository<WebauthnCredential, UUID> {
 

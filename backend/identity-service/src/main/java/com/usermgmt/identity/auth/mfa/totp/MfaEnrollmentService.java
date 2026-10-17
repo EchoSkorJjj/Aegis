@@ -1,5 +1,9 @@
 package com.usermgmt.identity.auth.mfa.totp;
 
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
 import com.usermgmt.identity.audit.AuditEventType;
 import com.usermgmt.identity.audit.AuditService;
 import com.usermgmt.identity.auth.mfa.MfaDtos;
@@ -10,10 +14,6 @@ import com.usermgmt.identity.user.User;
 import com.usermgmt.identity.user.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.time.Instant;
-import java.util.List;
-import java.util.UUID;
 
 /**
  * Self-service enrollment for the authenticator (TOTP) factor and its backup codes. A pending

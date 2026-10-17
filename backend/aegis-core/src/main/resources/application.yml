@@ -4,6 +4,19 @@ server:
 spring:
   application:
     name: aegis-core
+  # @Scheduled work (the ingestion poll loop + every feed's normaliser) shares ONE scheduler thread by
+  # default, so a single long task starves the rest — the OSV bulk sync streams a multi-hundred-MB
+  # snapshot for minutes, during which no normaliser runs and no advisories are written. Give the
+  # scheduler a small pool so a long sync runs alongside the normalisers and the other feeds' polls.
+  task:
+    scheduling:
+      pool:
+        size: ${AEGIS_SCHEDULING_POOL_SIZE:6}
+  # Pagination: cap client-supplied page sizes so a large ?size= can't exhaust memory or the DB.
+  data:
+    web:
+      pageable:
+        max-page-size: 100
   # One PostgreSQL instance shared with identity-service; this service owns the `core` schema
   # (identity-service uses `public`). Plain relational store — RAG/pgvector lives in the ai-service.
   datasource:
@@ -38,6 +51,299 @@ aegis:
   ai:
     base-url: ${AI_SERVICE_URI:http://localhost:8083}
     service-token: ${AI_SERVICE_TOKEN:dev-internal-token-change-me}
+  # The AI's reachability suggestion (E11-5): what an advisory's fix commits changed, fetched as diffs from github.com
+  # and gitlab.com (public, no credentials) for the AI to read beside the advisory. Off, it reads the advisory alone.
+  assess:
+    fix-commits:
+      enabled: ${AEGIS_ASSESS_FIX_COMMITS_ENABLED:true}
+  # The GitHub App (GITHUB_APP.md): draft pull requests and SBOM clones, only through installations an
+  # organization admin has connected under Organization > Integrations (V22).
+  actions:
+    github:
+      enabled: ${AEGIS_GITHUB_ENABLED:false}
+      api-base-url: ${AEGIS_GITHUB_API_URL:https://api.github.com}
+      web-base-url: ${AEGIS_GITHUB_WEB_URL:https://github.com}
+      client-id: ${AEGIS_GITHUB_APP_CLIENT_ID:}
+      # Only for the admin's GitHub sign-in when connecting; never logged.
+      client-secret: ${AEGIS_GITHUB_APP_CLIENT_SECRET:}
+      # The App's key, unencrypted PKCS#8 PEM: either the PEM text itself (how a secret manager hands it to a
+      # container) or a file holding it. The text wins when both are set. Never logged.
+      private-key: ${AEGIS_GITHUB_APP_PRIVATE_KEY:}
+      private-key-path: ${AEGIS_GITHUB_APP_PRIVATE_KEY_PATH:}
+      # Must equal the App's registered callback URL: the frontend page GitHub sends the admin back to.
+      callback-url: ${AEGIS_GITHUB_CALLBACK_URL:http://localhost:3000/admin/integrations/github/callback}
+      hosts: ${AEGIS_GITHUB_HOSTS:github.com}
+    # Jira (JIRA.md): where approved risk tickets are filed, through the site each organization's admin
+    # connected under Organization > Integrations (V24). Its tokens are sealed with aegis.secrets.key.
+    jira:
+      enabled: ${AEGIS_JIRA_ENABLED:false}
+      client-id: ${AEGIS_JIRA_CLIENT_ID:}
+      # Only for exchanging the admin's consent and renewing tokens; never logged.
+      client-secret: ${AEGIS_JIRA_CLIENT_SECRET:}
+      # Must equal the Atlassian app's callback URL: the frontend page Atlassian sends the admin back to.
+      callback-url: ${AEGIS_JIRA_CALLBACK_URL:http://localhost:3000/admin/integrations/jira/callback}
+      auth-base-url: ${AEGIS_JIRA_AUTH_URL:https://auth.atlassian.com}
+      api-base-url: ${AEGIS_JIRA_API_URL:https://api.atlassian.com}
+  # Seals the integration credentials Aegis keeps (Jira's tokens): base64 of 32 random bytes
+  # (openssl rand -base64 32). Required when Jira is enabled; keep it out of the repository.
+  secrets:
+    key: ${AEGIS_SECRETS_KEY:}
+  # identity-service's member directory — e.g. to verify that a service's assigned owner is a member of
+  # the caller's organization holding the SERVICE_OWNER role. Called with the CALLER's own access token
+  # (token relay), so identity-service applies the caller's org scope; never with a service credential.
+  identity:
+    base-url: ${IDENTITY_BASE_URL:http://localhost:8081}
+    # The token presented to identity-service's internal API (X-Service-Token), used only where no user is
+    # asking: the owner notifications below. identity-service must hold the same one
+    # (IDENTITY_INTERNAL_SERVICE_TOKEN). Keep it out of the repository.
+    service-token: ${IDENTITY_SERVICE_TOKEN:}
+  # Owner notifications (E9 story 5): each service owner is told once, in the app and by email through
+  # identity-service, about every item in their services that needs a decision. Off by default; needs the
+  # service token above. The job runs on the instance holding the scheduler lease.
+  notifications:
+    enabled: ${AEGIS_NOTIFICATIONS_ENABLED:false}
+    interval: ${AEGIS_NOTIFICATIONS_INTERVAL:PT5M}
+    initial-delay: ${AEGIS_NOTIFICATIONS_INITIAL_DELAY:PT1M}
+  # Opt-in: load the fictional demo estate (classpath:demo/) at startup. Idempotent; dev/demo only.
+  demo:
+    seed-enabled: ${AEGIS_DEMO_SEED_ENABLED:false}
+  inventory:
+    # Generate a service's CycloneDX SBOM straight from a Git repo: shallow-clone it and run syft (a
+    # STATIC cataloguer — it never runs a package manager or the repo's own code). Needs git + syft on
+    # the image (the Dockerfile installs both). Every axis is bounded; disable to hide the import from a
+    # linked repository (the CycloneDX upload API stays).
+    sbom-generation:
+      enabled: ${AEGIS_SBOM_GENERATION_ENABLED:true}
+      # Hosts that may be linked and cloned (public, or private with a per-import access token or the
+      # GitHub App). Never an internal or arbitrary host — this is the SSRF boundary. Add a self-hosted
+      # GitLab/Gitea/Bitbucket host here.
+      allowed-hosts: ${AEGIS_SBOM_ALLOWED_HOSTS:github.com,gitlab.com,bitbucket.org}
+      git-path: ${AEGIS_SBOM_GIT_PATH:git}
+      syft-path: ${AEGIS_SBOM_SYFT_PATH:syft}
+      clone-timeout: ${AEGIS_SBOM_CLONE_TIMEOUT:PT90S}
+      scan-timeout: ${AEGIS_SBOM_SCAN_TIMEOUT:PT180S}
+      # Reject a checkout larger than this before syft walks it (default 512 MiB).
+      max-repo-bytes: ${AEGIS_SBOM_MAX_REPO_BYTES:536870912}
+      # Cap the SBOM syft emits before it is parsed into memory (default 64 MiB).
+      max-sbom-bytes: ${AEGIS_SBOM_MAX_SBOM_BYTES:67108864}
+  # Impact scoring (E7). Every number the model multiplies, overridable per deployment: the weighting
+  # is the part a security team argues with, not the arithmetic. Each factor is a multiplier in [0,1],
+  # so the score stays a 0-100 percentage of the worst case. Omit any entry to keep its default, and
+  # omit the whole block to get the shipped model.
+  scoring:
+    # Every default below is calibrated against the demo dataset (CS203-73) — the anchors it must satisfy,
+    # the resulting demo scores, and why each number is what it is are in aegis-core's
+    # SCORING-CALIBRATION.md, and ScoringCalibrationTest fails the build if a retune breaks an anchor.
+    # How much of an advisory's severity a service's business tier retains.
+    criticality:
+      critical: ${AEGIS_SCORING_CRITICALITY_CRITICAL:1.0}
+      high: ${AEGIS_SCORING_CRITICALITY_HIGH:0.8}
+      medium: ${AEGIS_SCORING_CRITICALITY_MEDIUM:0.5}
+      low: ${AEGIS_SCORING_CRITICALITY_LOW:0.25}
+    # How much an attacker's reach is worth — CVSS's Attack Vector by another name, so INTERNAL takes CVSS
+    # v3.1's own Adjacent-vs-Network ratio (0.9). The floor is well above zero: an isolated service is not
+    # invulnerable, an insider or a compromised neighbour still reaches it. Applied to vulnerabilities
+    # only: a vendor outage takes an internal service down as surely as an internet-facing one.
+    exposure:
+      internet-facing: ${AEGIS_SCORING_EXPOSURE_INTERNET_FACING:1.0}
+      internal: ${AEGIS_SCORING_EXPOSURE_INTERNAL:0.9}
+      isolated: ${AEGIS_SCORING_EXPOSURE_ISOLATED:0.5}
+    # Discount applied for a match's confidence. Both 1.0 by default — confidence answers whether the
+    # match applies, not how bad it is, and a POSSIBLE row is already flagged for review. Lower
+    # `possible` to rank unreviewed matches below proven ones.
+    confidence:
+      confirmed: ${AEGIS_SCORING_CONFIDENCE_CONFIRMED:1.0}
+      possible: ${AEGIS_SCORING_CONFIDENCE_POSSIBLE:1.0}
+    # Whether the service's code reaches the vulnerable package (E11-4): a vulnerability in a package the code never
+    # imports, nor anything that pulls it in, keeps `not-imported` of its score — 0.8, a band lower at most, like a
+    # step on criticality or exposure. Unknown (the code wasn't read, or Aegis can't be sure) always scores like
+    # `imported`, so no score drops without evidence, and `not-imported` is held at or below `imported`.
+    reachability:
+      imported: ${AEGIS_SCORING_REACHABILITY_IMPORTED:1.0}
+      not-imported: ${AEGIS_SCORING_REACHABILITY_NOT_IMPORTED:0.8}
+    # Severity words for a signal with no CVSS (a vendor outage, an un-scored CVE), by the feed's own
+    # vocabulary. NVD's critical/high/medium/low and Statuspage's critical/major/minor/none ship with
+    # defaults (see ScoringProperties); add a key here only for a feed that speaks a different word,
+    # e.g. `severity-label.sev1: 0.9`. Each value is a [0,1] multiplier; an unrecognised word falls
+    # back to unknown-severity-factor.
+    # severity-label:
+    #   sev1: 0.9
+    # Applied when a signal carries neither a CVSS score nor a severity label we recognise. Neutral,
+    # never zero: not knowing how bad something is must not rank it as harmless.
+    unknown-severity-factor: ${AEGIS_SCORING_UNKNOWN_SEVERITY_FACTOR:0.5}
+    # Lower bound of each impact tier on the 0-100 scale: the CVSS v3.1 bands (9.0/7.0/4.0) scaled, so on
+    # a CRITICAL internet-facing service the tier is the published rating. Raise them for a stricter queue. Must be a
+    # descending ladder within 0-100 (critical >= high >= medium >= low); a non-descending or
+    # out-of-range ladder fails fast at startup rather than mis-tiering every score in silence.
+    tiers:
+      critical: ${AEGIS_SCORING_TIER_CRITICAL:90.0}
+      high: ${AEGIS_SCORING_TIER_HIGH:70.0}
+      medium: ${AEGIS_SCORING_TIER_MEDIUM:40.0}
+      low: ${AEGIS_SCORING_TIER_LOW:10.0}
+    # Below this score a result is returned but marked immaterial — the noise control, not a filter.
+    materiality-threshold: ${AEGIS_SCORING_MATERIALITY_THRESHOLD:10.0}
+    rollup:
+      # Hard ceiling on how many signals one roll-up request may score: each costs a match and a graph
+      # traversal, so this bounds the work a single call can ask for. Past it the response says so.
+      max-signals: ${AEGIS_SCORING_ROLLUP_MAX_SIGNALS:200}
+      # How far back a roll-up reaches when the caller gives no `from`.
+      default-window: ${AEGIS_SCORING_ROLLUP_WINDOW:P30D}
+  # The scheduled jobs below (feed polls, normalisers, the OSV sync) run on one instance at a time: the one
+  # holding a lease in the database (SchedulerLease, V30), so a rolling deploy's overlap or a second instance
+  # never runs a job twice. The holder renews it every lease-renewal; if it dies, another takes over once
+  # lease-duration passes. A stopping instance gives it up at once.
+  scheduling:
+    lease-duration: ${AEGIS_SCHEDULER_LEASE_DURATION:PT2M}
+    lease-renewal: ${AEGIS_SCHEDULER_LEASE_RENEWAL:PT30S}
+  # Ingestion framework (E5). Connectors register as IngestionSource beans and the scheduler
+  # discovers them. Disable with enabled=false; poll-interval is an ISO-8601 duration.
+  ingestion:
+    enabled: ${AEGIS_INGESTION_ENABLED:true}
+    poll-interval: ${AEGIS_INGESTION_POLL_INTERVAL:PT15M}
+    # How many times a raw event may fail normalisation transiently (a DB blip, a lost upsert race)
+    # before the drainer gives up and drops it. A definitively malformed payload is dropped on the first try.
+    normalize-max-attempts: 5
+    retry:
+      max-attempts: 3
+      initial-delay: PT1S
+      multiplier: 2.0
+      max-delay: PT30S
+    # NVD CVE API 2.0 connector. Off by default so the test suite and a plain local run never reach
+    # out to nvd.nist.gov; Docker Compose turns it on. The API key is optional — it raises NVD's rate
+    # limit from 5 to 50 requests per rolling 30s. Supply it through the environment, never here.
+    nvd:
+      enabled: ${AEGIS_INGESTION_NVD_ENABLED:false}
+      base-url: ${AEGIS_NVD_BASE_URL:https://services.nvd.nist.gov/rest/json/cves/2.0}
+      api-key: ${AEGIS_NVD_API_KEY:}
+      # How far back the first poll reaches, before a watermark exists. NVD caps a window at 120 days.
+      initial-window: ${AEGIS_NVD_INITIAL_WINDOW:P2D}
+      # Re-poll slightly before the watermark so an advisory revised mid-poll is never skipped.
+      overlap: PT10M
+      results-per-page: 1000
+      max-pages: 10
+      # NVD asks for >=6s between unauthenticated requests.
+      page-delay: PT6S
+      connect-timeout: PT5S
+      read-timeout: PT30S
+      # Feed content is untrusted: cap what a single CVE may push into the raw-event store. A CVE
+      # enumerating thousands of CPEs exceeds 1 MB, so this is deliberately well above the typical size.
+      max-payload-bytes: 5242880
+      # Cap the whole HTTP response (a page of up to 1000 CVEs), distinct from the per-CVE cap above,
+      # so a compromised endpoint cannot stream an unbounded body into memory.
+      max-response-bytes: 67108864
+      # Waive the SSRF guard's public-address check — set true only for an internal/mirrored NVD host.
+      allow-private-hosts: false
+      # Cadence of the raw-event -> advisory drain, and how many events one drain handles.
+      normalize-interval: ${AEGIS_NVD_NORMALIZE_INTERVAL:PT1M}
+      normalize-batch-size: 200
+    # OSV connector (osv.dev): ecosystem-native advisories (npm, PyPI, crates.io, RubyGems, Go, Maven)
+    # keyed by purl — osv.dev aggregates GHSA / PyPA / RustSec / RubySec / Go. Off by default. List only
+    # the ecosystems the estate uses: each is a full bulk-snapshot download, so keep the set small and
+    # poll infrequently.
+    osv:
+      enabled: ${AEGIS_INGESTION_OSV_ENABLED:false}
+      base-url: ${AEGIS_OSV_BASE_URL:https://osv-vulnerabilities.storage.googleapis.com}
+      # Exact OSV bucket names, comma-separated (e.g. npm,PyPI,crates.io,RubyGems,Go,Maven).
+      ecosystems: ${AEGIS_OSV_ECOSYSTEMS:npm,PyPI,crates.io,RubyGems,Go,Maven}
+      # OSV's malicious-package reports (MAL-*) are a supply-chain-malware database — often the large
+      # majority of an ecosystem's records — not vulnerability advisories, and they never match a curated
+      # inventory. Excluded by default so the feed is vulnerabilities (CVE/GHSA); set true for the
+      # separate use case of flagging a known-malicious package that slipped into the estate.
+      include-malicious: ${AEGIS_OSV_INCLUDE_MALICIOUS:false}
+      # OSV self-schedules its bulk sync on this cadence, independent of the 15-minute feed poll loop.
+      # Snapshots change slowly, and one sync downloads every listed ecosystem — keep it a day or more.
+      poll-interval: ${AEGIS_OSV_POLL_INTERVAL:P1D}
+      # Wait this long after startup before the first sync, so boot (and any restart) isn't slowed by it.
+      initial-delay: ${AEGIS_OSV_INITIAL_DELAY:PT30S}
+      connect-timeout: PT5S
+      read-timeout: PT60S
+      # Per-poll safety bound on records processed per ecosystem (well above a real export's size).
+      max-records-per-ecosystem: 200000
+      # Untrusted third-party document: cap one record's JSON.
+      max-payload-bytes: 4194304
+      normalize-batch-size: 200
+      # The SYNC is rare (poll-interval, daily), but a sync drops a large backlog of raw events, so the
+      # normaliser must drain briskly to clear it — a full snapshot is ~200k records. Keep this short
+      # (like NVD); fixed-delay means back-to-back runs never overlap, and it idles once caught up.
+      normalize-interval: ${AEGIS_OSV_NORMALIZE_INTERVAL:PT1M}
+      # Waive the SSRF public-address check — true only for an internal/mirrored OSV host (and tests).
+      allow-private-hosts: false
+
+    # Vendor status/outage connector. Off by default, like the NVD feed, so nothing reaches out to
+    # third-party status pages during tests or a plain local run.
+    #
+    # The vendor list is YAML rather than env vars because each entry needs four fields. `name` is
+    # what matching will resolve against the inventory's registered vendors, so it must match how the
+    # vendor is named there — these defaults mirror the demo estate. Replace them per deployment with
+    # the suppliers the estate actually depends on.
+    vendor-status:
+      enabled: ${AEGIS_INGESTION_VENDOR_STATUS_ENABLED:false}
+      connect-timeout: PT5S
+      read-timeout: PT15S
+      # Untrusted third-party documents: cap what one vendor's page may push into the raw store.
+      max-payload-bytes: 2097152
+      # Cap the whole HTTP response (>= max-payload-bytes); bound and re-check redirects for SSRF;
+      # allow-private-hosts waives the public-address check (internal/mirrored pages only).
+      max-response-bytes: 8388608
+      max-redirects: 5
+      allow-private-hosts: false
+      normalize-interval: ${AEGIS_VENDOR_STATUS_NORMALIZE_INTERVAL:PT1M}
+      normalize-batch-size: 50
+      vendors:
+        - key: aws
+          name: Amazon Web Services
+          url: https://status.aws.amazon.com/rss/all.rss
+          format: rss
+        - key: cloudflare
+          name: Cloudflare
+          url: https://www.cloudflarestatus.com/api/v2/incidents.json
+          format: statuspage
+        - key: stripe
+          name: Stripe
+          url: https://www.stripestatus.com/api/v2/incidents.json
+          format: statuspage
+        - key: auth0
+          name: Auth0
+          url: https://auth0.statuspage.io/api/v2/incidents.json
+          format: statuspage
+        - key: snowflake
+          name: Snowflake
+          url: https://status.snowflake.com/api/v2/incidents.json
+          format: statuspage
+    # Security news / threat intel connector. Off by default like the other feeds.
+    #
+    # Only credential-free RSS/Atom feeds: a "news API" needing a key would put a secret in config,
+    # and every worthwhile security publisher offers a feed. Articles are matched to the estate by
+    # the CVE identifiers they mention, extracted by pattern — never by a model.
+    news:
+      enabled: ${AEGIS_INGESTION_NEWS_ENABLED:false}
+      connect-timeout: PT5S
+      read-timeout: PT15S
+      # Untrusted third-party prose: cap what one publisher's document may push into the raw store.
+      max-payload-bytes: 4194304
+      # Cap the whole HTTP response (>= max-payload-bytes); bound and re-check redirects for SSRF;
+      # allow-private-hosts waives the public-address check (internal/mirrored feeds only).
+      max-response-bytes: 8388608
+      max-redirects: 5
+      allow-private-hosts: false
+      normalize-interval: ${AEGIS_NEWS_NORMALIZE_INTERVAL:PT1M}
+      normalize-batch-size: 50
+      feeds:
+        - key: cisa
+          name: CISA Cybersecurity Advisories
+          url: https://www.cisa.gov/cybersecurity-advisories/all.xml
+        - key: thehackernews
+          name: The Hacker News
+          url: https://feeds.feedburner.com/TheHackersNews
+        - key: bleepingcomputer
+          name: BleepingComputer
+          url: https://www.bleepingcomputer.com/feed/
+        - key: sans-isc
+          name: SANS Internet Storm Center
+          url: https://isc.sans.edu/rssfeed.xml
+        - key: krebs
+          name: Krebs on Security
+          url: https://krebsonsecurity.com/feed/
 
 springdoc:
   swagger-ui:
@@ -61,3 +367,10 @@ management:
     export:
       zipkin:
         endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+
+logging:
+  level:
+    # PDFBox (evidence export) warns on every standard font that no system font backs it: that only matters for
+    # drawing glyphs, which Aegis never does (the PDF names Helvetica and the reader's viewer supplies it).
+    org.apache.pdfbox.pdmodel.font.PDType1Font: error
+    org.apache.pdfbox.pdmodel.font.FileSystemFontProvider: warn

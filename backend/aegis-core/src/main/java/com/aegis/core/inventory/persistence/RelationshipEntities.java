@@ -1,17 +1,24 @@
 package com.aegis.core.inventory.persistence;
 
+import java.io.Serializable;
+import java.time.Instant;
+import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.IdClass;
 import jakarta.persistence.Table;
-import org.hibernate.annotations.CreationTimestamp;
-import org.hibernate.annotations.SourceType;
 
-import java.io.Serializable;
-import java.time.Instant;
-import java.util.Objects;
-import java.util.UUID;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.SourceType;
+import org.hibernate.type.SqlTypes;
+
+// Relationship rows carry org_id (ADR §6) so tenant scoping and RLS reach the edges too, not just the
+// entities. Both endpoints of an edge are always in the same org, so it equals either endpoint's org.
 
 @Entity
 @Table(name = "business_service_components")
@@ -19,15 +26,22 @@ import java.util.UUID;
 class ServiceComponentEntity {
     @Id @Column(name = "business_service_id") private UUID businessServiceId;
     @Id @Column(name = "component_id") private UUID componentId;
+    @Column(name = "org_id", nullable = false) private UUID orgId;
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "manifest_paths", nullable = false, columnDefinition = "text[]") private String[] manifestPaths = new String[0];
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "lockfile_paths", nullable = false, columnDefinition = "text[]") private String[] lockfilePaths = new String[0];
+    @Column(name = "from_repository", nullable = false) private boolean fromRepository;
     @CreationTimestamp(source = SourceType.DB)
     @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
 
     protected ServiceComponentEntity() {
     }
 
-    ServiceComponentEntity(UUID businessServiceId, UUID componentId) {
+    ServiceComponentEntity(UUID businessServiceId, UUID componentId, UUID orgId) {
         this.businessServiceId = businessServiceId;
         this.componentId = componentId;
+        this.orgId = orgId;
     }
 
     UUID getBusinessServiceId() {
@@ -36,6 +50,32 @@ class ServiceComponentEntity {
 
     UUID getComponentId() {
         return componentId;
+    }
+
+    List<String> getManifestPaths() {
+        return manifestPaths == null ? List.of() : List.of(manifestPaths);
+    }
+
+    void setManifestPaths(List<String> manifestPaths) {
+        this.manifestPaths = manifestPaths.toArray(String[]::new);
+    }
+
+    /** The JavaScript lockfiles resolving it, as the last import from the repository read them (V39). */
+    List<String> getLockfilePaths() {
+        return lockfilePaths == null ? List.of() : List.of(lockfilePaths);
+    }
+
+    void setLockfilePaths(List<String> lockfilePaths) {
+        this.lockfilePaths = lockfilePaths.toArray(String[]::new);
+    }
+
+    /** An import from the service's repository linked it, so a later one unlinks it once the repository drops it. */
+    boolean isFromRepository() {
+        return fromRepository;
+    }
+
+    void markFromRepository() {
+        this.fromRepository = true;
     }
 
     static final class Key implements Serializable {
@@ -67,15 +107,17 @@ class ServiceComponentEntity {
 class ServiceVendorEntity {
     @Id @Column(name = "business_service_id") private UUID businessServiceId;
     @Id @Column(name = "vendor_id") private UUID vendorId;
+    @Column(name = "org_id", nullable = false) private UUID orgId;
     @CreationTimestamp(source = SourceType.DB)
     @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
 
     protected ServiceVendorEntity() {
     }
 
-    ServiceVendorEntity(UUID businessServiceId, UUID vendorId) {
+    ServiceVendorEntity(UUID businessServiceId, UUID vendorId, UUID orgId) {
         this.businessServiceId = businessServiceId;
         this.vendorId = vendorId;
+        this.orgId = orgId;
     }
 
     UUID getBusinessServiceId() {
@@ -102,15 +144,17 @@ class ServiceVendorEntity {
 class ServiceOwnerEntity {
     @Id @Column(name = "business_service_id") private UUID businessServiceId;
     @Id @Column(name = "owner_id") private UUID ownerId;
+    @Column(name = "org_id", nullable = false) private UUID orgId;
     @CreationTimestamp(source = SourceType.DB)
     @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
 
     protected ServiceOwnerEntity() {
     }
 
-    ServiceOwnerEntity(UUID businessServiceId, UUID ownerId) {
+    ServiceOwnerEntity(UUID businessServiceId, UUID ownerId, UUID orgId) {
         this.businessServiceId = businessServiceId;
         this.ownerId = ownerId;
+        this.orgId = orgId;
     }
 
     UUID getBusinessServiceId() {
@@ -137,15 +181,17 @@ class ServiceOwnerEntity {
 class ComponentDependencyEntity {
     @Id @Column(name = "component_id") private UUID componentId;
     @Id @Column(name = "dependency_id") private UUID dependencyId;
+    @Column(name = "org_id", nullable = false) private UUID orgId;
     @CreationTimestamp(source = SourceType.DB)
     @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
 
     protected ComponentDependencyEntity() {
     }
 
-    ComponentDependencyEntity(UUID componentId, UUID dependencyId) {
+    ComponentDependencyEntity(UUID componentId, UUID dependencyId, UUID orgId) {
         this.componentId = componentId;
         this.dependencyId = dependencyId;
+        this.orgId = orgId;
     }
 
     UUID getComponentId() {
@@ -163,5 +209,151 @@ class ComponentDependencyEntity {
         Key(UUID componentId, UUID dependencyId) { this.componentId = componentId; this.dependencyId = dependencyId; }
         @Override public boolean equals(Object o) { return o instanceof Key key && Objects.equals(componentId, key.componentId) && Objects.equals(dependencyId, key.dependencyId); }
         @Override public int hashCode() { return Objects.hash(componentId, dependencyId); }
+    }
+}
+
+/**
+ * A dependency edge one service's SBOM declared: that service's resolution, which another service's lockfile may
+ * resolve differently. Edges added by hand, which hold in every service, are {@link ComponentDependencyEntity}.
+ */
+@Entity
+@Table(name = "business_service_component_dependencies")
+@IdClass(ServiceDependencyEntity.Key.class)
+class ServiceDependencyEntity {
+    @Id @Column(name = "business_service_id") private UUID businessServiceId;
+    @Id @Column(name = "component_id") private UUID componentId;
+    @Id @Column(name = "dependency_id") private UUID dependencyId;
+    @Column(name = "org_id", nullable = false) private UUID orgId;
+    @Column(name = "from_repository", nullable = false) private boolean fromRepository;
+    @CreationTimestamp(source = SourceType.DB)
+    @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
+
+    protected ServiceDependencyEntity() {
+    }
+
+    ServiceDependencyEntity(UUID businessServiceId, UUID componentId, UUID dependencyId, UUID orgId,
+            boolean fromRepository) {
+        this.businessServiceId = businessServiceId;
+        this.componentId = componentId;
+        this.dependencyId = dependencyId;
+        this.orgId = orgId;
+        this.fromRepository = fromRepository;
+    }
+
+    UUID getBusinessServiceId() {
+        return businessServiceId;
+    }
+
+    UUID getComponentId() {
+        return componentId;
+    }
+
+    UUID getDependencyId() {
+        return dependencyId;
+    }
+
+    /** An import from the service's repository declared it, so a later one removes it once no longer declared. */
+    boolean isFromRepository() {
+        return fromRepository;
+    }
+
+    void markFromRepository() {
+        this.fromRepository = true;
+    }
+
+    Key key() {
+        return new Key(businessServiceId, componentId, dependencyId);
+    }
+
+    static final class Key implements Serializable {
+        private UUID businessServiceId;
+        private UUID componentId;
+        private UUID dependencyId;
+
+        public Key() {
+        }
+
+        Key(UUID businessServiceId, UUID componentId, UUID dependencyId) {
+            this.businessServiceId = businessServiceId;
+            this.componentId = componentId;
+            this.dependencyId = dependencyId;
+        }
+
+        @Override public boolean equals(Object o) {
+            return o instanceof Key key && Objects.equals(businessServiceId, key.businessServiceId)
+                    && Objects.equals(componentId, key.componentId) && Objects.equals(dependencyId, key.dependencyId);
+        }
+
+        @Override public int hashCode() {
+            return Objects.hash(businessServiceId, componentId, dependencyId);
+        }
+    }
+}
+
+/**
+ * One module a service's code imports in one language, as the code scan of its last import from the repository found it
+ * (E11-3, V40): how many times, and the first sites, each {@code path:line}. Replaced whole at each such import.
+ */
+@Entity
+@Table(name = "service_imports")
+@IdClass(ServiceImportEntity.Key.class)
+class ServiceImportEntity {
+    @Id @Column(name = "business_service_id") private UUID businessServiceId;
+    @Id @Column(name = "language") private String language;
+    @Id @Column(name = "module") private String module;
+    @Column(name = "org_id", nullable = false) private UUID orgId;
+    @Column(name = "site_count", nullable = false) private int siteCount;
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "sites", nullable = false, columnDefinition = "text[]") private String[] sites = new String[0];
+
+    protected ServiceImportEntity() {
+    }
+
+    ServiceImportEntity(UUID businessServiceId, String language, String module, UUID orgId, int siteCount,
+            List<String> sites) {
+        this.businessServiceId = businessServiceId;
+        this.language = language;
+        this.module = module;
+        this.orgId = orgId;
+        this.siteCount = siteCount;
+        this.sites = sites.toArray(String[]::new);
+    }
+
+    UUID getBusinessServiceId() {
+        return businessServiceId;
+    }
+
+    String getLanguage() {
+        return language;
+    }
+
+    String getModule() {
+        return module;
+    }
+
+    int getSiteCount() {
+        return siteCount;
+    }
+
+    List<String> getSites() {
+        return sites == null ? List.of() : List.of(sites);
+    }
+
+    static final class Key implements Serializable {
+        private UUID businessServiceId;
+        private String language;
+        private String module;
+
+        public Key() {
+        }
+
+        @Override public boolean equals(Object o) {
+            return o instanceof Key key && Objects.equals(businessServiceId, key.businessServiceId)
+                    && Objects.equals(language, key.language) && Objects.equals(module, key.module);
+        }
+
+        @Override public int hashCode() {
+            return Objects.hash(businessServiceId, language, module);
+        }
     }
 }

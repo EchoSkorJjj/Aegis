@@ -1,5 +1,10 @@
 package com.usermgmt.identity.user;
 
+import java.time.Instant;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.UUID;
+
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
 import jakarta.persistence.ElementCollection;
@@ -10,13 +15,9 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
+
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
-
-import java.time.Instant;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.UUID;
 
 @Entity
 @Table(name = "users")
@@ -33,6 +34,14 @@ public class User {
 
     @Column(name = "display_name")
     private String displayName;
+
+    /**
+     * The org to activate on next login (ADR 0001) — remembered so a returning multi-org user lands
+     * back in their last-used workspace. Null for a brand-new or org-less user. Actual org membership
+     * lives in {@code organization_members}; this is only the default active-org hint.
+     */
+    @Column(name = "last_active_org_id")
+    private UUID lastActiveOrgId;
 
     @Column(nullable = false)
     private boolean enabled = true;
@@ -96,6 +105,14 @@ public class User {
 
     public void setDisplayName(String displayName) {
         this.displayName = displayName;
+    }
+
+    public UUID getLastActiveOrgId() {
+        return lastActiveOrgId;
+    }
+
+    public void setLastActiveOrgId(UUID lastActiveOrgId) {
+        this.lastActiveOrgId = lastActiveOrgId;
     }
 
     public boolean isEnabled() {

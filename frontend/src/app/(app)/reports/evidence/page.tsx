@@ -1,14 +1,9 @@
 import type { Metadata } from "next";
 
-import { PlaceholderPage } from "@/components/app/placeholder-page";
+import { EvidenceExport } from "@/components/app/reports/evidence-export";
 
 export const metadata: Metadata = { title: "Evidence" };
 
 export default function EvidencePage() {
-  return (
-    <PlaceholderPage
-      title="Evidence"
-      description="Exportable evidence per service and time window for audits and reviews."
-    />
-  );
+  return <EvidenceExport />;
 }

@@ -1,49 +1,48 @@
 package com.aegis.core.inventory;
 
-import com.aegis.core.common.ApiExceptions;
-import com.aegis.core.inventory.InventoryDtos.BusinessServiceResponse;
-import com.aegis.core.inventory.InventoryDtos.ComponentImpactResponse;
-import com.aegis.core.inventory.InventoryDtos.ComponentImpactedServiceResponse;
-import com.aegis.core.inventory.InventoryDtos.ImpactedServiceResponse;
-import com.aegis.core.inventory.InventoryDtos.OwnerResponse;
-import com.aegis.core.inventory.InventoryDtos.SoftwareComponentResponse;
-import com.aegis.core.inventory.InventoryDtos.ThirdPartyVendorResponse;
-import com.aegis.core.inventory.InventoryDtos.VendorImpactResponse;
-import com.aegis.core.inventory.InventoryStore.ServiceComponentLink;
+import java.util.List;
+import java.util.UUID;
+
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.Owner;
+import com.aegis.core.inventory.domain.RepositoryUrl;
+import com.aegis.core.inventory.domain.ServiceExposure;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
+import com.aegis.core.platform.common.ApiExceptions;
+import com.aegis.core.platform.identity.DirectoryUser;
+import com.aegis.core.platform.identity.IdentityDirectory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-import java.util.stream.Collectors;
-
 @Service
 public class InventoryService {
 
     private final InventoryStore store;
+    private final IdentityDirectory directory;
 
-    public InventoryService(InventoryStore store) {
+    public InventoryService(InventoryStore store, IdentityDirectory directory) {
         this.store = store;
+        this.directory = directory;
+    }
+
+    /** {@code exposure} may be null — the service then takes {@link BusinessService#DEFAULT_EXPOSURE}. */
+    @Transactional
+    public BusinessService createBusinessService(
+            String name, BusinessCriticality criticality, ServiceExposure exposure) {
+        BusinessService value = new BusinessService(
+                UUID.randomUUID(), name, criticality,
+                exposure == null ? BusinessService.DEFAULT_EXPOSURE : exposure);
+        rejectDuplicateBusinessServiceName(value.getName(), null);
+        return store.save(value);
     }
 
     @Transactional
     public BusinessService createBusinessService(String name, BusinessCriticality criticality) {
-        BusinessService value = new BusinessService(UUID.randomUUID(), name, criticality);
-        rejectDuplicateBusinessServiceName(value.getName(), null);
-        return store.save(value);
+        return createBusinessService(name, criticality, null);
     }
 
     @Transactional(readOnly = true)
@@ -53,22 +52,54 @@ public class InventoryService {
     }
 
     @Transactional(readOnly = true)
-    public Page<BusinessService> listBusinessServices(Pageable pageable) {
-        return store.findBusinessServices(pageable);
+    public Page<BusinessService> listBusinessServices(InventoryFilters.ServiceFilter filter, Pageable pageable) {
+        return store.findBusinessServices(filter, pageable);
+    }
+
+    /** {@code exposure} may be null — the service then keeps the exposure it already had. */
+    @Transactional
+    public BusinessService updateBusinessService(
+            UUID id, String name, BusinessCriticality criticality, ServiceExposure exposure) {
+        BusinessService value = getBusinessService(id);
+        if (exposure == null) {
+            value.update(name, criticality);
+        } else {
+            value.update(name, criticality, exposure);
+        }
+        rejectDuplicateBusinessServiceName(value.getName(), id);
+        return store.save(value);
     }
 
     @Transactional
     public BusinessService updateBusinessService(UUID id, String name, BusinessCriticality criticality) {
-        BusinessService value = getBusinessService(id);
-        value.update(name, criticality);
-        rejectDuplicateBusinessServiceName(value.getName(), id);
-        return store.save(value);
+        return updateBusinessService(id, name, criticality, null);
     }
 
     @Transactional
     public void deleteBusinessService(UUID id) {
         getBusinessService(id);
         store.deleteBusinessService(id);
+        // Its owner links go with it (DB cascade); anyone who owned only this service is no longer an owner.
+        store.deleteOrphanedOwners();
+    }
+
+    @Transactional
+    public BusinessService linkServiceRepository(UUID serviceId, RepositoryUrl url, String branch) {
+        BusinessService value = getBusinessService(serviceId);
+        String before = value.getRepositoryUrl() + " " + value.getRepositoryBranch();
+        value.linkRepository(url, branch);
+        if (!before.equals(value.getRepositoryUrl() + " " + value.getRepositoryBranch())) {
+            store.replaceServiceImports(serviceId, List.of()); // what the old repository's code imported
+        }
+        return store.save(value);
+    }
+
+    @Transactional
+    public void unlinkServiceRepository(UUID serviceId) {
+        BusinessService value = getBusinessService(serviceId);
+        value.unlinkRepository();
+        store.replaceServiceImports(serviceId, List.of());
+        store.save(value);
     }
 
     @Transactional
@@ -85,8 +116,13 @@ public class InventoryService {
     }
 
     @Transactional(readOnly = true)
-    public Page<SoftwareComponent> listSoftwareComponents(Pageable pageable) {
-        return store.findSoftwareComponents(pageable);
+    public Page<SoftwareComponent> listSoftwareComponents(InventoryFilters.ComponentFilter filter, Pageable pageable) {
+        return store.findSoftwareComponents(filter, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public List<String> listComponentEcosystems() {
+        return store.findComponentEcosystems();
     }
 
     @Transactional
@@ -117,8 +153,8 @@ public class InventoryService {
     }
 
     @Transactional(readOnly = true)
-    public Page<ThirdPartyVendor> listThirdPartyVendors(Pageable pageable) {
-        return store.findThirdPartyVendors(pageable);
+    public Page<ThirdPartyVendor> listThirdPartyVendors(InventoryFilters.NamedFilter filter, Pageable pageable) {
+        return store.findThirdPartyVendors(filter, pageable);
     }
 
     @Transactional
@@ -135,36 +171,16 @@ public class InventoryService {
         store.deleteThirdPartyVendor(id);
     }
 
-    @Transactional
-    public Owner createOwner(String name) {
-        Owner value = new Owner(UUID.randomUUID(), name);
-        rejectDuplicateOwnerName(value.getName(), null);
-        return store.save(value);
-    }
-
     @Transactional(readOnly = true)
     public Owner getOwner(UUID id) {
         return store.findOwner(id)
                 .orElseThrow(() -> new ApiExceptions.NotFound("Owner not found: " + id));
     }
 
+    /** The people currently accountable for at least one service in the caller's org. */
     @Transactional(readOnly = true)
-    public Page<Owner> listOwners(Pageable pageable) {
-        return store.findOwners(pageable);
-    }
-
-    @Transactional
-    public Owner updateOwner(UUID id, String name) {
-        Owner value = getOwner(id);
-        value.rename(name);
-        rejectDuplicateOwnerName(value.getName(), id);
-        return store.save(value);
-    }
-
-    @Transactional
-    public void deleteOwner(UUID id) {
-        getOwner(id);
-        store.deleteOwner(id);
+    public Page<Owner> listOwners(InventoryFilters.NamedFilter filter, Pageable pageable) {
+        return store.findOwners(filter, pageable);
     }
 
     @Transactional
@@ -217,16 +233,42 @@ public class InventoryService {
         return store.findServiceVendors(serviceId, pageable);
     }
 
+    /**
+     * Make an organization member one of a service's responsible owners. The member must exist in the
+     * caller's active org, be enabled, and hold the {@code SERVICE_OWNER} role — all verified against
+     * identity-service with the caller's own token, so a client cannot assign someone outside the org
+     * or without the role. There is one owner row per person per org; its name/email snapshot is
+     * refreshed on every assignment.
+     */
     @Transactional
-    public void addServiceOwner(UUID serviceId, UUID ownerId) {
+    public Owner assignServiceOwner(UUID serviceId, UUID userId) {
         getBusinessService(serviceId);
-        getOwner(ownerId);
-        if (store.serviceOwnerExists(serviceId, ownerId)) {
-            throw new ApiExceptions.Conflict("Business service already has that owner");
+        DirectoryUser member = directory.findMember(userId)
+                .orElseThrow(() -> new ApiExceptions.NotFound("No member of this organization with id " + userId));
+        if (!member.enabled()) {
+            throw new ApiExceptions.BadRequest(member.label() + "'s account is disabled");
         }
-        store.addServiceOwner(serviceId, ownerId);
+        if (!member.hasRole(InventoryRoles.SERVICE_OWNER)) {
+            throw new ApiExceptions.BadRequest(member.label() + " does not hold the Service Owner role");
+        }
+        Owner owner = store.findOwnerByUserId(userId).orElse(null);
+        if (owner == null) {
+            owner = new Owner(UUID.randomUUID(), userId, member.label(), member.email());
+        } else {
+            owner.refreshProfile(member.label(), member.email());
+        }
+        owner = store.save(owner);
+        if (store.serviceOwnerExists(serviceId, owner.getId())) {
+            throw new ApiExceptions.Conflict(owner.getName() + " already owns this service");
+        }
+        store.addServiceOwner(serviceId, owner.getId());
+        return owner;
     }
 
+    /**
+     * Remove an owner from a service. Someone no longer responsible for any service stops being an
+     * owner at all, so the owners list is exactly the people currently accountable for something.
+     */
     @Transactional
     public void removeServiceOwner(UUID serviceId, UUID ownerId) {
         getBusinessService(serviceId);
@@ -234,6 +276,16 @@ public class InventoryService {
         if (!store.removeServiceOwner(serviceId, ownerId)) {
             throw new ApiExceptions.NotFound("Business service owner relationship not found");
         }
+        store.deleteOrphanedOwners();
+    }
+
+    /**
+     * True when {@code userId} is one of the service's assigned owners in the caller's org — the check
+     * behind the owner-scoped permission to maintain a service ({@link InventoryRoles#COMPOSE}).
+     */
+    @Transactional(readOnly = true)
+    public boolean isAssignedOwner(UUID serviceId, UUID userId) {
+        return store.isServiceOwnedBy(serviceId, userId);
     }
 
     @Transactional(readOnly = true)
@@ -270,89 +322,6 @@ public class InventoryService {
         return store.findComponentDependencies(componentId, pageable);
     }
 
-    /**
-     * Services (and their owners) impacted by a component: those using it directly, plus those
-     * using some other component that depends on it, directly or transitively.
-     */
-    @Transactional(readOnly = true)
-    public ComponentImpactResponse getComponentImpact(UUID componentId) {
-        SoftwareComponent target = getSoftwareComponent(componentId);
-        Set<UUID> closure = resolveDependentClosure(componentId);
-        List<ServiceComponentLink> links = store.findServiceComponentLinks(closure);
-        if (links.isEmpty()) {
-            return new ComponentImpactResponse(SoftwareComponentResponse.from(target), List.of());
-        }
-
-        Map<UUID, List<ServiceComponentLink>> linksByService = new LinkedHashMap<>();
-        for (ServiceComponentLink link : links) {
-            linksByService.computeIfAbsent(link.serviceId(), key -> new ArrayList<>()).add(link);
-        }
-
-        Map<UUID, BusinessService> servicesById = store.findBusinessServicesByIds(linksByService.keySet());
-        Map<UUID, SoftwareComponent> componentsById = store.findSoftwareComponentsByIds(
-                links.stream().map(ServiceComponentLink::componentId).collect(Collectors.toSet()));
-        Map<UUID, List<Owner>> ownersByService = store.findOwnersForServices(linksByService.keySet());
-
-        List<ComponentImpactedServiceResponse> services = new ArrayList<>();
-        for (Map.Entry<UUID, List<ServiceComponentLink>> entry : linksByService.entrySet()) {
-            ServiceComponentLink chosen = entry.getValue().stream()
-                    .filter(link -> link.componentId().equals(componentId))
-                    .findFirst()
-                    .orElseGet(() -> entry.getValue().get(0));
-            services.add(new ComponentImpactedServiceResponse(
-                    BusinessServiceResponse.from(servicesById.get(entry.getKey())),
-                    toOwnerResponses(ownersByService.get(entry.getKey())),
-                    chosen.componentId().equals(componentId),
-                    SoftwareComponentResponse.from(componentsById.get(chosen.componentId()))));
-        }
-        services.sort(Comparator.comparing(response -> response.service().name(), String.CASE_INSENSITIVE_ORDER));
-
-        return new ComponentImpactResponse(SoftwareComponentResponse.from(target), services);
-    }
-
-    /** Services (and their owners) impacted by a vendor: those using it directly. */
-    @Transactional(readOnly = true)
-    public VendorImpactResponse getVendorImpact(UUID vendorId) {
-        ThirdPartyVendor vendor = getThirdPartyVendor(vendorId);
-        List<UUID> serviceIds = store.findServiceIdsForVendor(vendorId);
-        if (serviceIds.isEmpty()) {
-            return new VendorImpactResponse(ThirdPartyVendorResponse.from(vendor), List.of());
-        }
-
-        Map<UUID, BusinessService> servicesById = store.findBusinessServicesByIds(serviceIds);
-        Map<UUID, List<Owner>> ownersByService = store.findOwnersForServices(serviceIds);
-
-        List<ImpactedServiceResponse> services = serviceIds.stream()
-                .map(serviceId -> new ImpactedServiceResponse(
-                        BusinessServiceResponse.from(servicesById.get(serviceId)),
-                        toOwnerResponses(ownersByService.get(serviceId))))
-                .sorted(Comparator.comparing(response -> response.service().name(), String.CASE_INSENSITIVE_ORDER))
-                .toList();
-
-        return new VendorImpactResponse(ThirdPartyVendorResponse.from(vendor), services);
-    }
-
-    /** BFS over dependency edges: the component itself plus every component that depends on it. */
-    private Set<UUID> resolveDependentClosure(UUID componentId) {
-        Set<UUID> closure = new LinkedHashSet<>();
-        closure.add(componentId);
-        Set<UUID> frontier = Set.of(componentId);
-        while (!frontier.isEmpty()) {
-            Set<UUID> next = new LinkedHashSet<>();
-            for (UUID dependent : store.findComponentIdsDependingOn(frontier)) {
-                if (closure.add(dependent)) {
-                    next.add(dependent);
-                }
-            }
-            frontier = next;
-        }
-        return closure;
-    }
-
-    private static List<OwnerResponse> toOwnerResponses(List<Owner> owners) {
-        return owners == null ? List.of() : owners.stream().map(OwnerResponse::from).toList();
-    }
-
     private void rejectDuplicateBusinessServiceName(String name, UUID excludingId) {
         if (store.businessServiceNameExists(name, excludingId)) {
             throw new ApiExceptions.Conflict("Business service name already exists: " + name);
@@ -369,12 +338,6 @@ public class InventoryService {
     private void rejectDuplicateVendorName(String name, UUID excludingId) {
         if (store.thirdPartyVendorNameExists(name, excludingId)) {
             throw new ApiExceptions.Conflict("Third-party vendor name already exists: " + name);
-        }
-    }
-
-    private void rejectDuplicateOwnerName(String name, UUID excludingId) {
-        if (store.ownerNameExists(name, excludingId)) {
-            throw new ApiExceptions.Conflict("Owner name already exists: " + name);
         }
     }
 }

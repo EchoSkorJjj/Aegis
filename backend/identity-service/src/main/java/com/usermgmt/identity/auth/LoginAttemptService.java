@@ -1,12 +1,12 @@
 package com.usermgmt.identity.auth;
 
+import java.time.Duration;
+import java.util.UUID;
+
 import com.usermgmt.identity.user.UserRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.time.Duration;
-import java.util.UUID;
 
 /**
  * Tracks failed login attempts and applies temporary account lockout.

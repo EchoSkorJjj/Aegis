@@ -1,0 +1,38 @@
+{
+  "services": [
+    {
+      "name": "Payments API",
+      "criticality": "CRITICAL",
+      "exposure": "INTERNET_FACING",
+      "vendors": ["Stripe", "Amazon Web Services"],
+      "sbom": "demo/sbom/payments-api.cdx.json"
+    },
+    {
+      "name": "Order Service",
+      "criticality": "HIGH",
+      "exposure": "INTERNAL",
+      "vendors": ["Amazon Web Services"],
+      "sbom": "demo/sbom/order-service.cdx.json"
+    },
+    {
+      "name": "Customer Portal",
+      "criticality": "HIGH",
+      "exposure": "INTERNET_FACING",
+      "vendors": ["Cloudflare", "Auth0"],
+      "sbom": "demo/sbom/customer-portal.cdx.json"
+    },
+    {
+      "name": "Internal Reporting",
+      "criticality": "LOW",
+      "exposure": "ISOLATED",
+      "vendors": ["Snowflake"],
+      "sbom": "demo/sbom/internal-reporting.cdx.json"
+    },
+    {
+      "name": "Marketing Site",
+      "criticality": "MEDIUM",
+      "exposure": "INTERNET_FACING",
+      "vendors": ["Cloudflare"]
+    }
+  ]
+}

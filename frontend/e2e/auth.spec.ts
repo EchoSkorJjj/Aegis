@@ -17,8 +17,13 @@ test("a visitor can sign up, sign in (with email OTP), and sign out", async ({ p
   // Registration sends the visitor to the login page.
   await expect(page).toHaveURL(/\/login/);
 
-  // Sign in — completes the emailed one-time code, then lands on the app shell.
+  // Sign in — completes the emailed one-time code.
   await signIn(page, email, password);
+
+  // A brand-new account belongs to no organization yet: create one to enter the app (ADR 0001).
+  await expect(page.getByText(/create or join an organization/i)).toBeVisible();
+  await page.getByLabel("Organization name").fill("E2E Org");
+  await page.getByRole("button", { name: "Create organization" }).click();
   await expect(page.getByText(/your workspace content goes here/i)).toBeVisible();
 
   // Sign out from the sidebar account menu.

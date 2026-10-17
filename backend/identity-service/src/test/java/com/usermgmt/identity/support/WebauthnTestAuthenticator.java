@@ -1,5 +1,7 @@
 package com.usermgmt.identity.support;
 
+import java.util.List;
+
 import com.jayway.jsonpath.JsonPath;
 import com.webauthn4j.data.AuthenticatorSelectionCriteria;
 import com.webauthn4j.data.PublicKeyCredentialCreationOptions;
@@ -17,8 +19,6 @@ import com.webauthn4j.data.client.challenge.DefaultChallenge;
 import com.webauthn4j.test.EmulatorUtil;
 import com.webauthn4j.test.client.ClientPlatform;
 import com.webauthn4j.util.Base64UrlUtil;
-
-import java.util.List;
 
 /**
  * A software WebAuthn authenticator for integration tests. It wraps webauthn4j's emulator + client

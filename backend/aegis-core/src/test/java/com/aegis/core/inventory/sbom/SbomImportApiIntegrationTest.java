@@ -1,0 +1,192 @@
+package com.aegis.core.inventory.sbom;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.UUID;
+
+import com.aegis.core.inventory.InventoryService;
+import com.aegis.core.inventory.InventoryStore;
+import com.aegis.core.inventory.domain.BusinessCriticality;
+import com.aegis.core.platform.tenant.CurrentOrg;
+import com.aegis.core.support.AbstractInventoryIntegrationTest;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.startsWith;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+class SbomImportApiIntegrationTest extends AbstractInventoryIntegrationTest {
+
+    private static final String PATH = "/api/inventory/services/{serviceId}/sbom";
+
+    @Autowired
+    private InventoryService inventory;
+
+    @Autowired
+    private InventoryStore store;
+
+    @Autowired
+    private CurrentOrg currentOrg;
+
+    /**
+     * Asserts exact created/matched counts, which is only sound in a tenant no other test has imported
+     * the fixture into: its components have fixed coordinates, and the suite shares one database and —
+     * for inventory tests — one org. Components are per-org, so a fresh org guarantees a clean slate no
+     * matter which test classes ran first (the order differs between machines and CI runners).
+     */
+    @Test
+    void importsIdempotentlyAndFeedsTransitiveImpact() throws Throwable {
+        inFreshOrg(this::importTheFixtureTwiceAndTraceItsTransitiveImpact);
+    }
+
+    private void importTheFixtureTwiceAndTraceItsTransitiveImpact() throws Exception {
+        UUID serviceId = newService();
+        String sbom = fixture();
+
+        mvc.perform(post(PATH, serviceId).with(role("ANALYST")).contentType(MediaType.APPLICATION_JSON).content(sbom))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.serviceId").value(serviceId.toString()))
+                .andExpect(jsonPath("$.componentsCreated").value(4))
+                .andExpect(jsonPath("$.componentsMatched").value(0))
+                .andExpect(jsonPath("$.componentsSkipped").value(1))
+                .andExpect(jsonPath("$.dependenciesCreated").value(2))
+                .andExpect(jsonPath("$.serviceComponentsLinked").value(2));
+
+        // Re-import with the CycloneDX media type: everything matches, nothing new is written.
+        mvc.perform(post(PATH, serviceId).with(role("COMPLIANCE_ADMIN"))
+                        .contentType(SbomImportController.CYCLONEDX_JSON).content(sbom))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.componentsCreated").value(0))
+                .andExpect(jsonPath("$.componentsMatched").value(4))
+                .andExpect(jsonPath("$.dependenciesCreated").value(0))
+                .andExpect(jsonPath("$.serviceComponentsLinked").value(0));
+
+        mvc.perform(get("/api/inventory/services/{id}/components", serviceId).with(role("SERVICE_OWNER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[*].name", containsInAnyOrder("fixture-web-framework", "fixture-logger")));
+        assertThat(store.findSoftwareComponentByCoordinates("npm", "@fixture/http-client", "1.1.0")).isPresent();
+
+        // The fixture's edges are this service's own: another service importing the same fixture resolves nothing
+        // for it, so the use below is this service's alone.
+        String ours = "$.uses[?(@.service.id == '" + serviceId + "')]";
+        mvc.perform(get("/api/inventory/components/used-by").param("ecosystem", "npm").param("name", "fixture-redirects")
+                        .with(role("SERVICE_OWNER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath(ours + ".component.version", contains("0.9.0")))
+                .andExpect(jsonPath(ours + ".direct", contains(false)))
+                .andExpect(jsonPath(ours + ".through[0].name", contains("fixture-web-framework")));
+    }
+
+    /**
+     * Importing is governance work, or the service's own owner's (InventoryRoles.COMPOSE). A
+     * SERVICE_OWNER who is not assigned to this service is refused like any non-domain role; the
+     * owner-can-import path is covered by ServiceOwnershipIntegrationTest.
+     */
+    @Test
+    void refusesCallersWhoAreNeitherGovernanceNorAnOwnerOfTheService() throws Exception {
+        UUID serviceId = newService();
+        String sbom = fixture();
+
+        mvc.perform(post(PATH, serviceId).contentType(MediaType.APPLICATION_JSON).content(sbom))
+                .andExpect(status().isUnauthorized());
+        for (String role : new String[]{"SERVICE_OWNER", "USER", "ADMIN"}) {
+            mvc.perform(post(PATH, serviceId).with(role(role)).contentType(MediaType.APPLICATION_JSON).content(sbom))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.status").value(403));
+        }
+    }
+
+    @Test
+    void rejectsBadInputWithTheUniformErrorContract() throws Exception {
+        UUID serviceId = newService();
+
+        mvc.perform(post(PATH, serviceId).with(role("ANALYST")).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bomFormat\":\"SPDX\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", startsWith("Expected a CycloneDX")));
+        mvc.perform(post(PATH, serviceId).with(role("ANALYST")).contentType(MediaType.APPLICATION_JSON)
+                        .content("not json"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Malformed request"));
+        mvc.perform(post(PATH, UUID.randomUUID()).with(role("ANALYST")).contentType(MediaType.APPLICATION_JSON)
+                        .content(fixture()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404));
+    }
+
+    @Test
+    void aRejectedSbomWritesNothing() throws Exception {
+        UUID serviceId = newService();
+        String sbom = """
+                {"bomFormat":"CycloneDX","components":[
+                  {"bom-ref":"ok","name":"fixture-rollback-probe","version":"1.0.0","purl":"pkg:npm/fixture-rollback-probe@1.0.0"},
+                  {"bom-ref":"bad","name":"broken","version":"1","purl":"not-a-purl"}]}
+                """;
+
+        mvc.perform(post(PATH, serviceId).with(role("ANALYST")).contentType(MediaType.APPLICATION_JSON).content(sbom))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", startsWith("Invalid package URL")));
+
+        assertThat(store.findSoftwareComponentByCoordinates("npm", "fixture-rollback-probe", "1.0.0")).isEmpty();
+        mvc.perform(get("/api/inventory/services/{id}/components", serviceId).with(role("ANALYST")))
+                .andExpect(jsonPath("$.content.length()").value(0));
+    }
+
+    @Test
+    void importedComponentsAreVisibleInTheComponentList() throws Exception {
+        UUID serviceId = newService();
+        mvc.perform(post(PATH, serviceId).with(role("ANALYST")).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bomFormat\":\"CycloneDX\",\"components\":[{\"purl\":\"pkg:cargo/fixture-crate@0.3.1\"}]}"))
+                .andExpect(status().isOk());
+
+        mvc.perform(get("/api/inventory/services/{id}/components", serviceId).with(role("ANALYST")))
+                .andExpect(jsonPath("$.content[*].ecosystem", hasItem("cargo")));
+    }
+
+    private UUID newService() {
+        return inventory.createBusinessService("SBOM " + UUID.randomUUID(), BusinessCriticality.MEDIUM).getId();
+    }
+
+    /** Run {@code body} as a brand-new tenant, so it sees none of the rows other tests left behind. */
+    private void inFreshOrg(ThrowingRunnable body) throws Throwable {
+        Throwable[] thrown = new Throwable[1];
+        currentOrg.runAs(UUID.randomUUID(), () -> {
+            try {
+                body.run();
+            } catch (Throwable failure) {
+                thrown[0] = failure;
+            }
+        });
+        if (thrown[0] != null) {
+            throw thrown[0];
+        }
+    }
+
+    @FunctionalInterface
+    private interface ThrowingRunnable {
+        void run() throws Exception;
+    }
+
+    private static String fixture() throws IOException {
+        try (InputStream in = SbomImportApiIntegrationTest.class.getClassLoader()
+                .getResourceAsStream(SbomImportServiceTest.FIXTURE)) {
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    private static RequestPostProcessor role(String role) {
+        return jwt().authorities(new SimpleGrantedAuthority("ROLE_" + role));
+    }
+}

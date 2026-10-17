@@ -1,12 +1,12 @@
 package com.usermgmt.identity.auth.mfa.webauthn;
 
+import java.time.Instant;
+import java.util.UUID;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-
-import java.time.Instant;
-import java.util.UUID;
 
 /**
  * The pending WebAuthn registration challenge for a user, issued by {@code /register/begin} and

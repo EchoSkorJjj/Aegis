@@ -27,6 +27,7 @@ export const getAuthConfig = cache(async (): Promise<AuthConfig> => {
   return {
     mode: "local",
     registrationEnabled: true,
+    organizationSignupEnabled: true,
     methods: { emailOtp: true, totp: false, webauthn: false },
   };
 });

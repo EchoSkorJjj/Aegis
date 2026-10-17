@@ -1,11 +1,22 @@
+"use client";
+
+import { usePathname } from "next/navigation";
+
+import { pageTitle } from "@/components/app/navigation";
+import { NotificationBell } from "@/components/app/notification-bell";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 
-export function AppHeader({ title = "Dashboard" }: { title?: string }) {
+/** The top bar: the sidebar toggle, where you are (named as the sidebar names it), and your notifications. */
+export function AppHeader() {
+  const pathname = usePathname();
   return (
     <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-background/80 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <SidebarTrigger className="-ml-1" />
       <div className="mr-1 h-4 w-px bg-border" aria-hidden />
-      <h1 className="text-sm font-medium">{title}</h1>
+      <p className="text-sm font-medium">{pageTitle(pathname)}</p>
+      <div className="ml-auto">
+        <NotificationBell />
+      </div>
     </header>
   );
 }

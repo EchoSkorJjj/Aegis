@@ -1,0 +1,20 @@
+{
+  "id": "GHSA-wf5p-g6vw-rhxx",
+  "modified": "2024-01-15T10:00:00Z",
+  "published": "2024-01-10T00:00:00Z",
+  "aliases": ["CVE-2026-25639"],
+  "summary": "axios Server-Side Request Forgery",
+  "details": "A server-side request forgery in axios allows an attacker to ...",
+  "severity": [
+    { "type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N" }
+  ],
+  "affected": [
+    {
+      "package": { "ecosystem": "npm", "name": "axios", "purl": "pkg:npm/axios" },
+      "ranges": [
+        { "type": "SEMVER", "events": [{ "introduced": "0" }, { "fixed": "1.6.0" }] }
+      ]
+    }
+  ],
+  "database_specific": { "severity": "HIGH" }
+}

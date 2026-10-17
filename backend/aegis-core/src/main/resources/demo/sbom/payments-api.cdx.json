@@ -1,0 +1,98 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "bom-ref": "pkg:maven/com.demo/payments-api@1.4.0",
+      "type": "application",
+      "group": "com.demo",
+      "name": "payments-api",
+      "version": "1.4.0",
+      "purl": "pkg:maven/com.demo/payments-api@1.4.0"
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "pkg:maven/org.springframework.boot/spring-boot-starter-web@2.6.1",
+      "type": "library",
+      "group": "org.springframework.boot",
+      "name": "spring-boot-starter-web",
+      "version": "2.6.1",
+      "purl": "pkg:maven/org.springframework.boot/spring-boot-starter-web@2.6.1"
+    },
+    {
+      "bom-ref": "pkg:maven/org.springframework/spring-webmvc@5.3.13",
+      "type": "library",
+      "group": "org.springframework",
+      "name": "spring-webmvc",
+      "version": "5.3.13",
+      "purl": "pkg:maven/org.springframework/spring-webmvc@5.3.13"
+    },
+    {
+      "bom-ref": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.13.0",
+      "type": "library",
+      "group": "com.fasterxml.jackson.core",
+      "name": "jackson-databind",
+      "version": "2.13.0",
+      "purl": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.13.0"
+    },
+    {
+      "bom-ref": "pkg:maven/org.springframework.boot/spring-boot-starter-log4j2@2.6.1",
+      "type": "library",
+      "group": "org.springframework.boot",
+      "name": "spring-boot-starter-log4j2",
+      "version": "2.6.1",
+      "purl": "pkg:maven/org.springframework.boot/spring-boot-starter-log4j2@2.6.1"
+    },
+    {
+      "bom-ref": "pkg:maven/org.apache.logging.log4j/log4j-slf4j-impl@2.14.1",
+      "type": "library",
+      "group": "org.apache.logging.log4j",
+      "name": "log4j-slf4j-impl",
+      "version": "2.14.1",
+      "purl": "pkg:maven/org.apache.logging.log4j/log4j-slf4j-impl@2.14.1"
+    },
+    {
+      "bom-ref": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+      "type": "library",
+      "group": "org.apache.logging.log4j",
+      "name": "log4j-core",
+      "version": "2.14.1",
+      "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1"
+    },
+    {
+      "bom-ref": "pkg:maven/org.postgresql/postgresql@42.3.1",
+      "type": "library",
+      "group": "org.postgresql",
+      "name": "postgresql",
+      "version": "42.3.1",
+      "purl": "pkg:maven/org.postgresql/postgresql@42.3.1"
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "pkg:maven/com.demo/payments-api@1.4.0",
+      "dependsOn": [
+        "pkg:maven/org.springframework.boot/spring-boot-starter-web@2.6.1",
+        "pkg:maven/org.springframework.boot/spring-boot-starter-log4j2@2.6.1",
+        "pkg:maven/org.postgresql/postgresql@42.3.1"
+      ]
+    },
+    {
+      "ref": "pkg:maven/org.springframework.boot/spring-boot-starter-web@2.6.1",
+      "dependsOn": [
+        "pkg:maven/org.springframework/spring-webmvc@5.3.13",
+        "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.13.0"
+      ]
+    },
+    {
+      "ref": "pkg:maven/org.springframework.boot/spring-boot-starter-log4j2@2.6.1",
+      "dependsOn": ["pkg:maven/org.apache.logging.log4j/log4j-slf4j-impl@2.14.1"]
+    },
+    {
+      "ref": "pkg:maven/org.apache.logging.log4j/log4j-slf4j-impl@2.14.1",
+      "dependsOn": ["pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1"]
+    }
+  ]
+}

@@ -38,6 +38,9 @@ services:
       SPRING_MAIL_PORT: "1025"
       IDENTITY_FRONTEND_BASE_URL: http://localhost:3000
       IDENTITY_MAIL_FROM: no-reply@identity.local
+      # The internal API aegis-core's owner notifications call (/internal/**, never routed by the gateway), with
+      # this token in X-Service-Token. A dev placeholder; aegis-core holds the same one (IDENTITY_SERVICE_TOKEN).
+      IDENTITY_INTERNAL_SERVICE_TOKEN: dev-identity-internal-token-change-me
       # Dev-only: seeds an initial admin on startup. Use a real secret in production.
       IDENTITY_BOOTSTRAP_ADMIN_EMAIL: admin@example.com
       IDENTITY_BOOTSTRAP_ADMIN_PASSWORD: admin-dev-password
@@ -48,6 +51,9 @@ services:
       # Public self-registration. Set "false" for invite-only mode (admins provision accounts);
       # the identity service then rejects POST /auth/register and /auth/config tells the UI to hide sign-up.
       REGISTRATION_ENABLED: "true"
+      # Optional here: the PKCS#8 PEM that signs access tokens (set it in .env to keep sessions across restarts).
+      # Empty, a key is generated at every start. Every deployment sets one.
+      IDENTITY_JWT_PRIVATE_KEY: ${IDENTITY_JWT_PRIVATE_KEY:-}
     ports:
       - "8081:8081"
     networks: [edge]
@@ -75,17 +81,62 @@ services:
       DB_PASSWORD: identity
       # Fetch identity-service's public signing keys to validate access tokens.
       IDENTITY_JWKS_URI: http://identity-service:8081/oauth2/jwks
+      # identity-service's member directory (e.g. to verify a service's assigned owner). Called with the
+      # caller's own token, so identity-service applies the caller's org scope.
+      IDENTITY_BASE_URL: http://identity-service:8081
       # The internal ai-service (assess + draft). Called with a service token, not a user JWT.
       AI_SERVICE_URI: http://ai-service:8083
       AI_SERVICE_TOKEN: dev-internal-token-change-me
+      # Owner notifications (E9 story 5): every minute here, each service owner is told once about each item that
+      # needs their decision — under the bell in the app, and by email through identity-service (Mailhog,
+      # http://localhost:8025).
+      IDENTITY_SERVICE_TOKEN: dev-identity-internal-token-change-me
+      AEGIS_NOTIFICATIONS_ENABLED: "true"
+      AEGIS_NOTIFICATIONS_INTERVAL: PT1M
       # Export distributed traces to Zipkin — view them at http://localhost:9411
       ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
       CORS_ALLOWED_ORIGINS: http://localhost:3000
+      # Dev only: seed the demo estate (services, owners, vendors, SBOM components) on startup.
+      AEGIS_DEMO_SEED_ENABLED: "true"
+      # Ingest real CVEs from the NVD API 2.0. No API key is needed (NVD allows 5 requests per
+      # rolling 30s unauthenticated); set AEGIS_NVD_API_KEY in .env — which is git-ignored — to raise
+      # that to 50. Demo cadence: first poll ~1 min after startup over a one-day window, rather than the
+      # 15-minute/two-day production defaults, so `docker compose up` shows advisories quickly.
+      AEGIS_INGESTION_NVD_ENABLED: "true"
+      AEGIS_NVD_API_KEY: ${AEGIS_NVD_API_KEY:-}
+      AEGIS_INGESTION_POLL_INTERVAL: PT1M
+      AEGIS_NVD_INITIAL_WINDOW: P1D
+      AEGIS_INGESTION_OSV_ENABLED: "true"
+      AEGIS_OSV_ECOSYSTEMS: "npm,PyPI,crates.io,RubyGems,Go,Maven"
+      # Poll the status pages of the five vendors the demo estate depends on (AWS via RSS, the rest
+      # via Statuspage JSON). No credentials — these are public pages.
+      AEGIS_INGESTION_VENDOR_STATUS_ENABLED: "true"
+      # Poll public security news/threat-intel RSS feeds (CISA, press, research blogs). No keys —
+      # credential-free feeds only.
+      AEGIS_INGESTION_NEWS_ENABLED: "true"
+      # GitHub App that opens approved safe-upgrade draft PRs and reads repositories for SBOM imports (no
+      # personal token needed) — off by default. Set these in the repo-root .env (git-ignored), with the App's
+      # PKCS#8 key either in AEGIS_GITHUB_APP_PRIVATE_KEY there or mounted read-only at the path below from a
+      # local docker-compose.override.yml (also git-ignored); each organization's admin then connects its
+      # installations under Organization > Integrations. See backend/aegis-core/GITHUB_APP.md.
+      AEGIS_GITHUB_ENABLED: ${AEGIS_GITHUB_ENABLED:-false}
+      AEGIS_GITHUB_APP_CLIENT_ID: ${AEGIS_GITHUB_APP_CLIENT_ID:-}
+      AEGIS_GITHUB_APP_CLIENT_SECRET: ${AEGIS_GITHUB_APP_CLIENT_SECRET:-}
+      AEGIS_GITHUB_CALLBACK_URL: ${AEGIS_GITHUB_CALLBACK_URL:-http://localhost:3000/admin/integrations/github/callback}
+      # Jira (off by default): where approved risk tickets are filed, through the site each organization's
+      # admin connects. Set these and AEGIS_SECRETS_KEY in .env; see backend/aegis-core/JIRA.md.
+      AEGIS_JIRA_ENABLED: ${AEGIS_JIRA_ENABLED:-false}
+      AEGIS_JIRA_CLIENT_ID: ${AEGIS_JIRA_CLIENT_ID:-}
+      AEGIS_JIRA_CLIENT_SECRET: ${AEGIS_JIRA_CLIENT_SECRET:-}
+      AEGIS_JIRA_CALLBACK_URL: ${AEGIS_JIRA_CALLBACK_URL:-http://localhost:3000/admin/integrations/jira/callback}
+      AEGIS_SECRETS_KEY: ${AEGIS_SECRETS_KEY:-}
+      AEGIS_GITHUB_APP_PRIVATE_KEY: ${AEGIS_GITHUB_APP_PRIVATE_KEY:-}
+      AEGIS_GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/github-app.pkcs8.pem
     ports:
       - "8082:8082"
     networks: [edge, internal]
 
-  # Aegis AI Service — internal Python/FastAPI service for the AI logic (assess + draft + RAG).
+  # Aegis AI Service — internal Python/FastAPI service for assessment and drafting.
   # Locked down to aegis-core only: it joins ONLY the `internal` network (so the gateway, frontend,
   # identity-service and Prometheus on `edge` cannot reach it) and publishes NO host port. The
   # service token (X-Service-Token) is the app-level second layer. To poke it while debugging, go
@@ -95,9 +146,18 @@ services:
       context: ./backend/ai-service
     environment:
       SERVICE_TOKEN: dev-internal-token-change-me
-      # LLM is stubbed in dev. To enable real drafting: build with the `llm` extra and set
-      # LLM_PROVIDER=anthropic + ANTHROPIC_API_KEY (see backend/ai-service/README.md).
-      LLM_PROVIDER: stub
+      # Offline stub by default. Compose reads the repo-root .env; set LLM_PROVIDER=groq
+      # and GROQ_API_KEY there for real calls. No optional SDK extra is needed.
+      LLM_PROVIDER: ${LLM_PROVIDER:-stub}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+      GROQ_BASE_URL: ${GROQ_BASE_URL:-https://api.groq.com/openai/v1}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-20}
+      LLM_MAX_OUTPUT_TOKENS: ${LLM_MAX_OUTPUT_TOKENS:-1000}
+      LLM_MAX_INPUT_CHARS: ${LLM_MAX_INPUT_CHARS:-16000}
+      LLM_MAX_REQUESTS_PER_MINUTE: ${LLM_MAX_REQUESTS_PER_MINUTE:-25}
+      LLM_MAX_TOKENS_PER_MINUTE: ${LLM_MAX_TOKENS_PER_MINUTE:-7000}
+      LLM_DAILY_TOKEN_BUDGET: ${LLM_DAILY_TOKEN_BUDGET:-150000}
     networks: [internal]
 
   # API gateway (Spring Cloud Gateway, WebMVC) — the single entry point on :8080. Authenticates at
@@ -140,6 +200,10 @@ services:
       # authenticates it and routes to identity-service (/auth,/oauth2,/users) or aegis-core (/api).
       # Must be the service name — "localhost" would be the frontend container itself.
       - GATEWAY_URL=http://gateway:8080
+      # Shown on the public /privacy page (the link Atlassian shows when someone grants Aegis access to
+      # Jira): who runs this deployment, and an email address or https link to reach them. Set in .env.
+      - PRIVACY_OPERATOR=${PRIVACY_OPERATOR:-}
+      - PRIVACY_CONTACT=${PRIVACY_CONTACT:-}
     restart: always
     networks: [edge]
 
@@ -177,7 +241,7 @@ networks:
   edge:
   # Private link for the AI boundary: only aegis-core and ai-service join it, so ai-service is
   # reachable by aegis-core alone. Not marked `internal: true`, so ai-service keeps outbound
-  # internet access for the LLM API later.
+  # internet access for the configured LLM API.
   internal:
 
 volumes:

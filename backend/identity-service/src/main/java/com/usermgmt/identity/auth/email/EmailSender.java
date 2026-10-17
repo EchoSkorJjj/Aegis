@@ -14,4 +14,7 @@ public interface EmailSender {
 
     /** Invites an admin-created user to set their first password. */
     void sendInvite(String toEmail, String token);
+
+    /** Tells a service owner which items in Aegis need their decision (aegis-core's notifications). */
+    void sendOwnerNotification(String toEmail, OwnerNotification notification);
 }

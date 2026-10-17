@@ -1,9 +1,9 @@
 package com.usermgmt.identity.auth.mfa.totp;
 
-import org.junit.jupiter.api.Test;
-
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

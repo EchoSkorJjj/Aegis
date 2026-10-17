@@ -1,10 +1,10 @@
 package com.usermgmt.identity.auth.mfa;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-
 import java.util.ArrayList;
 import java.util.List;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
 /**
  * Which MFA methods this deployment allows. Each is an independent on/off flag

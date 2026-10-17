@@ -1,40 +1,53 @@
 package com.aegis.core.inventory;
 
-import com.aegis.core.common.ApiExceptions;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import java.util.function.Function;
+
+import jakarta.persistence.Entity;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityManagerFactory;
+import jakarta.persistence.Table;
+
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.SoftwareComponent;
 import com.aegis.core.inventory.domain.ThirdPartyVendor;
-import com.aegis.core.support.AbstractIntegrationTest;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.EntityManagerFactory;
-import jakarta.persistence.Table;
+import com.aegis.core.platform.common.ApiExceptions;
+import com.aegis.core.support.AbstractInventoryIntegrationTest;
+import com.aegis.core.support.TestOwners;
 import org.hibernate.Hibernate;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import java.time.Instant;
-import java.util.UUID;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class InventoryPersistenceIntegrationTest extends AbstractIntegrationTest {
+class InventoryPersistenceIntegrationTest extends AbstractInventoryIntegrationTest {
 
     private static final PageRequest PAGE = PageRequest.of(0, 20, Sort.by("name", "id"));
+
+    /** Org for the raw-JDBC constraint checks, which bypass the store and so must supply org_id (ADR §6). */
+    private static final UUID ORG = UUID.fromString("11111111-1111-1111-1111-111111111111");
 
     @Autowired
     private InventoryService inventory;
 
     @Autowired
-    private JdbcTemplate jdbc;
+    private TestOwners owners;
+
+    /** Past row-level security: checks the schema itself — its constraints, what a row holds — not what a caller sees. */
+    private final JdbcTemplate jdbc = new JdbcTemplate(superuserDataSource());
 
     @Autowired
     private EntityManager entityManager;
@@ -60,9 +73,9 @@ class InventoryPersistenceIntegrationTest extends AbstractIntegrationTest {
         BusinessService service = inventory.createBusinessService("Payments " + suffix, BusinessCriticality.CRITICAL);
         SoftwareComponent component = inventory.createSoftwareComponent("Maven", "spring-core-" + suffix, "7.0.0");
         ThirdPartyVendor vendor = inventory.createThirdPartyVendor("Acme " + suffix);
-        Owner owner = inventory.createOwner("Platform " + suffix);
+        Owner owner = owners.assign(service.getId(), "Platform " + suffix);
 
-        for (var value : java.util.List.of(service, component, vendor, owner)) {
+        for (var value : List.of(service, component, vendor, owner)) {
             assertThat(value.getId()).isNotNull();
             assertThat(value.getCreatedAt()).isNotNull();
             assertThat(value.getUpdatedAt()).isNotNull();
@@ -81,10 +94,15 @@ class InventoryPersistenceIntegrationTest extends AbstractIntegrationTest {
                 "select criticality from core.business_services where id = ?",
                 String.class, service.getId())).isEqualTo("CRITICAL");
 
-        assertThat(inventory.listBusinessServices(PAGE).getContent()).contains(service);
-        assertThat(inventory.listSoftwareComponents(PAGE).getContent()).contains(component);
-        assertThat(inventory.listThirdPartyVendors(PAGE).getContent()).contains(vendor);
-        assertThat(inventory.listOwners(PAGE).getContent()).contains(owner);
+        // Other test classes share this database, so the new rows may not be on the first page.
+        assertThat(allPages(p -> inventory.listBusinessServices(InventoryFilters.ServiceFilter.NONE, p)))
+                .contains(service);
+        assertThat(allPages(p -> inventory.listSoftwareComponents(InventoryFilters.ComponentFilter.NONE, p)))
+                .contains(component);
+        assertThat(allPages(p -> inventory.listThirdPartyVendors(InventoryFilters.NamedFilter.NONE, p)))
+                .contains(vendor);
+        assertThat(allPages(p -> inventory.listOwners(InventoryFilters.NamedFilter.NONE, p)))
+                .contains(owner);
 
         Instant previousUpdatedAt = service.getUpdatedAt();
         BusinessService updated = inventory.updateBusinessService(
@@ -109,13 +127,10 @@ class InventoryPersistenceIntegrationTest extends AbstractIntegrationTest {
         SoftwareComponent app = inventory.createSoftwareComponent("npm", "orders-" + suffix, "1.0.0");
         SoftwareComponent library = inventory.createSoftwareComponent("npm", "library-" + suffix, "2.0.0");
         ThirdPartyVendor vendor = inventory.createThirdPartyVendor("Cloud " + suffix);
-        Owner firstOwner = inventory.createOwner("Orders team " + suffix);
-        Owner secondOwner = inventory.createOwner("Risk partner " + suffix);
-
         inventory.addServiceComponent(service.getId(), app.getId());
         inventory.addServiceVendor(service.getId(), vendor.getId());
-        inventory.addServiceOwner(service.getId(), firstOwner.getId());
-        inventory.addServiceOwner(service.getId(), secondOwner.getId());
+        Owner firstOwner = owners.assign(service.getId(), "Orders team " + suffix);
+        Owner secondOwner = owners.assign(service.getId(), "Risk partner " + suffix);
         inventory.addComponentDependency(app.getId(), library.getId());
 
         assertThat(inventory.listServiceComponents(service.getId(), PAGE).getContent()).containsExactly(app);
@@ -143,53 +158,63 @@ class InventoryPersistenceIntegrationTest extends AbstractIntegrationTest {
     @Test
     void databaseConstraintsRejectInvalidRowsAndDuplicateEdges() {
         UUID componentId = UUID.randomUUID();
-        jdbc.update("insert into core.software_components (id, ecosystem, name, version) values (?, ?, ?, ?)",
-                componentId, "Maven", "db-check-" + componentId, "1");
+        jdbc.update("insert into core.software_components (id, ecosystem, name, version, org_id) values (?, ?, ?, ?, ?)",
+                componentId, "Maven", "db-check-" + componentId, "1", ORG);
 
         assertThatThrownBy(() -> jdbc.update(
-                "insert into core.software_component_dependencies (component_id, dependency_id) values (?, ?)",
-                componentId, componentId))
+                "insert into core.software_component_dependencies (component_id, dependency_id, org_id) values (?, ?, ?)",
+                componentId, componentId, ORG))
                 .isInstanceOf(DataIntegrityViolationException.class);
 
         UUID serviceId = UUID.randomUUID();
-        jdbc.update("insert into core.business_services (id, name, criticality) values (?, ?, ?)",
-                serviceId, "db-service-" + serviceId, "LOW");
+        jdbc.update("insert into core.business_services (id, name, criticality, org_id) values (?, ?, ?, ?)",
+                serviceId, "db-service-" + serviceId, "LOW", ORG);
 
         assertThatThrownBy(() -> jdbc.update(
-                "insert into core.business_services (id, name, criticality) values (?, ?, ?)",
-                UUID.randomUUID(), ("db-service-" + serviceId).toUpperCase(), "HIGH"))
+                "insert into core.business_services (id, name, criticality, org_id) values (?, ?, ?, ?)",
+                UUID.randomUUID(), ("db-service-" + serviceId).toUpperCase(), "HIGH", ORG))
                 .isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> jdbc.update(
-                "insert into core.software_components (id, ecosystem, name, version) values (?, ?, ?, ?)",
-                UUID.randomUUID(), "MAVEN", ("DB-CHECK-" + componentId).toUpperCase(), "1"))
+                "insert into core.software_components (id, ecosystem, name, version, org_id) values (?, ?, ?, ?, ?)",
+                UUID.randomUUID(), "MAVEN", ("DB-CHECK-" + componentId).toUpperCase(), "1", ORG))
                 .isInstanceOf(DataIntegrityViolationException.class);
 
         UUID vendorId = UUID.randomUUID();
         String vendorName = "db-vendor-" + vendorId;
-        jdbc.update("insert into core.third_party_vendors (id, name) values (?, ?)", vendorId, vendorName);
+        jdbc.update("insert into core.third_party_vendors (id, name, org_id) values (?, ?, ?)",
+                vendorId, vendorName, ORG);
         assertThatThrownBy(() -> jdbc.update(
-                "insert into core.third_party_vendors (id, name) values (?, ?)",
-                UUID.randomUUID(), vendorName.toUpperCase()))
+                "insert into core.third_party_vendors (id, name, org_id) values (?, ?, ?)",
+                UUID.randomUUID(), vendorName.toUpperCase(), ORG))
                 .isInstanceOf(DataIntegrityViolationException.class);
 
-        UUID ownerId = UUID.randomUUID();
-        String ownerName = "db-owner-" + ownerId;
-        jdbc.update("insert into core.owners (id, name) values (?, ?)", ownerId, ownerName);
+        // Owners are unique per person (identity user id) per org — not by name (V16): one person can't
+        // be two owners, but two people may share a display name.
+        UUID ownerUserId = UUID.randomUUID();
+        String ownerName = "db-owner-" + ownerUserId;
+        jdbc.update("insert into core.owners (id, user_id, name, org_id) values (?, ?, ?, ?)",
+                UUID.randomUUID(), ownerUserId, ownerName, ORG);
         assertThatThrownBy(() -> jdbc.update(
-                "insert into core.owners (id, name) values (?, ?)",
-                UUID.randomUUID(), ownerName.toUpperCase()))
+                "insert into core.owners (id, user_id, name, org_id) values (?, ?, ?, ?)",
+                UUID.randomUUID(), ownerUserId, "someone else", ORG))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        jdbc.update("insert into core.owners (id, user_id, name, org_id) values (?, ?, ?, ?)",
+                UUID.randomUUID(), UUID.randomUUID(), ownerName, ORG);
+        assertThatThrownBy(() -> jdbc.update(
+                "insert into core.owners (id, name, org_id) values (?, ?, ?)",
+                UUID.randomUUID(), "no-user-" + ownerUserId, ORG))
                 .isInstanceOf(DataIntegrityViolationException.class);
 
-        jdbc.update("insert into core.business_service_components (business_service_id, component_id) values (?, ?)",
-                serviceId, componentId);
+        jdbc.update("insert into core.business_service_components (business_service_id, component_id, org_id)"
+                        + " values (?, ?, ?)", serviceId, componentId, ORG);
         assertThatThrownBy(() -> jdbc.update(
-                "insert into core.business_service_components (business_service_id, component_id) values (?, ?)",
-                serviceId, componentId))
+                "insert into core.business_service_components (business_service_id, component_id, org_id)"
+                        + " values (?, ?, ?)", serviceId, componentId, ORG))
                 .isInstanceOf(DataIntegrityViolationException.class);
 
         assertThatThrownBy(() -> jdbc.update(
-                "insert into core.business_services (id, name, criticality) values (?, ?, ?)",
-                UUID.randomUUID(), "invalid-criticality-" + serviceId, "EXTREME"))
+                "insert into core.business_services (id, name, criticality, org_id) values (?, ?, ?, ?)",
+                UUID.randomUUID(), "invalid-criticality-" + serviceId, "EXTREME", ORG))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
@@ -209,6 +234,18 @@ class InventoryPersistenceIntegrationTest extends AbstractIntegrationTest {
         assertThat(edges).isZero();
         assertThatThrownBy(() -> inventory.getBusinessService(service.getId()))
                 .isInstanceOf(ApiExceptions.NotFound.class);
+    }
+
+    private static <T> List<T> allPages(Function<Pageable, Page<T>> query) {
+        List<T> all = new ArrayList<>();
+        Pageable pageable = PAGE;
+        Page<T> page;
+        do {
+            page = query.apply(pageable);
+            all.addAll(page.getContent());
+            pageable = page.nextPageable();
+        } while (page.hasNext());
+        return all;
     }
 
     private void assertJpaEntity(Class<?> type, String tableName) {
