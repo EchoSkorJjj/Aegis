@@ -1,13 +1,13 @@
 package com.usermgmt.identity.auth.mfa;
 
+import java.util.Base64;
+
 import com.jayway.jsonpath.JsonPath;
 import com.usermgmt.identity.support.AbstractIntegrationTest;
 import com.usermgmt.identity.support.WebauthnTestAuthenticator;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-
-import java.util.Base64;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;

@@ -1,9 +1,9 @@
 package com.usermgmt.identity.auth.mfa.totp;
 
-import org.springframework.data.jpa.repository.JpaRepository;
-
 import java.util.Optional;
 import java.util.UUID;
+
+import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface UserTotpRepository extends JpaRepository<UserTotp, UUID> {
 

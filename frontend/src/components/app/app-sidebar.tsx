@@ -6,26 +6,22 @@ import { usePathname } from "next/navigation";
 import {
   BadgeCheck,
   Bell,
-  Boxes,
+  Check,
   ChevronRight,
   ChevronsUpDown,
-  FileText,
-  GitPullRequest,
   Hexagon,
-  LayoutDashboard,
   LogOut,
-  type LucideIcon,
-  Rss,
-  Settings,
-  ShieldAlert,
-  ShieldCheck,
+  Plus,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -45,60 +41,43 @@ import {
   SidebarMenuSubItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import {
+  accountNav,
+  adminNav,
+  baseNav,
+  domainNav,
+  orgAdminNav,
+  visibleTo,
+  type NavGroup,
+  type NavItem,
+} from "@/components/app/navigation";
+import { canReadInventory } from "@/lib/roles";
 import { useAuth } from "@/providers/auth-provider";
-
-type NavLink = { title: string; href: string; icon: LucideIcon };
-type NavGroup = { title: string; icon: LucideIcon; items: { title: string; href: string }[] };
-type NavItem = NavLink | NavGroup;
-
-const platformNav: NavItem[] = [
-  { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  {
-    title: "Inventory",
-    icon: Boxes,
-    items: [
-      { title: "Services", href: "/inventory/services" },
-      { title: "Components", href: "/inventory/components" },
-      { title: "Vendors", href: "/inventory/vendors" },
-      { title: "Dependency map", href: "/inventory/map" },
-    ],
-  },
-  { title: "Advisories", href: "/advisories", icon: Rss },
-  {
-    title: "Findings",
-    icon: ShieldAlert,
-    items: [
-      { title: "Triage queue", href: "/findings" },
-      { title: "My services", href: "/findings/mine" },
-    ],
-  },
-  {
-    title: "Responses",
-    icon: GitPullRequest,
-    items: [
-      { title: "Review & approve", href: "/responses/review" },
-      { title: "History", href: "/responses/history" },
-    ],
-  },
-  {
-    title: "Reports",
-    icon: FileText,
-    items: [
-      { title: "Evidence", href: "/reports/evidence" },
-      { title: "Audit log", href: "/reports/audit" },
-    ],
-  },
-];
-
-const accountNav = [{ title: "Settings", href: "/settings", icon: Settings }];
-
-const adminNav = [{ title: "Users", href: "/admin/users", icon: ShieldCheck }];
 
 export function AppSidebar() {
   const { isMobile, state, setOpen } = useSidebar();
   const pathname = usePathname();
-  const { user, logout } = useAuth();
-  const isAdmin = !!user?.roles.includes("ADMIN");
+  const { user, organizations, switchOrg, logout } = useAuth();
+  // Anyone with a role beyond the USER baseline can open the member directory (read-only for the
+  // domain roles, full management for admins). The Users page itself gates what each can do.
+  const canSeeMembers = !!user?.roles.some((r) => r !== "USER");
+  // The organization's integrations (GitHub) are its admin's to connect.
+  const organizationNav = user?.roles.includes("ORG_ADMIN") ? [...adminNav, ...orgAdminNav] : adminNav;
+  // Domain data (inventory, advisories, and the rest of the estate features) needs a domain read role.
+  const platformNav: NavItem[] = canReadInventory(user?.roles ?? [])
+    ? [...baseNav, ...visibleTo(domainNav, user?.roles ?? [])]
+    : baseNav;
+
+  const activeOrgName =
+    organizations.find((org) => org.id === user?.orgId)?.name ?? "Workspace";
+  const switchTo = async (orgId: string) => {
+    if (orgId === user?.orgId) return;
+    try {
+      await switchOrg(orgId);
+    } catch {
+      toast.error("Could not switch organization");
+    }
+  };
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const isGroupActive = (group: NavGroup) =>
@@ -130,17 +109,47 @@ export function AppSidebar() {
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" render={<Link href="/dashboard" />}>
-              <span className="flex aspect-square size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                <Hexagon className="size-4" />
-              </span>
-              <span className="grid flex-1 text-left leading-tight">
-                <span className="truncate font-semibold">Aegis</span>
-                <span className="truncate text-xs text-muted-foreground">
-                  Workspace
-                </span>
-              </span>
-            </SidebarMenuButton>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <SidebarMenuButton
+                    size="lg"
+                    className="data-[popup-open]:bg-sidebar-accent data-[popup-open]:text-sidebar-accent-foreground"
+                  >
+                    <span className="flex aspect-square size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                      <Hexagon className="size-4" />
+                    </span>
+                    <span className="grid flex-1 text-left leading-tight">
+                      <span className="truncate font-semibold">{activeOrgName}</span>
+                      <span className="truncate text-xs text-muted-foreground">Aegis</span>
+                    </span>
+                    <ChevronsUpDown className="ml-auto size-4" />
+                  </SidebarMenuButton>
+                }
+              />
+              <DropdownMenuContent
+                className="w-(--anchor-width) min-w-56 rounded-lg"
+                side={isMobile ? "bottom" : "right"}
+                align="start"
+                sideOffset={4}
+              >
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Organizations</DropdownMenuLabel>
+                  {organizations.map((org) => (
+                    <DropdownMenuItem key={org.id} onClick={() => switchTo(org.id)}>
+                      <Hexagon className="size-4" />
+                      <span className="truncate">{org.name}</span>
+                      {org.id === user?.orgId && <Check className="ml-auto size-4" />}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem render={<Link href="/organizations/new" />}>
+                  <Plus className="size-4" />
+                  Create organization
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
@@ -198,12 +207,12 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {isAdmin && (
+        {canSeeMembers && (
           <SidebarGroup>
-            <SidebarGroupLabel>Admin</SidebarGroupLabel>
+            <SidebarGroupLabel>Organization</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {adminNav.map((item) => (
+                {organizationNav.map((item) => (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton
                       isActive={pathname === item.href}

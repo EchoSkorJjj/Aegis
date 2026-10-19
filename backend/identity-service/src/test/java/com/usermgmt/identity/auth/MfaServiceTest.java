@@ -1,5 +1,8 @@
 package com.usermgmt.identity.auth;
 
+import java.util.Optional;
+import java.util.UUID;
+
 import com.usermgmt.identity.auth.mfa.MfaMethod;
 import com.usermgmt.identity.auth.mfa.MfaService;
 import com.usermgmt.identity.auth.mfa.MfaSettings;
@@ -8,9 +11,6 @@ import com.usermgmt.identity.auth.mfa.totp.UserTotpRepository;
 import com.usermgmt.identity.auth.mfa.webauthn.WebauthnCredentialRepository;
 import com.usermgmt.identity.user.User;
 import org.junit.jupiter.api.Test;
-
-import java.util.Optional;
-import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;

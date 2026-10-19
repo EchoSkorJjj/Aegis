@@ -33,4 +33,10 @@ public class LoggingEmailSender implements EmailSender {
     public void sendInvite(String toEmail, String token) {
         log.info("[dev-mail] invite for {} -> token={} (wire SMTP for production)", toEmail, token);
     }
+
+    @Override
+    public void sendOwnerNotification(String toEmail, OwnerNotification notification) {
+        log.info("[dev-mail] owner notification for {} -> {} item(s) (wire SMTP for production)", toEmail,
+                notification.items().size());
+    }
 }

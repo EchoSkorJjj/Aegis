@@ -1,9 +1,13 @@
 /**
- * Ingestion — scheduled polling of advisory feeds (OSV / NVD / vendor status) and normalisation
- * into Advisory records (raw + parsed, de-duplicated), with a feed-health metric.
+ * Ingestion — the framework that polls external feeds (advisories, vendor status, threat intel) on a
+ * schedule and captures what they return in an append-only, de-duplicated raw-event store.
  *
- * <p>Sits behind the <b>queue seam</b>: ingestion hands normalised advisories to matching via a
- * queue, so long or bursty polls never affect API latency. First candidate to extract into a
- * standalone detector worker (see ARCHITECTURE.md). Deterministic — no AI here.
+ * <p>The seam is {@link com.aegis.core.ingestion.IngestionSource}: each feed connector implements it
+ * as a Spring bean, and the {@link com.aegis.core.ingestion.IngestionScheduler} discovers and polls
+ * them, applying per-source retry/backoff and isolating one feed's failure from the others.
+ *
+ * <p>This package is the framework; {@link com.aegis.core.ingestion.connectors.nvd} is the first connector and
+ * {@link com.aegis.core.advisories} holds the normalised output it feeds to matching. Vendor
+ * status and security-news connectors are later stories. Deterministic — no AI here.
  */
 package com.aegis.core.ingestion;

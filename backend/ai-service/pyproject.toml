@@ -13,8 +13,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The LLM SDK is optional so the scaffold installs and its tests run with no key — a StubLlmClient
-# stands in until the real prompts land (BUILD_PLAN step 7).
+# Reserved for a future Anthropic provider (not implemented). Groq uses the base httpx dependency;
+# both Groq and the offline stub work without this extra.
 llm = ["anthropic>=0.40"]
 # Distributed tracing to Zipkin (parity with the Java services); version-coupled, so kept optional.
 tracing = [

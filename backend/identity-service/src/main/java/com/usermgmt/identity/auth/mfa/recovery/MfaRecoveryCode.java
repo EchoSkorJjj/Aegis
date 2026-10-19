@@ -1,12 +1,12 @@
 package com.usermgmt.identity.auth.mfa.recovery;
 
+import java.time.Instant;
+import java.util.UUID;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-
-import java.time.Instant;
-import java.util.UUID;
 
 /** One single-use MFA backup code, stored as a SHA-256 hash of its normalised value. */
 @Entity

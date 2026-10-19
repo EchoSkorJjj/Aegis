@@ -1,11 +1,11 @@
 package com.usermgmt.identity.config;
 
+import java.util.Map;
+
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.Map;
 
 /**
  * Publishes the public half of our signing key as a JWK Set so other services

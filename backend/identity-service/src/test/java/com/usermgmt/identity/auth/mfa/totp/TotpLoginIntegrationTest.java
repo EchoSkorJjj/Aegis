@@ -1,5 +1,9 @@
 package com.usermgmt.identity.auth.mfa.totp;
 
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
 import com.jayway.jsonpath.JsonPath;
 import com.usermgmt.identity.auth.mfa.recovery.RecoveryCodeService;
 import com.usermgmt.identity.support.AbstractIntegrationTest;
@@ -9,10 +13,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-
-import java.time.Instant;
-import java.util.List;
-import java.util.UUID;
 
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title><![CDATA[Amazon Web Services Service Status]]></title>
+    <link>https://status.aws.amazon.com/</link>
+    <language>en-us</language>
+    <lastBuildDate>Tue, 15 Sep 2026 23:10:19 PDT</lastBuildDate>
+    <generator>AWS Service Health Dashboard RSS Generator</generator>
+    <description><![CDATA[Recent events affecting Amazon Web Services availability.]]></description>
+    <ttl>5</ttl>
+
+    <item>
+      <title><![CDATA[Service disruption: Increased Error Rates]]></title>
+      <link>https://status.aws.amazon.com/</link>
+      <pubDate>Tue, 15 Sep 2026 03:27:10 PDT</pubDate>
+      <guid isPermaLink="false">https://status.aws.amazon.com/#multipleservices-me-central-1_1789468030</guid>
+      <description><![CDATA[We are providing an update on the disruption affecting the Middle East (UAE) region.]]></description>
+    </item>
+
+    <item>
+      <title><![CDATA[Informational message: Elevated latency]]></title>
+      <link>https://status.aws.amazon.com/</link>
+      <pubDate>Mon, 14 Sep 2026 11:05:00 GMT</pubDate>
+      <description><![CDATA[Some requests are taking longer than usual.]]></description>
+    </item>
+  </channel>
+</rss>

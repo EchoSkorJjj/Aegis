@@ -9,20 +9,21 @@ import logging
 from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from ai_service.core.config import settings
+from ai_service.core.config import Settings, settings
 
 log = logging.getLogger(__name__)
 
 
-def setup_observability(app: FastAPI) -> None:
+def setup_observability(app: FastAPI, config: Settings | None = None) -> None:
+    config = config or settings
     Instrumentator().instrument(app).expose(
         app, endpoint="/actuator/prometheus", include_in_schema=False
     )
-    if settings.tracing_enabled:
-        _setup_tracing(app)
+    if config.tracing_enabled:
+        _setup_tracing(app, config)
 
 
-def _setup_tracing(app: FastAPI) -> None:
+def _setup_tracing(app: FastAPI, config: Settings) -> None:
     try:
         from opentelemetry import trace
         from opentelemetry.exporter.zipkin.json import ZipkinExporter
@@ -34,8 +35,8 @@ def _setup_tracing(app: FastAPI) -> None:
         log.warning("TRACING_ENABLED is set but OpenTelemetry is not installed; run: pip install '.[tracing]'")
         return
 
-    provider = TracerProvider(resource=Resource.create({"service.name": settings.service_name}))
-    provider.add_span_processor(BatchSpanProcessor(ZipkinExporter(endpoint=settings.zipkin_endpoint)))
+    provider = TracerProvider(resource=Resource.create({"service.name": config.service_name}))
+    provider.add_span_processor(BatchSpanProcessor(ZipkinExporter(endpoint=config.zipkin_endpoint)))
     trace.set_tracer_provider(provider)
     FastAPIInstrumentor.instrument_app(app)
-    log.info("Tracing enabled, exporting spans to %s", settings.zipkin_endpoint)
+    log.info("Tracing enabled, exporting spans to %s", config.zipkin_endpoint)

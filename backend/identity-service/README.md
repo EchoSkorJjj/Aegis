@@ -56,9 +56,10 @@ tokens directly.
 
 ### Getting an admin
 
-Admin endpoints require the `ADMIN` role. An initial admin is **seeded from config on startup** —
-**opt-in** (no default admin unless configured) and **idempotent** (creates the user if missing,
-grants ADMIN if not already held). This is the same pattern as Keycloak (`KEYCLOAK_ADMIN`) and
+Admin endpoints require an admin role — `PLATFORM_ADMIN` (the org-less platform operator) or, scoped
+to a single organization, `ORG_ADMIN`. An initial platform admin is **seeded from config on startup**
+— **opt-in** (no default admin unless configured) and **idempotent** (creates the user if missing,
+grants `PLATFORM_ADMIN` if not already held). This is the same pattern as Keycloak (`KEYCLOAK_ADMIN`) and
 Grafana (`GF_SECURITY_ADMIN_*`); the password is used only when creating a new admin and is never
 logged. `docker compose up` already sets dev credentials:
 
@@ -75,6 +76,23 @@ The always-current endpoint reference is the **Swagger UI** at
 codes (`/auth/mfa/*`), email verification, password reset, admin user provisioning / invites
 (`POST /users`), the user CRUD & roles API, and the admin audit trail (`/audit`). Other services
 verify tokens against the public keys at `GET /oauth2/jwks`.
+
+**Internal API** (`/internal/**`, for aegis-core's owner notifications; never routed by the gateway). It has its
+own filter chain and takes no user token: only the shared service token in `X-Service-Token`
+(`IDENTITY_INTERNAL_SERVICE_TOKEN`; empty, the default, refuses every call).
+
+- `GET /internal/organizations` — every organization's id.
+- `POST /internal/notifications/owner-email` — `{orgId, userId, deliveryId, items: [{title, serviceName, path}]}`:
+  emails the member the items that need their decision, through `EmailSender`, once per `deliveryId` (V16,
+  `owner_email_deliveries`, recorded in the transaction that sends it): aegis-core asks again under the same id
+  whenever it can't tell whether a request went through, and a repeat is answered 204 without sending. 204 when
+  sent; 404 unless they are an active member of that organization; 409 when their account is disabled or its
+  address unverified. Each item's `path` must be a path in the app (`/findings/…`), and identity-service writes the
+  email itself: item text is one line, with any URL removed and a host with a path defanged (`github[.]com/…`), so
+  the only links are the app's own.
+
+SMTP sends are bounded (`spring.mail.properties`: 5 s to connect, 10 s per read or write), so a mail server that
+stops answering fails the send instead of holding a request thread.
 
 ## The auth seam (how it's "dynamic")
 
@@ -94,9 +112,8 @@ Two config values control it — everything else is identical in both modes:
 
 Every setting is environment-overridable. The authoritative list with defaults lives in
 [`application.yml`](src/main/resources/application.yml), and the root
-[README](../../README.md#configuration) documents the full env-var surface — datasource, the auth
-seam, token TTLs, the MFA & registration feature flags, rate-limiting, audit, tracing and mail.
-(The two auth-seam knobs above are the ones that change how tokens are produced/validated.)
+[README](../../README.md#configuration) lists the ones you're most likely to change. (The two
+auth-seam knobs above are the ones that change how tokens are produced/validated.)
 
 ## Layout
 
@@ -119,8 +136,14 @@ src/test/java/…      AbstractIntegrationTest + integration tests across the ab
 
 - Passwords hashed with bcrypt (`DelegatingPasswordEncoder`).
 - Refresh tokens are opaque, stored **hashed** (SHA-256), and **rotated** (single-use) on exchange.
-- The RSA signing key is **generated at startup** (ephemeral). For production, load a stable key
-  from a secret manager / keystore so tokens survive restarts and can be rotated deliberately.
+- The RSA signing key comes from `IDENTITY_JWT_PRIVATE_KEY` (`identity.jwt.private-key`): an unencrypted
+  PKCS#8 PEM of at least 2048 bits, e.g. `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048`, handed
+  over by a secret manager. Then tokens survive restarts, and every instance signs with the same key and key id
+  (the key's RFC 7638 thumbprint), so rolling deploys and several instances work. Unset, a key is **generated at
+  startup** — fine for one local instance (the service warns); rotating means setting a new key and redeploying.
+- The `/auth` rate limit and the audit log read the client's address from the first `X-Forwarded-For` hop, which
+  the frontend's BFF and the gateway set (see the gateway's README). Only the gateway and aegis-core should be
+  able to reach this service: a caller reaching it directly could claim any address.
 - **Account lockout:** repeated failed logins lock the account (HTTP 423) for a cooldown.
 - **Email verification & password reset** use single-use, hashed, time-limited tokens. The default
   `EmailSender` **logs** the token (dev only); supply an SMTP-backed `EmailSender` bean for production.
@@ -139,5 +162,5 @@ genuinely exercised. They require a running Docker daemon.
 mvn verify
 ```
 
-CI runs them on every push/PR via `.github/workflows/backend-ci.yml` (JDK 21 + Docker on the
-GitHub runner), so they stay green without a local Maven install.
+CI runs them in `identity-service-ci` on every push and pull request that touches this folder (JDK 21,
+with Docker on the GitHub runner), so they stay green without a local Maven install.

@@ -1,0 +1,30 @@
+name: gateway-ci
+
+on:
+  push:
+    paths:
+      - "backend/gateway/**"
+      - ".github/workflows/gateway-ci.yml"
+  pull_request:
+    paths:
+      - "backend/gateway/**"
+      - ".github/workflows/gateway-ci.yml"
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      # No gateway tests yet — `verify` compiles and packages now, and will run tests
+      # automatically once they're added under backend/gateway/src/test.
+      - name: Build and run tests
+        working-directory: backend/gateway
+        run: mvn -B verify
