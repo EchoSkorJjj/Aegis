@@ -51,87 +51,230 @@ class ScriptedClient:
 
 def assessment_output(**changes):
     return {
-        "material": True,
-        "rationale": "The supplied public advisory describes relevant exposure.",
-        "suggested_severity": "HIGH",
-        "cited_passage_ids": ["A1"],
+        "verdict": "NOT_CALLED",
+        "rationale": "The code imports only merge from lodash; the advisory concerns template.",
+        "checks": [],
+        "cited_passage_ids": ["E1"],
         **changes,
     }
 
 
-def test_assessment_resolves_exact_bounded_input_passages():
-    advisory = "  advisory <details> & evidence\n" + "é" * PASSAGE_CHARS
-    context = "Public-facing demo service.\n"
-    engine = RecordingEngine(assessment_output(cited_passage_ids=["A2", "S1", "A1", "A2"]))
+def excerpt(id="E1", path="src/app.ts", start_line=4, text="import { merge } from 'lodash';\nmerge(a, b);",
+            kind="use", term=None):
+    return {"id": id, "path": path, "start_line": start_line, "text": text, "kind": kind, "term": term}
 
-    result = asyncio.run(
-        assess(
-            AssessmentRequest(
-                finding_id="opaque-finding-never-sent",
-                advisory_text=advisory,
-                service_context=context,
-            ),
-            engine,
-        )
-    )
 
-    assert result.citations == [advisory[PASSAGE_CHARS:], context, advisory[:PASSAGE_CHARS]]
-    assert all(len(citation) <= PASSAGE_CHARS for citation in result.citations)
-    assert result.material is True
-    assert result.suggested_severity == "HIGH"
-    assert set(result.model_dump()) == {"material", "rationale", "suggested_severity", "citations"}
+def search(term="template", files_searched=40, files_matched=0, lines_matched=0, complete=True):
+    return {"term": term, "files_searched": files_searched, "files_matched": files_matched,
+            "lines_matched": lines_matched, "complete": complete}
+
+
+def assessment_request(**changes):
+    return AssessmentRequest.model_validate({
+        "finding_id": "opaque-finding-never-sent",
+        "advisory_text": "lodash before 4.17.21: command injection through template.",
+        "package": {"ecosystem": "npm", "name": "lodash"},
+        "fix_summary": None,
+        "searches": [],
+        "excerpts": [excerpt(), excerpt(id="E2", path="lib/util.ts", start_line=20,
+                                        text="const _ = require('lodash');", kind="import")],
+        **changes,
+    })
+
+
+@pytest.mark.parametrize("verdict", ["CALLED", "NOT_CALLED", "CANT_TELL"])
+def test_assessment_answers_and_names_only_the_excerpts_it_cites(verdict):
+    engine = RecordingEngine(assessment_output(verdict=verdict, cited_passage_ids=["A1", "E2", "E1", "E2"]))
+
+    result = asyncio.run(assess(assessment_request(), engine))
+
+    assert result.verdict == verdict
+    # Excerpt ids only, once each, in the order cited: the caller maps them to the lines it sent.
+    assert result.cited_excerpts == ["E2", "E1"]
+    assert set(result.model_dump()) == {"verdict", "rationale", "checks", "cited_excerpts"}
     call = engine.calls[0]
-    assert call["template_id"] == "assess.v2"
+    assert call["template_id"] == "assess.v6"
     assert call["capability"] == "assess"
     assert "opaque-finding-never-sent" not in call["user"] + call["system"]
 
 
-@pytest.mark.parametrize("cited_ids", [["A99"], ["S1"], ["a1"], ["A1", "A999"]])
-def test_assessment_rejects_unknown_citations(cited_ids):
+def test_each_excerpt_is_one_passage_under_its_own_id_with_its_lines():
+    engine = RecordingEngine(assessment_output())
+
+    asyncio.run(assess(assessment_request(), engine))
+
+    user = engine.calls[0]["user"]
+    root = ElementTree.fromstring(user[user.index("<data>"):user.index("</data>") + len("</data>")])
+    passages = {element.attrib["id"]: element.text for element in root}
+    assert list(passages) == ["A1", "P1", "E1", "E2"]
+    assert passages["P1"] == "npm package lodash"
+    # Two lines from line 4: the header says which lines and why they were sent, so a citation means something.
+    assert passages["E1"] == "src/app.ts:4-5 [uses what it imports]\nimport { merge } from 'lodash';\nmerge(a, b);"
+    assert passages["E2"] == "lib/util.ts:20-20 [imports the package]\nconst _ = require('lodash');"
+
+
+def test_the_fix_and_the_search_are_passages_of_their_own_and_a_match_names_its_term():
+    request = assessment_request(
+        fix_summary="src/main/java/NioPathDeserializer.java: public Path deserialize(JsonParser p)",
+        searches=[search("java.nio.file.Path", 212, 1, 2), search("NioPathHelper", 212, 0, 0, complete=False)],
+        excerpts=[excerpt(id="E1", path="src/Upload.java", start_line=8, text="private Path file;", kind="match",
+                          term="java.nio.file.Path")])
+    engine = RecordingEngine(assessment_output(cited_passage_ids=["E1"]))
+
+    asyncio.run(assess(request, engine))
+
+    user = engine.calls[0]["user"]
+    root = ElementTree.fromstring(user[user.index("<data>"):user.index("</data>") + len("</data>")])
+    passages = {element.attrib["id"]: element.text for element in root}
+    assert list(passages) == ["A1", "P1", "F1", "S1", "E1"]
+    assert passages["F1"].startswith("What the fix changed:\nsrc/main/java/NioPathDeserializer.java")
+    assert passages["S1"] == (
+        "Aegis searched the service's code for names an application writes to use what the advisory describes:\n"
+        "- java.nio.file.Path (its package's wildcard imports too): 2 lines in 1 of 212 files\n"
+        "- NioPathHelper: no match in 212 files (the search stopped early, so some files weren't read)")
+    assert passages["E1"] == "src/Upload.java:8-8 [mentions java.nio.file.Path]\nprivate Path file;"
+
+
+def test_not_called_may_rest_on_a_search_that_found_nothing():
+    request = assessment_request(searches=[search("template")])
+    engine = RecordingEngine(assessment_output(verdict="NOT_CALLED", cited_passage_ids=["S1", "E1"]))
+    result = asyncio.run(assess(request, engine))
+    assert result.cited_excerpts == ["E1"]
+    alone = RecordingEngine(assessment_output(verdict="NOT_CALLED", cited_passage_ids=["S1"]))
+    assert asyncio.run(assess(request, alone)).cited_excerpts == []
+
+
+def test_called_must_cite_the_code_not_only_the_search():
+    request = assessment_request(searches=[search("template", files_matched=1, lines_matched=1)])
+    engine = RecordingEngine(assessment_output(verdict="CALLED", cited_passage_ids=["S1"]))
+    with pytest.raises(ValueError, match="cite the code"):
+        asyncio.run(assess(request, engine))
+
+
+def test_a_check_about_a_name_a_complete_search_found_nowhere_is_dropped_as_settled():
+    request = assessment_request(searches=[search("template"), search("templateSettings", lines_matched=1,
+                                                                      files_matched=1)])
+    engine = RecordingEngine(assessment_output(verdict="NOT_CALLED", cited_passage_ids=["S1"], checks=[
+        "Search the entire codebase for any call to _.template.",
+        "Whether templateSettings is set from request input",
+        "Whether the service runs a lodash build older than 4.17.21"]))
+
+    result = asyncio.run(assess(request, engine))
+
+    assert result.checks == ["Whether templateSettings is set from request input",
+                             "Whether the service runs a lodash build older than 4.17.21"]
+
+
+def test_a_check_naming_the_searched_setting_in_words_is_settled_too():
+    request = assessment_request(searches=[search("cacheComponents")])
+    engine = RecordingEngine(assessment_output(verdict="CANT_TELL", cited_passage_ids=[], checks=[
+        "Whether the application uses the App router without the Cache Component",
+        "Whether the server is hosted on Windows"]))
+    assert asyncio.run(assess(request, engine)).checks == ["Whether the server is hosted on Windows"]
+
+
+def test_a_search_that_stopped_early_settles_nothing():
+    request = assessment_request(searches=[search("template", complete=False)])
+    engine = RecordingEngine(assessment_output(verdict="CANT_TELL", cited_passage_ids=[],
+                                               checks=["Whether any unread file calls template"]))
+    assert asyncio.run(assess(request, engine)).checks == ["Whether any unread file calls template"]
+
+
+def test_for_java_a_complete_search_finding_no_qualified_type_says_no_class_can_use_it():
+    request = assessment_request(package={"ecosystem": "Maven", "name": "com.fasterxml.jackson.core:jackson-databind"},
+                                 searches=[search("java.nio.file.Path", 64)])
+    engine = RecordingEngine(assessment_output(cited_passage_ids=["S1"]))
+
+    asyncio.run(assess(request, engine))
+
+    user = engine.calls[0]["user"]
+    assert ("- java.nio.file.Path (its package's wildcard imports too): no match in 64 files, so no class in the"
+            " service's code can use this type") in user
+
+
+def test_checks_are_what_a_reviewer_should_verify_and_come_back_as_they_were_written():
+    engine = RecordingEngine(assessment_output(verdict="CANT_TELL", cited_passage_ids=[], checks=[
+        "Whether the server is hosted on Windows", "Whether Cache Components are enabled"]))
+    result = asyncio.run(assess(assessment_request(), engine))
+    assert result.checks == ["Whether the server is hosted on Windows", "Whether Cache Components are enabled"]
+
+
+def test_build_prompt_keeps_identified_passages_whole_and_apart_from_split_sources():
+    long = "x" * (PASSAGE_CHARS + 10)
+    prompt = build_prompt("assess", [("A", long)], passages=[("E1", "first"), ("E2", "second")])
+    assert list(prompt.passages) == ["A1", "A2", "E1", "E2"]
+    assert prompt.passages["E1"] == "first" and prompt.passages["E2"] == "second"
+
+
+@pytest.mark.parametrize("verdict", ["CALLED", "NOT_CALLED"])
+def test_a_called_or_not_called_answer_must_cite_the_code(verdict):
+    engine = RecordingEngine(assessment_output(verdict=verdict, cited_passage_ids=["A1"]))
+    with pytest.raises(ValueError, match="cite the code"):
+        asyncio.run(assess(assessment_request(), engine))
+
+
+@pytest.mark.parametrize("cited_ids", [["E9"], ["e1"], ["A99"], ["E1", "S1"], ["F1"]])
+def test_an_answer_citing_anything_not_sent_is_refused(cited_ids):
     engine = RecordingEngine(assessment_output(cited_passage_ids=cited_ids))
     with pytest.raises(ValueError, match="supplied passage IDs"):
-        asyncio.run(assess(AssessmentRequest(finding_id="f1", advisory_text="evidence"), engine))
+        asyncio.run(assess(assessment_request(), engine))
 
 
-def test_material_assessment_requires_citations():
-    engine = RecordingEngine(assessment_output(cited_passage_ids=[]))
-    with pytest.raises(ValueError, match="supporting citation"):
-        asyncio.run(assess(AssessmentRequest(finding_id="f1", advisory_text="evidence"), engine))
-
-
-def test_nonmaterial_assessment_can_have_no_citations():
-    engine = RecordingEngine(assessment_output(material=False, cited_passage_ids=[]))
-    result = asyncio.run(
-        assess(AssessmentRequest(finding_id="f1", advisory_text="uncertain evidence"), engine)
-    )
-    assert result.citations == []
-    assert result.material is False
-
-
-def test_nonmaterial_assessment_still_rejects_fabricated_citations():
-    engine = RecordingEngine(assessment_output(material=False, cited_passage_ids=["A99"]))
-    with pytest.raises(ValueError, match="supplied passage IDs"):
-        asyncio.run(assess(AssessmentRequest(finding_id="f1", advisory_text="evidence"), engine))
+def test_cant_tell_may_cite_nothing():
+    engine = RecordingEngine(assessment_output(verdict="CANT_TELL", cited_passage_ids=[]))
+    result = asyncio.run(assess(assessment_request(), engine))
+    assert result.verdict == "CANT_TELL"
+    assert result.cited_excerpts == []
 
 
 @pytest.mark.parametrize(
     "changes",
     [
-        {"material": "true"},
-        {"material": 1},
-        {"suggested_severity": "UNKNOWN"},
+        {"verdict": "MAYBE"},
+        {"verdict": "called"},
         {"rationale": ""},
-        {"rationale": "x" * 4001},
+        {"rationale": "x" * 1201},
         {"cited_passage_ids": [1]},
-        {"cited_passage_ids": ["A1"] * 65},
-        {"cited_passage_ids": ["A" * 17]},
-        {"fabricated_field": "ignored?"},
+        {"cited_passage_ids": ["E1"] * 65},
+        {"checks": ["a check"] * 4},
+        {"checks": ["x" * 201]},
+        {"checks": [""]},
+        {"material": True},
         {"citations": ["fabricated citation text"]},
     ],
 )
 def test_assessment_output_is_strict_and_bounded(changes):
     with pytest.raises(ValidationError):
         AssessmentOutput.model_validate_json(json.dumps(assessment_output(**changes)))
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"excerpts": []},
+        {"excerpts": [excerpt(id=f"E{index}") for index in range(1, 8)]},
+        {"excerpts": [excerpt(id="E7")]},
+        {"excerpts": [excerpt(id="C1")]},
+        {"excerpts": [excerpt(), excerpt()]},
+        {"excerpts": [excerpt(text="x" * 601)]},
+        {"excerpts": [excerpt(path="p" * 301)]},
+        {"excerpts": [excerpt(kind="match", term="t" * 65)]},
+        {"excerpts": [excerpt(start_line=0)]},
+        {"excerpts": [excerpt(kind="call")]},
+        {"excerpts": [excerpt(kind="match")]},
+        {"excerpts": [excerpt(kind="use", term="template")]},
+        {"fix_summary": "x" * 1201},
+        {"advisory_text": "x" * 2501},
+        {"searches": [search()] * 6},
+        {"searches": [search(term="")]},
+        {"searches": [search(files_searched=-1)]},
+        {"package": {"ecosystem": "npm"}},
+        {"service_context": "a field the contract no longer has"},
+    ],
+)
+def test_assessment_request_is_strict_and_bounded(changes):
+    with pytest.raises(ValidationError):
+        assessment_request(**changes)
 
 
 @pytest.mark.parametrize("capability,prefix", [("assess", "A"), ("draft", "C")])
@@ -292,25 +435,16 @@ def test_memo_output_without_a_section_is_rejected():
         MemoOutput.model_validate_json(json.dumps(output))
 
 
-@pytest.mark.parametrize(
-    "payload",
-    [
-        AssessmentRequest(finding_id="id", advisory_text="a" * 9),
-        AssessmentRequest(finding_id="id", advisory_text="a" * 7, service_context="ss"),
-        AssessmentRequest(finding_id="f" * 11, advisory_text=""),
-    ],
-)
-def test_assessment_counts_every_input_field_before_a_call(payload):
-    engine = RecordingEngine(assessment_output(), max_chars=10)
-    with pytest.raises(BadRequest, match="limit of 10"):
-        asyncio.run(assess(payload, engine))
+def test_assessment_counts_the_excerpts_too_before_a_call():
+    request = assessment_request()
+    sent = len(request.finding_id) + len(request.advisory_text) + len("npm") + len("lodash") + sum(
+        len(item.path) + len(item.id) + len(item.text) + len(item.kind) for item in request.excerpts)
+    engine = RecordingEngine(assessment_output(), max_chars=sent - 1)
+    with pytest.raises(BadRequest, match=f"limit of {sent - 1}"):
+        asyncio.run(assess(request, engine))
     assert engine.calls == []
-
-
-def test_exact_input_limit_is_accepted_without_truncation():
-    engine = RecordingEngine(assessment_output(), max_chars=10)
-    result = asyncio.run(assess(AssessmentRequest(finding_id="id", advisory_text="a" * 8), engine))
-    assert result.citations == ["a" * 8]
+    # The exact limit is accepted.
+    assert asyncio.run(assess(request, RecordingEngine(assessment_output(), max_chars=sent))).verdict
 
 
 def test_draft_counts_control_fields_and_context_before_a_call():
@@ -338,9 +472,9 @@ def test_unknown_draft_type_returns_uniform_http_400(client):
 
 def test_oversized_input_returns_uniform_http_400(client):
     response = client.post(
-        "/v1/assess",
+        "/v1/draft",
         headers={"X-Service-Token": "test-token"},
-        json={"finding_id": "f1", "advisory_text": "a" * 16001},
+        json={"finding_id": "f1", "draft_type": "upgrade", "context": "a" * 16001},
     )
     assert response.status_code == 400
     assert response.json()["error"] == "Bad Request"
@@ -350,26 +484,26 @@ def test_oversized_input_returns_uniform_http_400(client):
 @pytest.mark.parametrize("finding_id", [True, 123])
 def test_request_fields_do_not_coerce_input_types(finding_id):
     with pytest.raises(ValidationError):
-        AssessmentRequest(finding_id=finding_id, advisory_text="advisory")
+        assessment_request(finding_id=finding_id)
 
 
 def test_real_generator_retries_unknown_citation_then_resolves_valid_passage():
     client = ScriptedClient(
-        [assessment_output(cited_passage_ids=["A99"]), assessment_output(cited_passage_ids=["A1"])]
+        [assessment_output(cited_passage_ids=["E9"]), assessment_output(cited_passage_ids=["E2"])]
     )
     engine = StructuredGenerator(Settings(_env_file=None), client)
-    result = asyncio.run(assess(AssessmentRequest(finding_id="f1", advisory_text="source"), engine))
-    assert result.citations == ["source"]
+    result = asyncio.run(assess(assessment_request(), engine))
+    assert result.cited_excerpts == ["E2"]
     assert len(client.calls) == 2
-    assert "A99" not in client.calls[1]["user"] + client.calls[1]["system"]
+    assert "E9" not in client.calls[1]["user"] + client.calls[1]["system"]
 
 
-@pytest.mark.parametrize("cited_ids", [[], ["A99"]])
+@pytest.mark.parametrize("cited_ids", [["A1"], ["E9"]])
 def test_real_generator_rejects_bad_assessment_citations_after_one_retry(cited_ids):
     client = ScriptedClient([assessment_output(cited_passage_ids=cited_ids)] * 2)
     engine = StructuredGenerator(Settings(_env_file=None), client)
     with pytest.raises(BadGateway, match="invalid output"):
-        asyncio.run(assess(AssessmentRequest(finding_id="f1", advisory_text="source"), engine))
+        asyncio.run(assess(assessment_request(), engine))
     assert len(client.calls) == 2
 
 

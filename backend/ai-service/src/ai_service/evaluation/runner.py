@@ -11,7 +11,9 @@ from pathlib import Path
 from uuid import uuid4
 
 from ai_service.capabilities._guardrails import redact
+from ai_service.capabilities.assess import assess
 from ai_service.capabilities.draft import draft
+from ai_service.capabilities.look_for import look_for
 from ai_service.core.config import Settings
 from ai_service.core.errors import BadGateway, BadRequest, ServiceUnavailable
 from ai_service.evaluation.cases import Corpus, fingerprint
@@ -21,6 +23,8 @@ from ai_service.evaluation.rubric import (
     RUBRIC_VERSION,
     WEIGHTS,
     grade,
+    grade_assessment,
+    grade_look_for,
 )
 from ai_service.llm.base import LlmResult
 from ai_service.llm.structured import StructuredGenerator
@@ -86,7 +90,8 @@ async def evaluate(corpus: Corpus, client, config: Settings, *, delay_seconds: f
             await asyncio.sleep(delay_seconds)
         if isinstance(client, GoldenClient):
             client.reference = case.reference
-        prompt = build_prompt("draft", [("C", case.context)], draft_type=case.draft_type)
+        prompt = (build_prompt(case.capability, [("A", case.advisory)]) if case.capability != "draft"
+                  else build_prompt("draft", [("C", case.context)], draft_type=case.draft_type))
         resources = files("ai_service.prompts")
         template = prompt.template_id.rsplit(".", 1)[0]
         templates[prompt.template_id] = fingerprint([
@@ -97,10 +102,17 @@ async def evaluate(corpus: Corpus, client, config: Settings, *, delay_seconds: f
         started = time.perf_counter()
         candidate, grading = None, None
         try:
-            candidate = await draft(DraftRequest(finding_id=case.id, draft_type=case.draft_type,
-                                               context=case.context), engine)
+            if case.capability == "assess":
+                candidate = await assess(case.assessment_request(), engine)
+                grading = grade_assessment(case, candidate)
+            elif case.capability == "look_for":
+                candidate = await look_for(case.look_for_request(), engine)
+                grading = grade_look_for(case, candidate)
+            else:
+                candidate = await draft(DraftRequest(finding_id=case.id, draft_type=case.draft_type,
+                                                   context=case.context), engine)
+                grading = grade(case, candidate)
             outcome = "draft"
-            grading = grade(case, candidate)
         except BadRequest as error:
             outcome = ("blocked" if error.message == "Source content contains unsupported control instructions"
                        else "invalid_request")
@@ -116,10 +128,12 @@ async def evaluate(corpus: Corpus, client, config: Settings, *, delay_seconds: f
         passed = (outcome == "blocked" and calls == 0 if case.expected == "blocked"
                   else outcome == "draft" and grading["passed"])
         results.append({
-            "id": case.id, "title": case.title, "draft_type": case.draft_type, "tags": case.tags,
+            "id": case.id, "title": case.title, "capability": case.capability, "draft_type": case.draft_type,
+            "tags": case.tags,
             "expected": case.expected, "outcome": outcome, "passed": passed,
             "grading": grading, "draft": _protected(candidate.model_dump()) if candidate else None,
-            "context": redact(case.context), "latency_ms": elapsed, "provider_calls": calls,
+            "context": redact(case.context if case.capability == "draft" else _assessment_source(case)),
+            "latency_ms": elapsed, "provider_calls": calls,
             "input_tokens": tracked.input_tokens - before[1],
             "output_tokens": tracked.output_tokens - before[2],
         })
@@ -168,9 +182,25 @@ async def evaluate(corpus: Corpus, client, config: Settings, *, delay_seconds: f
                        "passed": sum(item["passed"] for item in items)}
                 for kind in ("risk_ticket", "upgrade", "memo")
             },
+            "by_capability": {
+                kind: {"cases": len(items := [item for item in results if item["capability"] == kind]),
+                       "passed": sum(item["passed"] for item in items)}
+                for kind in ("draft", "assess", "look_for")
+            },
             "human_review": "pending", "machine_scores_are_quality_proxies": True,
         }, "cases": results,
     }
+
+
+def _assessment_source(case) -> str:
+    """An assess or look-for case's sources as one text: the advisory, what its fix changed, the search, then each
+    excerpt under its path, first line and kind."""
+    searches = "\n".join(f"searched {item['files_searched']} files for {item['term']}: {item['lines_matched']} lines"
+                         for item in case.searches or [])
+    excerpts = "\n\n".join(f"{item['id']} {item['path']}:{item['start_line']} [{item['kind']}]\n{item['text']}"
+                            for item in case.excerpts or [])
+    parts = [case.advisory or "", case.fix_summary or "", searches, excerpts]
+    return "\n\n".join(part for part in parts if part).strip()
 
 
 def compare(report: dict, baseline: dict, max_score_drop: float = 0) -> dict:
@@ -213,7 +243,8 @@ def write_report(report: dict, directory: Path) -> None:
              "| Case | Type | Outcome | Score | Pass |", "|---|---|---|---|---|"]
     for case in protected["cases"]:
         score = case["grading"]["auto_score"] if case["grading"] else "n/a"
-        lines.append(f"| {case['id']} | {case['draft_type']} | {case['outcome']} | {score} | {case['passed']} |")
+        lines.append(f"| {case['id']} | {case['draft_type'] or case['capability']} | {case['outcome']} | {score} "
+                     f"| {case['passed']} |")
     if "comparison" in protected:
         lines.extend(["", "Baseline regressions: " + ", ".join(protected["comparison"]["regressions"] or ["none"])])
     for case in protected["cases"]:

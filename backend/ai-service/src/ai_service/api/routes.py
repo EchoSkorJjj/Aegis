@@ -10,9 +10,17 @@ from fastapi import APIRouter, Depends, Request
 
 from ai_service.capabilities.assess import assess as run_assess
 from ai_service.capabilities.draft import draft as run_draft
+from ai_service.capabilities.look_for import look_for as run_look_for
 from ai_service.core.security import require_service_token
 from ai_service.llm.structured import StructuredGenerator
-from ai_service.schemas import Assessment, AssessmentRequest, Draft, DraftRequest
+from ai_service.schemas import (
+    Assessment,
+    AssessmentRequest,
+    Draft,
+    DraftRequest,
+    LookFor,
+    LookForRequest,
+)
 
 router = APIRouter()
 
@@ -49,6 +57,19 @@ async def assess(
     request: AssessmentRequest, engine: Annotated[StructuredGenerator, Depends(generator)],
 ) -> Assessment:
     return await run_assess(request, engine)
+
+
+@router.post(
+    "/v1/assess/look-for",
+    response_model=LookFor,
+    tags=["ai"],
+    summary="Name what to search a service's code for, before assessing it",
+    dependencies=[Depends(require_service_token)],
+)
+async def look_for(
+    request: LookForRequest, engine: Annotated[StructuredGenerator, Depends(generator)],
+) -> LookFor:
+    return await run_look_for(request, engine)
 
 
 @router.post(

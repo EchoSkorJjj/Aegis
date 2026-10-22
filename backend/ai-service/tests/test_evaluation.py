@@ -11,7 +11,7 @@ from ai_service.capabilities.draft import _ticket_text
 from ai_service.core.errors import BadRequest, ServiceUnavailable
 from ai_service.evaluation.__main__ import main
 from ai_service.evaluation.cases import Corpus, load_corpus
-from ai_service.evaluation.rubric import WEIGHTS, _contains, grade
+from ai_service.evaluation.rubric import WEIGHTS, _contains, grade, grade_assessment, grade_look_for
 from ai_service.evaluation.runner import (
     GoldenClient,
     compare,
@@ -20,7 +20,7 @@ from ai_service.evaluation.runner import (
     write_report,
 )
 from ai_service.llm.stub import StubLlmClient
-from ai_service.schemas import Draft, TicketSections
+from ai_service.schemas import Assessment, Draft, LookFor, TicketSections
 
 
 @pytest.fixture(scope="module")
@@ -42,8 +42,26 @@ def ticket(case, **changes):
 
 
 def test_corpus_covers_all_drafts_missing_evidence_privacy_and_attacks(corpus):
-    assert len(corpus.cases) == 20
-    assert {case.draft_type for case in corpus.cases} == {"risk_ticket", "upgrade", "memo"}
+    assert len(corpus.cases) == 33
+    drafts = [case for case in corpus.cases if case.capability == "draft"]
+    assert {case.draft_type for case in drafts} == {"risk_ticket", "upgrade", "memo"}
+    # E11-5: the AI on whether the vulnerable function is called — each answer, one resting on the search, one whose
+    # condition code can't show (with what to check) — and code that tries to instruct it.
+    assessments = [case for case in corpus.cases if case.capability == "assess"]
+    assert {case.expected_verdict for case in assessments if case.expected == "draft"} == {
+        "CALLED", "NOT_CALLED", "CANT_TELL"}
+    assert any(case.expected == "blocked" for case in assessments)
+    assert any(case.searches for case in assessments) and any(case.fix_summary for case in assessments)
+    assert any(case.checks.actions for case in assessments)
+    # A trigger that is the shape of bound data, absent and present: searched by the type an application declares.
+    assert {case.expected_verdict for case in assessments if "data-shape" in case.tags} == {"CALLED", "NOT_CALLED"}
+    # Pass 1: what to search for, from the advisory and its fix; a secret-ish name dropped; an instruction refused.
+    look_fors = [case for case in corpus.cases if case.capability == "look_for"]
+    assert any(case.unexpected_terms for case in look_fors)
+    # The fix commit's names are mostly the package's own, which no service writes: never searched.
+    assert any("fix-commit" in case.tags and case.unexpected_terms for case in look_fors)
+    assert any(case.fix_summary for case in look_fors)
+    assert any(case.expected == "blocked" for case in look_fors)
     for kind in ("risk_ticket", "upgrade", "memo"):
         assert any(case.draft_type == kind and case.context is None for case in corpus.cases)
         assert any(case.draft_type == kind and "privacy" in case.tags for case in corpus.cases)
@@ -52,11 +70,14 @@ def test_corpus_covers_all_drafts_missing_evidence_privacy_and_attacks(corpus):
 
 
 def test_all_golden_references_pass_actual_drafting_pipeline(golden_report):
-    assert golden_report["summary"]["passed"] == 20
-    assert golden_report["summary"]["quality_cases"] == 17
+    assert golden_report["summary"]["passed"] == 33
+    assert golden_report["summary"]["quality_cases"] == 28
     assert golden_report["summary"]["mean_auto_score"] == 100
-    assert golden_report["summary"]["guardrail_cases"] == 3
-    assert golden_report["summary"]["provider_calls"] == 17
+    assert golden_report["summary"]["guardrail_cases"] == 5
+    assert golden_report["summary"]["provider_calls"] == 28
+    assert golden_report["summary"]["by_capability"] == {
+        "draft": {"cases": 20, "passed": 20}, "assess": {"cases": 8, "passed": 8},
+        "look_for": {"cases": 5, "passed": 5}}
     assert golden_report["mode"] == "reference_replay"
     assert golden_report["summary"]["human_review"] == "pending"
     for case in golden_report["cases"]:
@@ -211,6 +232,83 @@ def test_corpus_rejects_duplicate_ids_invalid_rules_and_invalid_reference(corpus
     data = corpus.model_dump()
     data["cases"][0]["checks"]["facts"] = []
     with pytest.raises(ValidationError, match="factual and actionable"):
+        Corpus.model_validate(data)
+
+
+def assessment(case, **changes):
+    payload = {"verdict": case.reference["verdict"], "rationale": case.reference["rationale"],
+               "checks": case.reference["checks"],
+               "cited_excerpts": [passage for passage in case.reference["cited_passage_ids"]
+                                  if passage.startswith("E")], **changes}
+    return Assessment(**payload)
+
+
+def test_an_assessment_is_scored_on_the_checks_it_suggests_too(corpus):
+    case = next(case for case in corpus.cases if case.id == "assess-condition-outside-the-code")
+    assert grade_assessment(case, assessment(case))["passed"] is True
+    vague = grade_assessment(case, assessment(case, checks=["Review the code."]))
+    assert vague["scores"]["actionability"] < 4 and vague["passed"] is False
+    leaky = grade_assessment(case, assessment(case, checks=["Rotate token=ghp_" + "a1" * 12]))
+    assert "sensitive_text" in leaky["hard_failures"]
+
+
+def test_a_settled_answer_never_asks_a_reviewer_to_redo_the_search_or_look_for_internals(corpus):
+    case = next(case for case in corpus.cases if case.id == "assess-data-shape-trigger-absent")
+    assert grade_assessment(case, assessment(case))["passed"] is True
+    for noise in ("Search the entire codebase for references to java.nio.file.Path.",
+                  "Verify no imports of jackson-databind's NioPathDeserializer."):
+        graded = grade_assessment(case, assessment(case, checks=[noise]))
+        assert "forbidden_claim" in graded["hard_failures"], noise
+
+
+def test_a_look_for_answer_is_scored_on_the_terms_it_keeps(corpus):
+    case = next(case for case in corpus.cases if case.id == "look-for-fix-symbols")
+    expected = LookFor(terms=case.expected_terms)
+    assert grade_look_for(case, expected)["passed"] is True
+    assert grade_look_for(case, expected)["auto_score"] == 100
+    missing = grade_look_for(case, LookFor(terms=[]))
+    assert missing["scores"]["grounding"] == 0 and missing["passed"] is False
+    secretive = next(case for case in corpus.cases if case.id == "look-for-secret-dropped")
+    unsafe = grade_look_for(secretive, LookFor(terms=secretive.expected_terms + secretive.unexpected_terms))
+    assert "unsafe_or_ungrounded_terms" in unsafe["hard_failures"] and unsafe["passed"] is False
+
+
+def test_corpus_rejects_a_look_for_case_without_the_terms_it_expects(corpus):
+    data = corpus.model_dump()
+    look_for = next(index for index, case in enumerate(data["cases"]) if case["id"] == "look-for-fix-symbols")
+    data["cases"][look_for]["expected_terms"] = []
+    with pytest.raises(ValidationError, match="expected terms"):
+        Corpus.model_validate(data)
+
+
+def test_an_assessment_is_scored_on_its_verdict_and_the_lines_it_cites(corpus):
+    case = next(case for case in corpus.cases if case.id == "assess-not-called")
+    assert grade_assessment(case, assessment(case))["passed"] is True
+    assert grade_assessment(case, assessment(case))["auto_score"] == 100
+
+    wrong = grade_assessment(case, assessment(case, verdict="CALLED"))
+    assert "wrong_verdict" in wrong["hard_failures"] and wrong["passed"] is False
+    unsent = grade_assessment(case, assessment(case, cited_excerpts=["E9"]))
+    assert "missing_or_fabricated_citations" in unsent["hard_failures"] and unsent["passed"] is False
+    uncited = grade_assessment(case, assessment(case, cited_excerpts=[]))
+    assert "missing_or_fabricated_citations" in uncited["hard_failures"]
+    leaky = grade_assessment(case, assessment(case, rationale="Called from password=synthetic-password."))
+    assert "sensitive_text" in leaky["hard_failures"]
+
+
+def test_corpus_rejects_an_assessment_case_without_its_expected_answer(corpus):
+    data = corpus.model_dump()
+    assess = next(index for index, case in enumerate(data["cases"]) if case["id"] == "assess-called")
+    data["cases"][assess]["expected_verdict"] = None
+    with pytest.raises(ValidationError, match="expected verdict"):
+        Corpus.model_validate(data)
+    data = corpus.model_dump()
+    data["cases"][assess]["reference"]["verdict"] = "MAYBE"
+    with pytest.raises(ValidationError):
+        Corpus.model_validate(data)
+    data = corpus.model_dump()
+    data["cases"][assess]["excerpts"] = []
+    with pytest.raises(ValidationError):
         Corpus.model_validate(data)
 
 

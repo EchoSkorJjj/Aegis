@@ -20,7 +20,12 @@ final class NvdJson {
             String vulnStatus,
             List<LangValue> descriptions,
             Metrics metrics,
-            List<Configuration> configurations) {
+            List<Configuration> configurations,
+            List<Reference> references) {
+    }
+
+    /** A link the CVE cites, tagged ("Patch", "Vendor Advisory", …). */
+    record Reference(String url, List<String> tags) {
     }
 
     record LangValue(String lang, String value) {

@@ -16,8 +16,18 @@ test("the privacy notice is public and says what Aegis keeps from Jira and GitHu
 
   await expect(page.getByRole("region", { name: "GitHub" }))
     .toContainText("An access token pasted for an import is used for that import only and never stored.");
-  await expect(page.getByRole("region", { name: "AI drafting" }))
-    .toContainText("It never sends access tokens, repository files or anything read from Jira.");
+  const drafting = page.getByRole("region", { name: "AI drafting" });
+  await expect(drafting).toContainText("It never sends access tokens, the service's code, or anything read from Jira.");
+  await expect(drafting).toContainText("how many owners each service has, never who they are");
+  // E11-5: only a few lines where the code imports, uses or names the vulnerable part leave, when someone asks, and no
+  // code is kept; the fix commit comes from its public host.
+  const reachability = page.getByRole("region", { name: "AI reachability assessment" });
+  await expect(reachability).toContainText("the lines where the code imports or uses the vulnerable package, and the"
+    + " lines that name what the advisory or its fix names, up to six places, with three lines on either side");
+  await expect(reachability).toContainText("Nothing else from the repository is sent");
+  await expect(reachability).toContainText("the fix commit's changes from its public host");
+  await expect(reachability).toContainText("never the code");
+  await expect(reachability).toContainText("It never changes an impact score or decides anything.");
   await expect(page.getByRole("region", { name: "Contact" })).toContainText("Contact whoever runs this Aegis deployment.");
 });
 

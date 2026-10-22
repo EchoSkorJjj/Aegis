@@ -6,7 +6,7 @@ import { siteConfig } from "@/lib/site";
 export const metadata: Metadata = { title: "Privacy" };
 
 /** When this notice last changed in substance. */
-const UPDATED = "26 September 2026";
+const UPDATED = "16 October 2026";
 
 /**
  * What Aegis does with data from the Jira and GitHub accounts an organization connects — the page
@@ -128,10 +128,29 @@ export default async function PrivacyPage() {
         <p>
           When this deployment has an AI provider configured, {name} uses it to draft the text of pull requests,
           risk tickets and regulator notifications. It sends the provider the change&apos;s published description
-          and {name}&apos;s own facts about it: the affected services, packages, versions and vendors, their
-          impact scores, and the names of the services&apos; assigned owners. It never sends access tokens,
-          repository files or anything read from Jira. A person reviews every draft before anything is filed,
+          and {name}&apos;s own facts about it: the affected services, packages, versions and vendors, their impact
+          scores, and how many owners each service has, never who they are. It never sends access tokens, the
+          service&apos;s code, or anything read from Jira. A person reviews every draft before anything is filed,
           opened or finalised.
+        </p>
+      </Section>
+
+      <Section id="ai-reachability" title="AI reachability assessment">
+        <p>
+          When someone asks the AI whether a service&apos;s code uses the vulnerable part of a package it imports, or
+          drafts a risk ticket for such a vulnerability, {name} fetches the fix commit&apos;s changes from its public
+          host (GitHub or GitLab), when the advisory names one, and reads the repository again at the commit its last
+          import read — only the source files in the package&apos;s language, deleted when done. It sends the AI
+          provider the vulnerability&apos;s published description, what the fix changed, the package&apos;s name, how
+          often the code names what the advisory names, and the lines where the code imports or uses the vulnerable
+          package, and the lines that name what the advisory or its fix names, up to six places, with three lines on
+          either side and each file&apos;s path — after removing anything that looks like a secret or personal data.
+          Nothing else from the repository is sent, and the AI can&apos;t search the code for credentials.
+        </p>
+        <p>
+          {name} keeps the answer — called, not called or can&apos;t tell — the AI&apos;s reason, what it suggests a
+          reviewer check, the names the code was searched for, and the file paths and line numbers it cites, never
+          the code. The answer is a suggestion for a person. It never changes an impact score or decides anything.
         </p>
       </Section>
 

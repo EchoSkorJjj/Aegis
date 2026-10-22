@@ -204,7 +204,7 @@ public class CodeUsage {
      * The line's address in the repository's web view: GitHub's {@code /blob/<ref>/<path>#L<line>} (and any host but
      * these), GitLab's {@code /-/blob/…}, Bitbucket's {@code /src/…#lines-<line>}. Null when the URL isn't one.
      */
-    static String lineUrl(String repositoryUrl, String ref, String path, int line) {
+    public static String lineUrl(String repositoryUrl, String ref, String path, int line) {
         if (repositoryUrl == null || !repositoryUrl.startsWith("https://")) {
             return null;
         }

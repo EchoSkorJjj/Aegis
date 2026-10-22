@@ -12,6 +12,7 @@ import java.util.Set;
 
 import com.aegis.core.advisories.Advisory;
 import com.aegis.core.advisories.AffectedProduct;
+import com.aegis.core.advisories.CommitUrl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -67,11 +68,16 @@ class NvdAdvisoryParser {
                 null, // assigned by the store on first write
                 NvdSource.SOURCE_ID,
                 cve.id().trim(),
+                cve.id().trim(), // an NVD id already is the canonical (CVE) id
                 description(cve),
                 NvdTimestamps.parse(cve.published()),
                 NvdTimestamps.parse(cve.lastModified()),
                 cvss(cve.metrics()),
-                affectedProducts(cve));
+                affectedProducts(cve),
+                null, // the description already is the full text
+                CommitUrl.among(cve.references() == null ? null
+                        : cve.references().stream().filter(reference -> reference != null)
+                                .map(NvdJson.Reference::url).toList()));
     }
 
     private static String description(NvdJson.Cve cve) {

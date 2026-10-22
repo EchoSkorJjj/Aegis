@@ -56,6 +56,11 @@ aegis:
   ai:
     base-url: ${AI_SERVICE_URI:http://localhost:8083}
     service-token: ${AI_SERVICE_TOKEN:dev-internal-token-change-me}
+  # The AI's reachability suggestion (E11-5): what an advisory's fix commits changed, fetched as diffs from github.com
+  # and gitlab.com (public, no credentials) for the AI to read beside the advisory. Off, it reads the advisory alone.
+  assess:
+    fix-commits:
+      enabled: ${AEGIS_ASSESS_FIX_COMMITS_ENABLED:true}
   # The GitHub App (GITHUB_APP.md): draft pull requests and SBOM clones, only through installations an
   # organization admin has connected under Organization > Integrations (V22).
   actions:

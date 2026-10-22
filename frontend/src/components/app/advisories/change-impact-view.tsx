@@ -4,6 +4,7 @@ import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, Info } from "lucide-react";
 
+import { AiSuggestion, useAssessments } from "@/components/app/advisories/ai-suggestion";
 import { ReachabilityEvidence } from "@/components/app/responses/code-usage";
 import { MemoAction, useLiveMemo } from "@/components/app/responses/memo-action";
 import { ResponseAction, useResponses } from "@/components/app/responses/response-action";
@@ -124,6 +125,8 @@ function ImpactView({ signalId, finding }: { signalId: string; finding: boolean 
     status === "ok" && (data?.change.signalType === "VULNERABILITY" || data?.change.signalType === "VENDOR_OUTAGE");
   const { responses, error: responseError } = useResponses(signalId, respondable);
   const memo = useLiveMemo(signalId, respondable);
+  // The AI's suggestion on whether the code calls the vulnerable function (E11-5): vulnerabilities only.
+  const assessments = useAssessments(signalId, status === "ok" && data?.change.signalType === "VULNERABILITY");
 
   const backLink = (
     <Link
@@ -250,6 +253,15 @@ function ImpactView({ signalId, finding }: { signalId: string; finding: boolean 
                 key={scored.service.id}
                 scored={scored}
                 response={respondable ? { signalId, responses, canDraft, preview: finding } : null}
+                suggestion={change.signalType === "VULNERABILITY" && !assessments.error ? (
+                  <AiSuggestion
+                    changeSignalId={signalId}
+                    serviceId={scored.service.id}
+                    items={assessments.byService ? (assessments.byService.get(scored.service.id) ?? []) : null}
+                    canAsk={canDraft}
+                    onAnswered={(items) => assessments.replace(scored.service.id, items)}
+                  />
+                ) : null}
               />
             );
           })}
@@ -270,7 +282,16 @@ type ResponseContext = {
   preview: boolean;
 };
 
-function ServiceCard({ scored, response }: { scored: ScoredService; response: ResponseContext | null }) {
+function ServiceCard({
+  scored,
+  response,
+  suggestion,
+}: {
+  scored: ScoredService;
+  response: ResponseContext | null;
+  /** The AI's reachability suggestion (E11-5), beside the score and never part of it. */
+  suggestion: React.ReactNode;
+}) {
   const confidence = CONFIDENCE[scored.confidence];
   const existing = response?.responses?.get(scored.service.id);
   return (
@@ -294,6 +315,7 @@ function ServiceCard({ scored, response }: { scored: ScoredService; response: Re
       </div>
       <div className="space-y-3 p-4">
         <WhyThisScore scored={scored} />
+        {suggestion}
         {scored.evidence.map((evidence, index) => (
           <Evidence key={index} evidence={evidence} />
         ))}

@@ -24,7 +24,12 @@ final class OsvJson {
             List<String> aliases,
             List<Severity> severity,
             List<Affected> affected,
-            @JsonProperty("database_specific") DatabaseSpecific databaseSpecific) {
+            @JsonProperty("database_specific") DatabaseSpecific databaseSpecific,
+            List<Reference> references) {
+    }
+
+    /** A link the record cites; {@code type} is WEB, ADVISORY, FIX, PACKAGE… (GHSA marks its fix commits WEB). */
+    record Reference(String type, String url) {
     }
 
     /** A CVSS metric: {@code type} like {@code CVSS_V3}, {@code score} the vector string. */

@@ -22,20 +22,34 @@ class Prompt:
     passages: dict[str, str]
 
 
+# A template's version moves when its wording does, so metrics and logs tell the two apart.
+VERSIONS = {"assess": "v6", "look_for": "v2"}
+
+
 def build_prompt(
-    capability: Literal["assess", "draft"],
+    capability: Literal["assess", "look_for", "draft"],
     sources: list[tuple[str, str | None]],
     *,
     draft_type: Literal["risk_ticket", "upgrade", "memo"] | None = None,
+    passages: list[tuple[str, str]] | None = None,
 ) -> Prompt:
-    """Redact whole sources before splitting; citations resolve to the same protected passages."""
+    """Redact whole sources before splitting; citations resolve to the same protected passages.
+
+    ``passages`` are already identified (an assessment's code excerpts, fix summary and search results, each its own
+    citation): each is redacted and kept whole under its own ID, after the split sources. Splitting numbers passages per prefix, so two sources
+    sharing a prefix would collide; identified passages can't.
+    """
     sources = [(prefix, redact(text)) for prefix, text in sources]
-    passages = {
+    split = {
         f"{prefix}{index // PASSAGE_CHARS + 1}": text[index : index + PASSAGE_CHARS]
         for prefix, text in sources
         if text
         for index in range(0, len(text), PASSAGE_CHARS)
     }
+    identified = {passage_id: redact(text) for passage_id, text in passages or []}
+    if split.keys() & identified.keys():
+        raise ValueError("Identified passages must not reuse a split source's IDs")
+    passages = {**split, **identified}
     blocks = "\n".join(
         f'<passage id="{passage_id}">{escape(text, quote=False)}</passage>'
         for passage_id, text in passages.items()
@@ -47,4 +61,4 @@ def build_prompt(
     user = resources.joinpath(f"{template}.user.md").read_text(encoding="utf-8").format(
         passages=blocks, draft_type=draft_type
     )
-    return Prompt(f"{template}.v2", system, user, passages)
+    return Prompt(f"{template}.{VERSIONS.get(template, 'v2')}", system, user, passages)

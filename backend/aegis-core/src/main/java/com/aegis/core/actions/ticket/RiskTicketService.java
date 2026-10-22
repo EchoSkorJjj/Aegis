@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import com.aegis.core.actions.assess.ReachabilityAssessments;
 import com.aegis.core.actions.evidence.DraftEvidence;
 import com.aegis.core.actions.ticket.RiskTicketText.Sections;
 import com.aegis.core.actions.tracker.IssueTracker;
@@ -96,10 +97,11 @@ public class RiskTicketService {
     private final RiskTicketStore store;
     private final UpgradeProposalService upgrades;
     private final DecisionTrail trail;
+    private final ReachabilityAssessments assessments;
 
     public RiskTicketService(InventoryService inventory, InventoryStore inventoryStore, ScoringService scoring,
             ChangeSignalStore signals, AiDrafter drafter, ObjectProvider<IssueTracker> trackers, RiskTicketStore store,
-            UpgradeProposalService upgrades, DecisionTrail trail) {
+            UpgradeProposalService upgrades, DecisionTrail trail, ReachabilityAssessments assessments) {
         this.inventory = inventory;
         this.inventoryStore = inventoryStore;
         this.scoring = scoring;
@@ -109,6 +111,7 @@ public class RiskTicketService {
         this.store = store;
         this.upgrades = upgrades;
         this.trail = trail;
+        this.assessments = assessments;
     }
 
     public RiskTicket propose(UUID changeSignalId, UUID serviceId, UUID drafterId) {
@@ -138,6 +141,10 @@ public class RiskTicketService {
             plan.notAutomated().forEach(reason -> evidence.add("Not automated: " + SensitiveText.redact(reason)));
         }
         evidence.addAll(DraftEvidence.source(impact.change(), signal));
+        if (type == SignalType.VULNERABILITY) {
+            // The AI's suggestion on whether the code calls the vulnerable function (E11-5): kept, else asked now.
+            evidence.addAll(DraftEvidence.assessments(assessments.forDraft(serviceId, changeSignalId, drafterId)));
+        }
         UUID id = UUID.randomUUID();
         Sections sections = sections(id, type, title, changeTitle, signal, scored, evidence);
         LocalDate drafted = LocalDate.now(ZoneOffset.UTC);
