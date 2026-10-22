@@ -46,6 +46,7 @@ import static org.springframework.security.test.web.servlet.setup.SecurityMockMv
         "aegis.ingestion.news.enabled=false",
         "aegis.demo.seed-enabled=false",
         "aegis.notifications.enabled=false",
+        "aegis.assess.fix-commits.enabled=false",
         "aegis.dashboard.snapshots.enabled=false"})
 public abstract class AbstractIntegrationTest {
 
