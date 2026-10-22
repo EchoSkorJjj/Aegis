@@ -1066,4 +1066,9 @@ export interface RiskPostureDashboard {
   from: string;
   to: string;
   trend: PostureSnapshot[];
+  history: {
+    total: PostureSnapshot;
+    services: PostureBreakdown[];
+    owners: PostureBreakdown[];
+  }[];
 }

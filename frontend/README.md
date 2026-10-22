@@ -109,6 +109,11 @@ and **Daily counts** exposes the chart's values without relying on color or poin
 loading, failed requests, an empty estate, zero open items and workspace changes. `e2e/dashboard.spec.ts` exercises
 the browser contract using the fake BFF; the core integration tests cover counting, snapshots and tenant isolation.
 
+The default trend covers **30 days including today**. **Show** selects the organization, a service, an owner, or
+Unassigned. Service/owner points come from the API's daily `history`, preserving ownership as it was on each day;
+removed groups remain selectable as historical. A group with no observation on a day is **Not recorded**; it only
+shows zero when zero was actually recorded. The selection survives period changes and resets on workspace changes.
+
 ## Checks and tests
 
 | Check | Command | Needs |

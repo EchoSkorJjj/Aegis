@@ -8,6 +8,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
+import com.aegis.core.actions.dashboard.PostureSnapshotStore.History;
+import com.aegis.core.actions.dashboard.PostureSnapshotStore.RecordedSnapshot;
 import com.aegis.core.actions.ticket.ResponseStage;
 import com.aegis.core.actions.triage.TriageQueue;
 import com.aegis.core.actions.triage.TriageQueue.Item;
@@ -40,7 +42,7 @@ public class RiskPosture {
     }
 
     public record Dashboard(Instant asOf, Totals totals, List<Breakdown> services, List<Breakdown> owners,
-                            LocalDate from, LocalDate to, List<Snapshot> trend) {
+                            LocalDate from, LocalDate to, List<Snapshot> trend, List<RecordedSnapshot> history) {
     }
 
     public Dashboard read(int days) {
@@ -53,8 +55,9 @@ public class RiskPosture {
         save(current);
         LocalDate today = asOf.atOffset(ZoneOffset.UTC).toLocalDate();
         LocalDate from = today.minusDays(days - 1L);
+        History history = snapshots.historyBetween(from, today);
         return new Dashboard(asOf, current.totals(), current.services(), current.owners(), from, today,
-                snapshots.between(from, today));
+                history.trend(), history.days());
     }
 
     /** Background capture uses the same computation as a page view, without fetching history. */
@@ -65,8 +68,10 @@ public class RiskPosture {
 
     private void save(Dashboard current) {
         Totals totals = current.totals();
-        snapshots.save(new Snapshot(current.asOf().atOffset(ZoneOffset.UTC).toLocalDate(), current.asOf(),
-                totals.openItems(), totals.criticalItems(), totals.highItems()));
+        snapshots.save(new RecordedSnapshot(
+                new Snapshot(current.asOf().atOffset(ZoneOffset.UTC).toLocalDate(), current.asOf(),
+                        totals.openItems(), totals.criticalItems(), totals.highItems()),
+                current.services(), current.owners()));
     }
 
     static Dashboard aggregate(TriageQueue.Queue estate, Instant asOf) {
@@ -88,7 +93,7 @@ public class RiskPosture {
                 stageCount(open, ResponseStage.APPROVED) + stageCount(open, ResponseStage.OVERRIDDEN),
                 unassigned.size(), (int) services.stream().filter(service -> service.openItems() > 0).count(),
                 services.size());
-        return new Dashboard(asOf, totals, services, List.copyOf(owners), null, null, List.of());
+        return new Dashboard(asOf, totals, services, List.copyOf(owners), null, null, List.of(), List.of());
     }
 
     private static Breakdown breakdown(UUID id, String name, List<Item> items) {

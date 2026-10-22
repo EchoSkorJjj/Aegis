@@ -97,6 +97,14 @@ with daily aggregate history. `days` accepts 7, 30 (default) or 90. It has the s
 `ANALYST`, `COMPLIANCE_ADMIN` and `SERVICE_OWNER`. It reuses `TriageQueue.overview()`, including services with no
 owner, and never computes matching or scores separately. **Open** means `NEW`, `IN_REVIEW`, `APPROVED` or
 `OVERRIDDEN`; `ACTIONED` and `CLOSED` are excluded. Filing a response is actioned in Aegis, not proof of remediation.
+
+The API returns current `totals`, `services` and `owners`, inclusive UTC dates `from` / `to`, the organization's
+`trend` (daily totals) and `history` (daily `total`, `services` and `owners` as recorded). Omitting `days` selects
+**30 days including today**. Totals and group history are read in one REPEATABLE READ transaction, so a concurrent
+capture cannot mix different versions of a day's observation in the response. Legacy totals-only days remain in
+`trend` but not `history`; a group absent from a recorded day is unknown for that day, not an invented zero.
+The frontend's **Show** selector uses this history to plot the organization, one service, one owner, or Unassigned.
+Removed groups stay selectable as historical; their counts and names come from their recorded days.
 Each material dependency or outage in a service counts once overall. A shared item counts under every assigned
 owner, so owner totals overlap; the unassigned group has a null id. Zero-item services remain visible.
 
@@ -108,16 +116,33 @@ V44 (`risk_posture_snapshots`; V41–V43 are reserved by CS203-129) stores **onl
 concurrent computation cannot replace a newer one. Each dashboard read refreshes today's observation. No prior
 days are reconstructed from current feeds or the decision log, and missing dates are unknown, not zero.
 
+V45 adds `risk_posture_breakdowns`: one row per UTC day and service, assigned owner, or the **Unassigned** owner
+bucket. Each keeps its id and name as observed, open / critical / high counts and top score; zero-item groups are
+recorded too. Shared items count for every assigned owner, while the organization's total counts each item once.
+The new table has `org_id`, a composite foreign key to its organization's day, and forced RLS through
+`current_org()`. It has no foreign keys to live services or owners, so reassignment, renaming or deletion cannot
+rewrite past observations. Owner display names are retained with the history; no emails are stored.
+
+The snapshot store commits a day's totals and both breakdowns in **one transaction**, replacing the complete set
+only when its observation wins the parent row's timestamp check. This prevents duplicate groups, stale rows after
+a same-day reassignment, and older captures overwriting newer detail. Failed child writes roll back the totals too.
+`PostureSnapshotStore.recordedBetween` reads the day and its groups in one REPEATABLE READ transaction. Old V44
+observations keep `breakdowns_recorded=false`: their totals remain in the chart, but no historical service or owner
+counts are invented. A first new capture of that same day records its actual current groups.
+
 For observations without page views, enable `AEGIS_DASHBOARD_SNAPSHOTS_ENABLED=true` and configure the existing
 identity internal service token (`IDENTITY_SERVICE_TOKEN`, matching identity-service's
 `IDENTITY_INTERNAL_SERVICE_TOKEN`). The job runs only while holding `SchedulerLease`, captures each organization
-independently and continues if one fails. `AEGIS_DASHBOARD_SNAPSHOTS_INTERVAL` defaults to `PT1H`, and
-`AEGIS_DASHBOARD_SNAPSHOTS_INITIAL_DELAY` to `PT2M`. Docker Compose enables it with its existing dev token; other
+independently and continues if one fails. The job runs **daily at 23:55 UTC**, configurable with
+`AEGIS_DASHBOARD_SNAPSHOTS_CRON` (Spring's six-field cron; the zone stays UTC). This replaces the earlier interval
+and initial-delay settings. Docker Compose enables it with its existing dev token; other
 deployments opt in. The chart uses the last observation each day, with today marked partial, and makes the raw
 daily counts available in a table. Findings themselves are still recomputed, not persisted.
 
 Tests: `RiskPostureTest`, `PostureSnapshotJobTest`, `RiskPostureIntegrationTest` (real PostgreSQL, RLS, daily upsert,
-history gaps, RBAC and triage drill-down), and frontend `e2e/dashboard.spec.ts`.
+history gaps, the default 30-day API boundary, RBAC and triage drill-down), and frontend `e2e/dashboard.spec.ts`
+(current posture, service/owner trends, historical groups, unknown versus zero days, period changes, loading,
+permissions, retries, workspace switching and mobile layout).
 
 ## Owner notifications (E9 Story 5)
 

@@ -93,6 +93,7 @@ services:
       IDENTITY_SERVICE_TOKEN: dev-identity-internal-token-change-me
       AEGIS_NOTIFICATIONS_ENABLED: "true"
       AEGIS_DASHBOARD_SNAPSHOTS_ENABLED: "true"
+      AEGIS_DASHBOARD_SNAPSHOTS_CRON: "${AEGIS_DASHBOARD_SNAPSHOTS_CRON:-0 55 23 * * *}"
       AEGIS_NOTIFICATIONS_INTERVAL: PT1M
       # Export distributed traces to Zipkin — view them at http://localhost:9411
       ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans

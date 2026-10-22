@@ -38,6 +38,7 @@ export function RiskDashboard() {
 
 function Posture() {
   const [days, setDays] = useState(30);
+  const [trendScope, setTrendScope] = useState("organization");
   const [refresh, setRefresh] = useState(0);
   const [data, setData] = useState<RiskPostureDashboard | null>(null);
   const [loading, setLoading] = useState(true);
@@ -123,7 +124,7 @@ function Posture() {
             </p>
           )}
 
-          <RiskTrend data={data} days={days} onDaysChange={setDays} />
+          <RiskTrend data={data} days={days} onDaysChange={setDays} scope={trendScope} onScopeChange={setTrendScope} />
 
           <div className="grid gap-6 lg:grid-cols-2">
             <BreakdownTable title="By service" rows={data.services} kind="service" />

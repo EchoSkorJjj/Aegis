@@ -22,7 +22,7 @@ public class RiskPostureController {
 
     @GetMapping
     @PreAuthorize(InventoryRoles.READ)
-    @Operation(summary = "Open material items by service and owner, with daily observed totals")
+    @Operation(summary = "Open material items by service and owner, with 30 days of recorded history by default")
     public Dashboard read(@RequestParam(defaultValue = "30") int days) {
         return posture.read(days);
     }

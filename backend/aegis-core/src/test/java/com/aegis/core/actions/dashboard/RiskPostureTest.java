@@ -5,6 +5,8 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
+import com.aegis.core.actions.dashboard.PostureSnapshotStore.History;
+import com.aegis.core.actions.dashboard.PostureSnapshotStore.RecordedSnapshot;
 import com.aegis.core.actions.dashboard.RiskPosture.Breakdown;
 import com.aegis.core.actions.dashboard.RiskPosture.Snapshot;
 import com.aegis.core.actions.ticket.ResponseStage;
@@ -62,14 +64,15 @@ class RiskPostureTest {
         TriageQueue queue = mock(TriageQueue.class);
         PostureSnapshotStore store = mock(PostureSnapshotStore.class);
         when(queue.overview()).thenReturn(new TriageQueue.Queue(new PageImpl<>(List.of()), List.of(), List.of(), List.of()));
-        when(store.between(any(), any())).thenReturn(List.of());
+        when(store.historyBetween(any(), any())).thenReturn(new History(List.of(), List.of()));
         var result = new RiskPosture(queue, store).read(7);
         assertThat(result.totals().openItems()).isZero();
         assertThat(result.totals().totalServices()).isZero();
         assertThat(result.trend()).isEmpty();
         assertThat(result.from()).isEqualTo(result.to().minusDays(6));
         assertThat(result.to()).isEqualTo(result.asOf().atOffset(java.time.ZoneOffset.UTC).toLocalDate());
-        verify(store).save(new Snapshot(result.to(), result.asOf(), 0, 0, 0));
+        verify(store).save(new RecordedSnapshot(new Snapshot(result.to(), result.asOf(), 0, 0, 0), List.of(),
+                List.of(new Breakdown(null, "Unassigned", 0, 0, 0, null))));
     }
 
     @Test
@@ -80,10 +83,14 @@ class RiskPostureTest {
                 ImpactTier.CRITICAL, 100))));
         LocalDate today = LocalDate.now(java.time.ZoneOffset.UTC);
         Snapshot previous = new Snapshot(today.minusDays(2), Instant.now().minusSeconds(172800), 4, 2, 1);
-        when(store.between(any(), any())).thenReturn(List.of(previous));
+        RecordedSnapshot recorded = new RecordedSnapshot(previous,
+                List.of(new Breakdown(PAYMENTS.id(), PAYMENTS.name(), 4, 2, 1, 100.0)),
+                List.of(new Breakdown(MORGAN.id(), MORGAN.name(), 4, 2, 1, 100.0)));
+        when(store.historyBetween(any(), any())).thenReturn(new History(List.of(previous), List.of(recorded)));
         var result = new RiskPosture(queue, store).read(30);
         assertThat(result.totals().openItems()).isEqualTo(1);
         assertThat(result.trend()).containsExactly(previous);
+        assertThat(result.history()).containsExactly(recorded);
         assertThat(result.from()).isEqualTo(today.minusDays(29));
     }
 

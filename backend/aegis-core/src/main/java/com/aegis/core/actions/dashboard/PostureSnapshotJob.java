@@ -27,8 +27,7 @@ class PostureSnapshotJob {
         this.lease = lease;
     }
 
-    @Scheduled(fixedDelayString = "${aegis.dashboard.snapshots.interval:PT1H}",
-            initialDelayString = "${aegis.dashboard.snapshots.initial-delay:PT2M}")
+    @Scheduled(cron = "${aegis.dashboard.snapshots.cron:0 55 23 * * *}", zone = "UTC")
     void run() {
         if (!lease.held()) {
             return;

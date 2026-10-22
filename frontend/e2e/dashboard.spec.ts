@@ -22,7 +22,24 @@ const DATA: RiskPostureDashboard = {
     { day: "2026-10-21", capturedAt: "2026-10-21T23:00:00Z", openItems: 5, criticalItems: 1, highItems: 2 },
     { day: TODAY, capturedAt: `${TODAY}T09:00:00Z`, openItems: 4, criticalItems: 1, highItems: 1 },
   ],
+  history: [],
 };
+
+// Groups are observations from each day, not today's ownership applied backwards.
+DATA.history = DATA.trend.map((total, index) => {
+  const payments = { ...DATA.services[0], openItems: [1, 3, 2][index], highItems: [0, 1, 1][index] };
+  const worker = { ...DATA.services[1], openItems: [6, 2, 2][index], criticalItems: [1, 0, 0][index],
+    highItems: [3, 1, 0][index] };
+  return {
+    total,
+    services: [payments, worker, ...(index === 2 ? [DATA.services[2]] : [])],
+    owners: [
+      { ...payments, id: OWNER.id, name: OWNER.name },
+      { ...worker, id: null, name: "Unassigned" },
+      ...(index === 0 ? [{ ...payments, id: "former-owner", name: "Former owner" }] : []),
+    ],
+  };
+});
 
 async function dashboard(page: Page, options: { role?: Role; fail?: number; data?: RiskPostureDashboard } = {}) {
   const base = await fakeBff(page, { role: options.role });
@@ -34,7 +51,8 @@ async function dashboard(page: Page, options: { role?: Role; fail?: number; data
     requests.push(days);
     if (status !== 200) return route.fulfill({ status, json: { message: "Unavailable" } });
     const from = new Date(Date.parse(`${TODAY}T00:00:00Z`) - (days - 1) * DAY).toISOString().slice(0, 10);
-    return route.fulfill({ json: { ...data, from, trend: data.trend.filter((point) => point.day >= from) } });
+    return route.fulfill({ json: { ...data, from, trend: data.trend.filter((point) => point.day >= from),
+      history: data.history.filter((point) => point.total.day >= from) } });
   });
   return { ...base, requests, recover: () => { status = 200; }, replace: (next: RiskPostureDashboard) => { data = next; } };
 }
@@ -92,6 +110,7 @@ test("first observation, no open items and an empty estate have honest empty sta
   empty.services = [];
   empty.owners = [{ id: null, name: "Unassigned", openItems: 0, criticalItems: 0, highItems: 0, topScore: null }];
   empty.trend = [{ day: TODAY, capturedAt: empty.asOf, openItems: 0, criticalItems: 0, highItems: 0 }];
+  empty.history = [{ total: empty.trend[0], services: [], owners: empty.owners }];
   const { replace } = await dashboard(page, { data: empty });
   await page.goto("/dashboard");
   await expect(page.getByText("No services registered yet.", { exact: false })).toBeVisible();
@@ -144,7 +163,7 @@ test("switching workspace discards the previous organization's posture and perio
   ] }));
   await page.route("**/api/auth/switch-org", (route) => {
     org = route.request().postDataJSON().orgId;
-    replace({ ...DATA, totals: { ...DATA.totals, openItems: 0, totalServices: 0 }, services: [], owners: [], trend: [] });
+    replace({ ...DATA, totals: { ...DATA.totals, openItems: 0, totalServices: 0 }, services: [], owners: [], trend: [], history: [] });
     return route.fulfill({ status: 204 });
   });
   await page.goto("/dashboard");
@@ -157,4 +176,53 @@ test("switching workspace discards the previous organization's posture and perio
   await expect(page.getByRole("region", { name: "By service", exact: true })).not.toContainText("Payments API");
   await expect(page.getByLabel("Trend period")).toHaveValue("30");
   expect(requests.at(-1)).toBe(30);
+});
+
+test("30-day service and owner trends use their saved daily counts and keep the scope when the period changes", async ({ page }) => {
+  await dashboard(page);
+  await page.goto("/dashboard");
+  const trend = page.getByRole("region", { name: "Open material items trend" });
+  await expect(page.getByLabel("Trend period")).toHaveValue("30");
+  await page.getByLabel("Trend for").selectOption("service:service-1");
+  await expect(trend).toContainText("1 more open item since");
+  await trend.getByText("Daily counts", { exact: true }).click();
+  await expect(trend.getByRole("row").filter({ hasText: "2026-10-19" }).getByRole("cell"))
+    .toHaveText(["2026-10-19", "1", "1", "0"]);
+  await page.getByLabel("Trend period").selectOption("7");
+  await expect(page.getByLabel("Trend for")).toHaveValue("service:service-1");
+  await expect(trend).toContainText("3 of 7 days recorded");
+  await page.getByLabel("Trend for").selectOption(`owner:${OWNER.id}`);
+  await expect(trend).toContainText("1 more open item since");
+  await page.getByLabel("Trend for").selectOption("owner:unassigned");
+  await expect(trend).toContainText("4 fewer open items since");
+});
+
+test("a newly recorded service has unknown earlier days and a removed owner keeps their recorded history", async ({ page }) => {
+  await dashboard(page);
+  await page.goto("/dashboard");
+  const trend = page.getByRole("region", { name: "Open material items trend" });
+  await page.getByLabel("Trend for").selectOption("service:service-3");
+  await expect(trend).toContainText("1 of 30 days recorded");
+  await trend.getByText("Daily counts", { exact: true }).click();
+  await expect(trend.getByRole("row").filter({ hasText: "2026-10-19" })).toContainText("Not recorded");
+  await expect(trend.getByRole("row").filter({ hasText: TODAY }).getByRole("cell"))
+    .toHaveText([TODAY, "0", "0", "0"]);
+  await page.getByLabel("Trend for").selectOption({ label: "Former owner (historical)" });
+  await expect(trend).toContainText("1 of 30 days recorded");
+  await expect(trend.getByRole("row").filter({ hasText: TODAY })).toContainText("Not recorded");
+  await expect(trend.getByRole("row").filter({ hasText: "2026-10-19" }).getByRole("cell"))
+    .toHaveText(["2026-10-19", "1", "1", "0"]);
+});
+
+test("loading and a backend permission refusal never appear as zero risk", async ({ page }) => {
+  await dashboard(page, { fail: 403 });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/findings/posture?*", async (route) => { await gate; await route.fallback(); });
+  await page.goto("/dashboard");
+  await expect(page.getByRole("status", { name: "Loading risk posture" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Open material items", exact: true })).toHaveCount(0);
+  release();
+  await expect(page.getByRole("alert", { name: "Risk posture error" })).toContainText("You don't have access");
+  await expect(page.getByRole("region", { name: "Open material items", exact: true })).toHaveCount(0);
 });
