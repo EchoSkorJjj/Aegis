@@ -87,7 +87,10 @@ export async function signUp(
 export async function createOrg(page: Page, orgName: string): Promise<void> {
   await page.getByLabel("Organization name").fill(orgName);
   await page.getByRole("button", { name: "Create organization" }).click();
-  await expect(page.getByText(/your workspace content goes here/i)).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: `${orgName} Aegis`, exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Manage organization members" })).toBeVisible();
 }
 
 /**
