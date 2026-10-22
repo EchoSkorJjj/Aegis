@@ -96,6 +96,24 @@ The dev server serves http://localhost:3000 and calls the gateway that Compose p
 | `TRUSTED_PROXY_HOPS` | `1` | How many proxies in front of this server append to `X-Forwarded-For`: 1 for a load balancer |
 | `PRIVACY_OPERATOR`, `PRIVACY_CONTACT` | empty | Who runs this deployment, and an email address or link to reach them, shown on `/privacy` |
 
+## Risk posture dashboard (CS203-130)
+
+`/dashboard` shows the active organization's open material items by service and owner, stages, critical/high
+impact, unassigned items and a 7/30/90-day trend. Domain readers use the existing findings BFF; organization admins
+without a domain role see a member-management link instead. Selecting a service, owner or the unassigned group
+opens the triage queue with matching filters. The backend defines open as New, In review, Approved or Overridden;
+actioned and dismissed responses are excluded, not treated as proof the risk was fixed. Owner totals may overlap.
+
+Trend points are daily UTC observations, not reconstructed history. Missing dates remain unknown, today is partial,
+and **Daily counts** exposes the chart's values without relying on color or pointer interaction. The page handles
+loading, failed requests, an empty estate, zero open items and workspace changes. `e2e/dashboard.spec.ts` exercises
+the browser contract using the fake BFF; the core integration tests cover counting, snapshots and tenant isolation.
+
+The default trend covers **30 days including today**. **Show** selects the organization, a service, an owner, or
+Unassigned. Service/owner points come from the API's daily `history`, preserving ownership as it was on each day;
+removed groups remain selectable as historical. A group with no observation on a day is **Not recorded**; it only
+shows zero when zero was actually recorded. The selection survives period changes and resets on workspace changes.
+
 ## Checks and tests
 
 | Check | Command | Needs |

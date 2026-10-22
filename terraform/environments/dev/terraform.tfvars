@@ -25,3 +25,7 @@ llm_provider          = "groq"
 bootstrap_admin_email = "jihoonsong29+admin@gmail.com"
 privacy_operator      = "Song Jihoon"
 privacy_contact       = "jihoonsong29@gmail.com"
+
+# The dashboard's daily risk-posture record (23:55 UTC). Like owner notifications, it needs the
+# identity-internal-token parameter: create it first (README, step 2).
+dashboard_snapshots_enabled = true
