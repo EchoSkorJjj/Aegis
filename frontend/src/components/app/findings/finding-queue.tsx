@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
 import { DataPagination } from "@/components/app/data-pagination";
 import { StageBadge, formatDateTime } from "@/components/app/responses/response-status";
@@ -31,9 +32,11 @@ interface Filters {
   ecosystem: string;
   tier: string;
   page: number;
+  openOnly: boolean;
+  unassigned: boolean;
 }
 
-const NO_FILTERS: Filters = { serviceId: "", ownerId: "", ecosystem: "", tier: "", page: 0 };
+const NO_FILTERS: Filters = { serviceId: "", ownerId: "", ecosystem: "", tier: "", page: 0, openOnly: false, unassigned: false };
 
 /**
  * The triage queue (E9 story 1): what to respond to next, highest impact first — each service's material vulnerable
@@ -42,6 +45,7 @@ const NO_FILTERS: Filters = { serviceId: "", ownerId: "", ecosystem: "", tier: "
  */
 export function FindingQueue() {
   const { user, isLoading } = useAuth();
+  const search = useSearchParams();
   if (isLoading) return <Skeleton className="h-40 w-full" />;
   if (!canReadInventory(user?.roles ?? [])) {
     return (
@@ -70,7 +74,10 @@ export function FindingQueue() {
         </p>
       </div>
       {/* Another workspace or user starts over: its filters may name services this one doesn't have. */}
-      <TriageList key={`${user?.orgId}:${user?.id}`} />
+      <TriageList key={`${user?.orgId}:${user?.id}:${search.toString()}`} initialFilters={{
+        serviceId: search.get("serviceId") ?? "", ownerId: search.get("ownerId") ?? "",
+        openOnly: search.get("open") === "true", unassigned: search.get("unassigned") === "true",
+      }} />
     </div>
   );
 }
@@ -83,13 +90,16 @@ export function FindingQueue() {
 export function TriageList({
   mine = false,
   initialServiceId = "",
+  initialFilters,
   onRefresh,
 }: {
   mine?: boolean;
   initialServiceId?: string;
+  initialFilters?: Partial<Filters>;
   onRefresh?: () => void;
 }) {
-  const [filters, setFilters] = useState<Filters>({ ...NO_FILTERS, serviceId: initialServiceId });
+  const [filters, setFilters] = useState<Filters>({ ...NO_FILTERS, ...initialFilters,
+    serviceId: initialServiceId || initialFilters?.serviceId || "" });
   const [data, setData] = useState<TriageQueueResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<"forbidden" | "error" | null>(null);
@@ -108,6 +118,8 @@ export function TriageList({
         ecosystem: filters.ecosystem || undefined,
         tier: filters.tier || undefined,
         mine: mine ? "true" : undefined,
+        open: filters.openOnly ? "true" : undefined,
+        unassigned: filters.unassigned ? "true" : undefined,
         page: filters.page,
         size: PAGE_SIZE,
       })
@@ -125,7 +137,8 @@ export function TriageList({
     };
   }, [filters, mine, refresh]);
 
-  const filtering = filters.serviceId !== "" || filters.ownerId !== "" || filters.ecosystem !== "" || filters.tier !== "";
+  const filtering = filters.serviceId !== "" || filters.ownerId !== "" || filters.ecosystem !== "" || filters.tier !== ""
+    || filters.openOnly || filters.unassigned;
   const filter = (change: Partial<Filters>) => setFilters((current) => ({ ...current, ...change, page: 0 }));
   // The ecosystems follow the service and owner chosen; keep the one picked selectable when another drops it.
   const ecosystems = [...new Set([...(data?.ecosystems ?? []), filters.ecosystem].filter(Boolean))].sort();
@@ -188,6 +201,14 @@ export function TriageList({
             </option>
           ))}
         </FilterSelect>
+        <label className="flex h-9 items-center gap-2 text-sm">
+          <input type="checkbox" checked={filters.openOnly} onChange={(event) => filter({ openOnly: event.target.checked })} />
+          Open items only
+        </label>
+        <label className="flex h-9 items-center gap-2 text-sm">
+          <input type="checkbox" checked={filters.unassigned} onChange={(event) => filter({ unassigned: event.target.checked })} />
+          Unassigned only
+        </label>
         {filtering && (
           <Button variant="ghost" onClick={() => setFilters(NO_FILTERS)}>
             Clear

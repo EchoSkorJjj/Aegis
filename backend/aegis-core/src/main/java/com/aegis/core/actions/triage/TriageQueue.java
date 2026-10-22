@@ -132,6 +132,11 @@ public class TriageQueue {
 
     // Deliberately no outer transaction: each org-scoped store and scoring call owns its own.
     public Queue list(Filters filters, Caller caller, Pageable pageable) {
+        return list(filters, caller, pageable, false, false);
+    }
+
+    /** Dashboard drill-down filters are applied before paging, against the same response stages it counts. */
+    public Queue list(Filters filters, Caller caller, Pageable pageable, boolean openOnly, boolean unassigned) {
         Estate estate = estate();
         Map<UUID, List<Owner>> assignments = estate.assignments();
         List<BusinessService> scope = estate.services().stream()
@@ -150,6 +155,8 @@ public class TriageQueue {
         List<String> ecosystems = material.stream().filter(item -> item.upgrade() != null)
                 .map(item -> item.upgrade().component().ecosystem()).distinct().sorted().toList();
         List<Item> ranked = material.stream()
+                .filter(item -> !openOnly || item.stage().isOpen())
+                .filter(item -> !unassigned || item.owners().isEmpty())
                 .filter(item -> filters.ecosystem() == null || (item.upgrade() != null
                         && filters.ecosystem().equalsIgnoreCase(item.upgrade().component().ecosystem())))
                 .filter(item -> filters.tier() == null || item.tier() == filters.tier())
@@ -186,6 +193,12 @@ public class TriageQueue {
 
     /** No one: a scheduled job's view of the queue. */
     private static final Caller NO_CALLER = new Caller(new UUID(0, 0), false, false);
+
+    /** The whole organization's queue for aggregate reporting, including services without owners. */
+    public Queue overview() {
+        return list(new Filters(null, null, false, null, null), NO_CALLER,
+                PageRequest.of(0, Integer.MAX_VALUE));
+    }
 
     /**
      * E9 story 2: the services the caller is an assigned owner of, by name, each with what it needs from them. The

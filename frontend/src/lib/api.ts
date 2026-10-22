@@ -38,6 +38,7 @@ import type {
   ResetPasswordInput,
   RiskTicket,
   RiskTicketStatus,
+  RiskPostureDashboard,
   Role,
   SbomImportResult,
   SelectMethodInput,
@@ -460,11 +461,16 @@ export const matchApi = {
  * the active organization's estate; paging follows the ranking.
  */
 export const findingApi = {
+  posture(days: number = 30) {
+    return bffFetch<RiskPostureDashboard>(`/api/findings/posture${qs({ days })}`);
+  },
   list(
     params: {
       serviceId?: string;
       ownerId?: string;
       mine?: string;
+      open?: string;
+      unassigned?: string;
       ecosystem?: string;
       tier?: string;
       page?: number;

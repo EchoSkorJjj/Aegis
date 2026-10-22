@@ -90,6 +90,35 @@ is the item detail: the change-impact view with the original change, every
 impacted service and owner, score factors and match evidence, and each service's drafted response and upgrade
 edits. Persisted findings with a lifecycle status are a later story; owners are notified of new items (below).
 
+## Dashboard: risk posture (CS203-130)
+
+`GET /api/findings/posture?days=30` is the current organization's open material items, grouped by service and owner,
+with daily aggregate history. `days` accepts 7, 30 (default) or 90. It has the same read gate as inventory and triage:
+`ANALYST`, `COMPLIANCE_ADMIN` and `SERVICE_OWNER`. It reuses `TriageQueue.overview()`, including services with no
+owner, and never computes matching or scores separately. **Open** means `NEW`, `IN_REVIEW`, `APPROVED` or
+`OVERRIDDEN`; `ACTIONED` and `CLOSED` are excluded. Filing a response is actioned in Aegis, not proof of remediation.
+Each material dependency or outage in a service counts once overall. A shared item counts under every assigned
+owner, so owner totals overlap; the unassigned group has a null id. Zero-item services remain visible.
+
+The dashboard links to `/findings?open=true&serviceId=…`, `ownerId=…`, or `unassigned=true`. The triage endpoint applies
+the open/unassigned filters before pagination, and its existing UI accepts the same query parameters.
+
+V44 (`risk_posture_snapshots`; V41–V43 are reserved by CS203-129) stores **only aggregate counts**, scoped by
+`org_id` with RLS through `current_org()`. There is one latest observation per organization and UTC date; an older
+concurrent computation cannot replace a newer one. Each dashboard read refreshes today's observation. No prior
+days are reconstructed from current feeds or the decision log, and missing dates are unknown, not zero.
+
+For observations without page views, enable `AEGIS_DASHBOARD_SNAPSHOTS_ENABLED=true` and configure the existing
+identity internal service token (`IDENTITY_SERVICE_TOKEN`, matching identity-service's
+`IDENTITY_INTERNAL_SERVICE_TOKEN`). The job runs only while holding `SchedulerLease`, captures each organization
+independently and continues if one fails. `AEGIS_DASHBOARD_SNAPSHOTS_INTERVAL` defaults to `PT1H`, and
+`AEGIS_DASHBOARD_SNAPSHOTS_INITIAL_DELAY` to `PT2M`. Docker Compose enables it with its existing dev token; other
+deployments opt in. The chart uses the last observation each day, with today marked partial, and makes the raw
+daily counts available in a table. Findings themselves are still recomputed, not persisted.
+
+Tests: `RiskPostureTest`, `PostureSnapshotJobTest`, `RiskPostureIntegrationTest` (real PostgreSQL, RLS, daily upsert,
+history gaps, RBAC and triage drill-down), and frontend `e2e/dashboard.spec.ts`.
+
 ## Owner notifications (E9 Story 5)
 
 When an item in the triage queue needs a decision — **New** (no response yet) or **In review** (drafted,

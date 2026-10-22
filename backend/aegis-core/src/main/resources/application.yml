@@ -45,6 +45,11 @@ spring:
 
 # ---- Aegis Core configuration -------------------------------------------
 aegis:
+  dashboard:
+    snapshots:
+      enabled: ${AEGIS_DASHBOARD_SNAPSHOTS_ENABLED:false}
+      interval: ${AEGIS_DASHBOARD_SNAPSHOTS_INTERVAL:PT1H}
+      initial-delay: ${AEGIS_DASHBOARD_SNAPSHOTS_INITIAL_DELAY:PT2M}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
   # The internal Python ai-service (assess + draft + RAG). Called with a service token, not a user JWT.

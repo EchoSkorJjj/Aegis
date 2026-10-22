@@ -45,7 +45,8 @@ import static org.springframework.security.test.web.servlet.setup.SecurityMockMv
         "aegis.ingestion.vendor-status.enabled=false",
         "aegis.ingestion.news.enabled=false",
         "aegis.demo.seed-enabled=false",
-        "aegis.notifications.enabled=false"})
+        "aegis.notifications.enabled=false",
+        "aegis.dashboard.snapshots.enabled=false"})
 public abstract class AbstractIntegrationTest {
 
     private static final String APP_ROLE = "aegis";

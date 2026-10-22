@@ -16,6 +16,11 @@ public enum ResponseStage {
     ACTIONED,
     CLOSED;
 
+    /** Still needs a response or completion inside Aegis. Filing is actioned; dismissal is closed. */
+    public boolean isOpen() {
+        return this != ACTIONED && this != CLOSED;
+    }
+
     public static ResponseStage of(RiskTicket ticket) {
         return switch (ticket.status()) {
             case PROPOSED -> IN_REVIEW;
