@@ -73,6 +73,8 @@ test("an analyst sees posture, stage totals, service and owner breakdowns, and d
   await expect(owners).toContainText("owner totals can overlap");
   await expect(owners.getByRole("link", { name: OWNER.name })).toHaveAttribute("href", `/findings?open=true&ownerId=${OWNER.id}`);
   await expect(owners.getByRole("link", { name: "Unassigned", exact: true })).toHaveAttribute("href", "/findings?open=true&unassigned=true");
+  // It navigates, so it is a link (styled as a button), not a button.
+  await expect(page.getByRole("link", { name: "Open triage" })).toHaveAttribute("href", "/findings?open=true");
   await page.screenshot({ path: test.info().outputPath("risk-posture.png"), fullPage: true });
   await services.getByRole("link", { name: OTHER.name }).click();
   await expect(page).toHaveURL(`/findings?open=true&serviceId=${OTHER.id}`);

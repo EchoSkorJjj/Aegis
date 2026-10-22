@@ -6,7 +6,7 @@ import { ArrowUpRight, RefreshCw } from "lucide-react";
 
 import { RiskTrend } from "@/components/app/dashboard/risk-trend";
 import { DataPagination } from "@/components/app/data-pagination";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ApiError, findingApi } from "@/lib/api";
@@ -76,9 +76,10 @@ function Posture() {
           <Button variant="outline" disabled={loading} onClick={() => setRefresh((value) => value + 1)}>
             <RefreshCw aria-hidden="true" className={loading ? "animate-spin" : ""} /> Refresh
           </Button>
-          <Button nativeButton={false} render={<Link href="/findings?open=true" />}>
+          {/* A link styled as a button: it navigates, so assistive technology must announce a link. */}
+          <Link href="/findings?open=true" className={buttonVariants()}>
             Open triage <ArrowUpRight aria-hidden="true" />
-          </Button>
+          </Link>
         </div>
       </header>
 

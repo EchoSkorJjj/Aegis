@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { DataPagination } from "@/components/app/data-pagination";
 import { StageBadge, formatDateTime } from "@/components/app/responses/response-status";
@@ -26,17 +26,42 @@ import { useAuth } from "@/providers/auth-provider";
 const PAGE_SIZE = 20;
 const COLUMNS = 5;
 
+/** What the queue is narrowed to. Paging is kept apart, and starts again at the first page whenever these change. */
 interface Filters {
   serviceId: string;
   ownerId: string;
   ecosystem: string;
   tier: string;
-  page: number;
   openOnly: boolean;
   unassigned: boolean;
 }
 
-const NO_FILTERS: Filters = { serviceId: "", ownerId: "", ecosystem: "", tier: "", page: 0, openOnly: false, unassigned: false };
+const NO_FILTERS: Filters = { serviceId: "", ownerId: "", ecosystem: "", tier: "", openOnly: false, unassigned: false };
+
+/** The filters a triage-queue URL names: what the dashboard links to, and what the queue writes back. */
+function filtersFrom(search: URLSearchParams): Filters {
+  return {
+    serviceId: search.get("serviceId") ?? "",
+    ownerId: search.get("ownerId") ?? "",
+    ecosystem: search.get("ecosystem") ?? "",
+    tier: search.get("tier") ?? "",
+    openOnly: search.get("open") === "true",
+    unassigned: search.get("unassigned") === "true",
+  };
+}
+
+/** The query string naming exactly these filters, so a reload or a shared link shows what is on screen. */
+function queryOf(filters: Filters): string {
+  const params = new URLSearchParams();
+  if (filters.serviceId) params.set("serviceId", filters.serviceId);
+  if (filters.ownerId) params.set("ownerId", filters.ownerId);
+  if (filters.ecosystem) params.set("ecosystem", filters.ecosystem);
+  if (filters.tier) params.set("tier", filters.tier);
+  if (filters.openOnly) params.set("open", "true");
+  if (filters.unassigned) params.set("unassigned", "true");
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
 
 /**
  * The triage queue (E9 story 1): what to respond to next, highest impact first — each service's material vulnerable
@@ -46,6 +71,8 @@ const NO_FILTERS: Filters = { serviceId: "", ownerId: "", ecosystem: "", tier: "
 export function FindingQueue() {
   const { user, isLoading } = useAuth();
   const search = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   if (isLoading) return <Skeleton className="h-40 w-full" />;
   if (!canReadInventory(user?.roles ?? [])) {
     return (
@@ -73,11 +100,13 @@ export function FindingQueue() {
           ranked here.
         </p>
       </div>
-      {/* Another workspace or user starts over: its filters may name services this one doesn't have. */}
-      <TriageList key={`${user?.orgId}:${user?.id}:${search.toString()}`} initialFilters={{
-        serviceId: search.get("serviceId") ?? "", ownerId: search.get("ownerId") ?? "",
-        openOnly: search.get("open") === "true", unassigned: search.get("unassigned") === "true",
-      }} />
+      {/* Another workspace or user starts over. The filters live in the URL, so Clear, a reload and a shared link
+          all show what is on screen; a change replaces the URL rather than adding to the history. */}
+      <TriageList
+        key={`${user?.orgId}:${user?.id}`}
+        filters={filtersFrom(search)}
+        onFiltersChange={(next) => router.replace(`${pathname}${queryOf(next)}`, { scroll: false })}
+      />
     </div>
   );
 }
@@ -85,21 +114,30 @@ export function FindingQueue() {
 /**
  * The queue's items with their filters and paging. `mine` limits it to the services the caller is an assigned
  * owner of (their own page, so there is no owner to filter by), `initialServiceId` starts it on one of them, and
- * `onRefresh` also tells the page when the reader asks for fresh data.
+ * `onRefresh` also tells the page when the reader asks for fresh data. A page that keeps the filters itself (the
+ * triage queue keeps them in its URL) passes `filters` and `onFiltersChange`; otherwise the list keeps its own.
  */
 export function TriageList({
   mine = false,
   initialServiceId = "",
-  initialFilters,
+  filters: kept,
+  onFiltersChange,
   onRefresh,
 }: {
   mine?: boolean;
   initialServiceId?: string;
-  initialFilters?: Partial<Filters>;
+  filters?: Filters;
+  onFiltersChange?: (filters: Filters) => void;
   onRefresh?: () => void;
 }) {
-  const [filters, setFilters] = useState<Filters>({ ...NO_FILTERS, ...initialFilters,
-    serviceId: initialServiceId || initialFilters?.serviceId || "" });
+  const [own, setOwn] = useState<Filters>({ ...NO_FILTERS, serviceId: initialServiceId });
+  // Kept filters change once the page has them (the URL updates in a transition): show the reader's choice at once.
+  const [, startTransition] = useTransition();
+  const [filters, showFilters] = useOptimistic(kept ?? own);
+  // A page belongs to the filters it was turned under: other filters start again at the first page.
+  const filterKey = JSON.stringify(filters);
+  const [paging, setPaging] = useState({ key: filterKey, page: 0 });
+  const page = paging.key === filterKey ? paging.page : 0;
   const [data, setData] = useState<TriageQueueResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<"forbidden" | "error" | null>(null);
@@ -108,19 +146,20 @@ export function TriageList({
 
   useEffect(() => {
     let cancelled = false;
+    const query = JSON.parse(filterKey) as Filters;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- a new request for the new filters
     setLoading(true);
     setError(null);
     findingApi
       .list({
-        serviceId: filters.serviceId || undefined,
-        ownerId: filters.ownerId || undefined,
-        ecosystem: filters.ecosystem || undefined,
-        tier: filters.tier || undefined,
+        serviceId: query.serviceId || undefined,
+        ownerId: query.ownerId || undefined,
+        ecosystem: query.ecosystem || undefined,
+        tier: query.tier || undefined,
         mine: mine ? "true" : undefined,
-        open: filters.openOnly ? "true" : undefined,
-        unassigned: filters.unassigned ? "true" : undefined,
-        page: filters.page,
+        open: query.openOnly ? "true" : undefined,
+        unassigned: query.unassigned ? "true" : undefined,
+        page,
         size: PAGE_SIZE,
       })
       .then((result) => {
@@ -135,11 +174,22 @@ export function TriageList({
     return () => {
       cancelled = true;
     };
-  }, [filters, mine, refresh]);
+  }, [filterKey, page, mine, refresh]);
 
   const filtering = filters.serviceId !== "" || filters.ownerId !== "" || filters.ecosystem !== "" || filters.tier !== ""
     || filters.openOnly || filters.unassigned;
-  const filter = (change: Partial<Filters>) => setFilters((current) => ({ ...current, ...change, page: 0 }));
+  const filter = (change: Partial<Filters>) => {
+    const next = { ...filters, ...change };
+    setPaging({ key: JSON.stringify(next), page: 0 });
+    if (onFiltersChange) {
+      startTransition(() => {
+        showFilters(next);
+        onFiltersChange(next);
+      });
+    } else {
+      setOwn(next);
+    }
+  };
   // The ecosystems follow the service and owner chosen; keep the one picked selectable when another drops it.
   const ecosystems = [...new Set([...(data?.ecosystems ?? []), filters.ecosystem].filter(Boolean))].sort();
   const items = data?.items;
@@ -210,7 +260,7 @@ export function TriageList({
           Unassigned only
         </label>
         {filtering && (
-          <Button variant="ghost" onClick={() => setFilters(NO_FILTERS)}>
+          <Button variant="ghost" onClick={() => filter(NO_FILTERS)}>
             Clear
           </Button>
         )}
@@ -279,7 +329,7 @@ export function TriageList({
             totalElements={items.totalElements}
             pageSize={items.size}
             itemsOnPage={items.content.length}
-            onPageChange={(page) => setFilters((current) => ({ ...current, page }))}
+            onPageChange={(next) => setPaging({ key: filterKey, page: next })}
           />
         )}
       </section>

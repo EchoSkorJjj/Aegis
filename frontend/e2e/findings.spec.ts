@@ -82,6 +82,36 @@ test("the triage queue filters by service, owner, ecosystem and impact, paged by
   expect(listed.at(-1)?.get("serviceId")).toBe(OTHER.id);
 });
 
+test("the triage queue keeps its filters in the URL, so Clear, a reload and a shared link all agree", async ({ page }) => {
+  const { listed } = await fakeBff(page);
+  // Where the dashboard's Unassigned items count lands.
+  await page.goto("/findings?open=true&unassigned=true");
+  const open = page.getByRole("checkbox", { name: "Open items only" });
+  const unassigned = page.getByRole("checkbox", { name: "Unassigned only" });
+  const impact = page.getByLabel("Impact", { exact: true });
+  await expect(open).toBeChecked();
+  await expect(unassigned).toBeChecked();
+
+  await unassigned.uncheck();
+  await expect(page).toHaveURL(/\/findings\?open=true$/);
+  await expect.poll(() => listed.at(-1)?.get("unassigned")).toBeNull();
+  await impact.selectOption("HIGH");
+  await expect(page).toHaveURL(/\/findings\?tier=HIGH&open=true$/);
+  await page.reload();
+  await expect(open).toBeChecked();
+  await expect(unassigned).not.toBeChecked();
+  await expect(impact).toHaveValue("HIGH");
+
+  await page.getByRole("button", { name: "Clear", exact: true }).click();
+  await expect(page).toHaveURL(/\/findings$/);
+  await expect(open).not.toBeChecked();
+  await page.reload();
+  await expect(open).not.toBeChecked();
+  await expect(impact).toHaveValue("");
+  await expect.poll(() => listed.at(-1)?.get("open")).toBeNull();
+  expect(listed.at(-1)?.get("tier")).toBeNull();
+});
+
 test("in the triage queue, an owner drafts only for their own services", async ({ page }) => {
   await fakeBff(page, { role: "SERVICE_OWNER" });
   await page.goto("/findings");

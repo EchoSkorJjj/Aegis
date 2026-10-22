@@ -109,7 +109,8 @@ Each material dependency or outage in a service counts once overall. A shared it
 owner, so owner totals overlap; the unassigned group has a null id. Zero-item services remain visible.
 
 The dashboard links to `/findings?open=true&serviceId=…`, `ownerId=…`, or `unassigned=true`. The triage endpoint applies
-the open/unassigned filters before pagination, and its existing UI accepts the same query parameters.
+the open/unassigned filters before pagination. The triage page keeps all its filters in those query parameters,
+so Clear, a reload and a shared link show what is on screen.
 
 V44 (`risk_posture_snapshots`; V41–V43 are reserved by CS203-129) stores **only aggregate counts**, scoped by
 `org_id` with RLS through `current_org()`. There is one latest observation per organization and UTC date; an older
@@ -135,9 +136,10 @@ identity internal service token (`IDENTITY_SERVICE_TOKEN`, matching identity-ser
 `IDENTITY_INTERNAL_SERVICE_TOKEN`). The job runs only while holding `SchedulerLease`, captures each organization
 independently and continues if one fails. The job runs **daily at 23:55 UTC**, configurable with
 `AEGIS_DASHBOARD_SNAPSHOTS_CRON` (Spring's six-field cron; the zone stays UTC). This replaces the earlier interval
-and initial-delay settings. Docker Compose enables it with its existing dev token; other
-deployments opt in. The chart uses the last observation each day, with today marked partial, and makes the raw
-daily counts available in a table. Findings themselves are still recomputed, not persisted.
+and initial-delay settings. Docker Compose enables it with its existing dev token, and both AWS environments with
+`dashboard_snapshots_enabled` (Terraform; it needs the `identity-internal-token` parameter). The chart uses the last
+observation each day, with today marked partial, and makes the raw daily counts available in a table. Findings
+themselves are still recomputed, not persisted.
 
 Tests: `RiskPostureTest`, `PostureSnapshotJobTest`, `RiskPostureIntegrationTest` (real PostgreSQL, RLS, daily upsert,
 history gaps, the default 30-day API boundary, RBAC and triage drill-down), and frontend `e2e/dashboard.spec.ts`
