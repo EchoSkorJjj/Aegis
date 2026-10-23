@@ -197,6 +197,12 @@ to accept it. [`security/data-classification.md`](security/data-classification.m
 holds — its class, where it's kept, who reads it, how long it's kept and what leaves Aegis — checked against the
 privacy notice. Update both when a trust boundary, a role, an integration or a data store changes.
 
+[`security/access-control.md`](security/access-control.md) lists every endpoint of the gateway, identity-service and
+aegis-core with the roles that may call it. `GatewayAccessTest`, `IdentityAccessIntegrationTest` and
+`AccessControlIntegrationTest` call each one anonymously and as each role, check the answer against the table, and
+fail on an endpoint the table doesn't list — so a new endpoint, or a change to who may call one, updates the table in
+the same pull request.
+
 ## Repository layout
 
 ```
