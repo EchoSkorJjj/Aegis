@@ -65,7 +65,9 @@ jobs:
 
   # The Spring Boot parent manages most Maven versions, which GitHub can't read from a pom on its own. Maven
   # resolves the whole graph here and submits it for the change's own commit, so dependency review compares real
-  # versions. Same-repository changes only: a fork's token can't submit.
+  # versions. A pull request also submits its base commit's graph: dependency review compares the two, and a base
+  # without one (the first run, or develop's own run not done yet) would make every dependency look newly added.
+  # Same-repository changes only: a fork's token can't submit.
   maven-dependency-graph:
     name: maven dependency graph (${{ matrix.service }})
     if: >-
@@ -96,6 +98,24 @@ jobs:
           correlator: maven-${{ matrix.service }}
           snapshot-sha: ${{ github.event.pull_request.head.sha || github.sha }}
           snapshot-ref: ${{ github.event_name == 'pull_request' && format('refs/heads/{0}', github.head_ref) || github.ref }}
+
+      - name: Check out the pull request's base
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+
+      - name: Submit the base's resolved dependency graph
+        # A service the base doesn't have yet has no graph to compare with.
+        if: github.event_name == 'pull_request' && hashFiles(format('base/backend/{0}/pom.xml', matrix.service)) != ''
+        uses: advanced-security/maven-dependency-submission-action@v6
+        with:
+          directory: base/backend/${{ matrix.service }}
+          ignore-maven-wrapper: true
+          correlator: maven-${{ matrix.service }}
+          snapshot-sha: ${{ github.event.pull_request.base.sha }}
+          snapshot-ref: ${{ format('refs/heads/{0}', github.base_ref) }}
 
   dependency-review:
     name: dependency review
