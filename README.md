@@ -189,6 +189,14 @@ known-vulnerable dependency fails it:
 There's no Dependabot: Aegis watches its own dependencies, so a second bot opening upgrade pull requests would
 compete with it.
 
+### Threat model and data classification
+
+[`security/threat-model.md`](security/threat-model.md) goes through each trust boundary with STRIDE and the OWASP
+risks for LLM applications: every threat has an owner and either the code that mitigates it or a recorded decision
+to accept it. [`security/data-classification.md`](security/data-classification.md) lists every kind of data Aegis
+holds — its class, where it's kept, who reads it, how long it's kept and what leaves Aegis — checked against the
+privacy notice. Update both when a trust boundary, a role, an integration or a data store changes.
+
 ## Repository layout
 
 ```
