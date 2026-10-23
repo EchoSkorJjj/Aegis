@@ -5,10 +5,12 @@ on:
     paths:
       - "backend/aegis-core/**"
       - ".github/workflows/aegis-core-ci.yml"
+      - "security/access-control.md"   # the access tests read it
   pull_request:
     paths:
       - "backend/aegis-core/**"
       - ".github/workflows/aegis-core-ci.yml"
+      - "security/access-control.md"   # the access tests read it
 
 jobs:
   build-and-test:

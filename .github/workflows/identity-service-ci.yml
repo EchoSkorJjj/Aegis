@@ -5,10 +5,12 @@ on:
     paths:
       - "backend/identity-service/**"
       - ".github/workflows/identity-service-ci.yml"
+      - "security/access-control.md"   # the access tests read it
   pull_request:
     paths:
       - "backend/identity-service/**"
       - ".github/workflows/identity-service-ci.yml"
+      - "security/access-control.md"   # the access tests read it
 
 jobs:
   build-and-test:
