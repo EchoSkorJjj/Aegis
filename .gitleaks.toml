@@ -1,0 +1,42 @@
+# gitleaks configuration (CS203-145), read by the security-scanning workflow: gitleaks's default rules, minus the
+# test fixtures and documentation below, which only look like secrets.
+#
+# Each entry allows only the exact fixture text (matched against what gitleaks found), never a file: a real secret
+# added anywhere, including beside a fixture, is still caught. (An entry's `paths` would allow everything in the
+# file, whatever its regexes say.)
+#
+# Never allow-list a real secret. If one is committed: revoke and rotate it first, then remove it from the history
+# or allow-list that one commit (`commits = [...]`) with why.
+
+title = "Aegis"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """Test PEM keys whose bodies are placeholders (private-material, secret, c2VjcmV0 = base64 'secret'): \
+fixtures in SensitiveTextTest, GitHubPrConfigTest, SigningKeyTest and the ai-service's test_guardrails.py"""
+regexTarget = "match"
+regexes = [
+  '''-----BEGIN (RSA )?PRIVATE KEY-----\\n(private-material|secret|c2VjcmV0)\\n-----END (RSA )?PRIVATE KEY-----''',
+]
+
+[[allowlists]]
+description = "GitHubAppPrProviderTest wraps a key it generates at runtime in PEM armour: no key is in the file"
+regexTarget = "match"
+regexes = ['''-----BEGIN PRIVATE KEY-----\\n"\s*\+\s*Base64\.getMimeEncoder''']
+
+[[allowlists]]
+description = "test_guardrails.py's redaction inputs: made-up credential values the guardrails must redact"
+regexTarget = "match"
+regexes = ['''opaque-credential", "hunter2-opaque''']
+
+[[allowlists]]
+description = "terraform/environments/README.md names the PEM header a GitHub App key starts with, in prose"
+regexTarget = "match"
+regexes = ['''-----BEGIN PRIVATE KEY-----`''']
+
+[[allowlists]]
+description = ".env.example, the template of a git-ignored .env: an empty value is no secret"
+regexTarget = "match"
+regexes = ['''^[A-Z0-9_]+=""\s''']

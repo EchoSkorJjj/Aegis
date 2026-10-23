@@ -1,0 +1,139 @@
+name: security-scanning
+
+# CS203-145: every pull request, and every push to develop and main, is checked for
+#   - committed secrets (gitleaks, the commits the change adds; .gitleaks.toml lists the allowed test fixtures),
+#   - vulnerable dependencies the change adds (GitHub dependency review, with the Maven graph resolved first),
+#   - vulnerable code (CodeQL: Java, JavaScript/TypeScript, Python).
+# A secret or a vulnerable dependency fails the check. No Dependabot: Aegis watches its own dependencies.
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+  schedule:
+    # CodeQL weekly on the default branch, so new queries reach code nobody changed.
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-scanning-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  secrets:
+    name: secrets (gitleaks)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The CLI, not gitleaks-action (which needs a paid licence for organization accounts), pinned and checked.
+      - name: Install gitleaks
+        env:
+          VERSION: 8.28.0
+          SHA256: a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb
+        run: |
+          curl -sSfL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
+          echo "${SHA256}  gitleaks.tar.gz" | sha256sum --check --strict
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo install gitleaks /usr/local/bin/gitleaks
+          rm gitleaks gitleaks.tar.gz
+
+      - name: Scan the commits this change adds
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            range="$PR_BASE..$PR_HEAD"
+          elif [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range="$BEFORE..$AFTER"
+          else
+            # A new branch, or a force-push from a commit no longer here: everything reachable from it.
+            range="$AFTER"
+          fi
+          echo "Scanning $range"
+          gitleaks git --config .gitleaks.toml --redact --no-banner --verbose --log-opts="$range" .
+
+  # The Spring Boot parent manages most Maven versions, which GitHub can't read from a pom on its own. Maven
+  # resolves the whole graph here and submits it for the change's own commit, so dependency review compares real
+  # versions. Same-repository changes only: a fork's token can't submit.
+  maven-dependency-graph:
+    name: maven dependency graph (${{ matrix.service }})
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [identity-service, gateway, aegis-core]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Submit the resolved dependency graph
+        uses: advanced-security/maven-dependency-submission-action@v6
+        with:
+          directory: backend/${{ matrix.service }}
+          ignore-maven-wrapper: true
+          correlator: maven-${{ matrix.service }}
+          snapshot-sha: ${{ github.event.pull_request.head.sha || github.sha }}
+          snapshot-ref: ${{ github.event_name == 'pull_request' && format('refs/heads/{0}', github.head_ref) || github.ref }}
+
+  dependency-review:
+    name: dependency review
+    needs: maven-dependency-graph
+    # Runs even when the Maven graph was skipped (a fork) or failed: the lockfiles and poms still get reviewed.
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail on any known-vulnerable dependency the change adds
+        uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: low
+          fail-on-scopes: runtime, development, unknown
+          retry-on-snapshot-warnings: true
+          retry-on-snapshot-warnings-timeout: 300
+
+  codeql:
+    name: codeql (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [java-kotlin, javascript-typescript, python]
+    steps:
+      - uses: actions/checkout@v4
+
+      # No build needed: Java is analysed from source (there is no Kotlin), the others are interpreted.
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}

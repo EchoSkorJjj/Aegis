@@ -168,6 +168,27 @@ Run each from the service's folder. Every service has its own workflow in [`.git
 run on the pushes and pull requests that touch it: `identity-service-ci`, `gateway-ci`, `aegis-core-ci`,
 `ai-service-ci` (ruff and pytest) and `frontend-e2e` (Playwright).
 
+### Security scanning
+
+`security-scanning` runs on every pull request and every push to `develop` and `main`. A committed secret or a
+known-vulnerable dependency fails it:
+
+- **Secrets** — gitleaks (the CLI, pinned and checksummed) scans the commits the change adds. The only exceptions are
+  the test fixtures and documentation that merely look like secrets, listed in [`.gitleaks.toml`](.gitleaks.toml)
+  with why; each allows that exact text, never a whole file. Never allow-list a real secret: revoke and rotate it.
+  To run it locally: `gitleaks git --config .gitleaks.toml .`
+- **Dependencies** — GitHub's dependency review fails a pull request that adds a dependency with any known
+  vulnerability (runtime, development or unknown scope). Maven resolves each Java service's whole graph first and
+  submits it, so versions the Spring Boot parent manages are reviewed too; the frontend is reviewed from
+  `pnpm-lock.yaml`. GitHub doesn't read the ai-service's `pyproject.toml` (PEP 621), so its dependencies aren't
+  reviewed yet.
+- **Code** — CodeQL analyses the Java, TypeScript/JavaScript and Python code (no build needed), and weekly on the
+  default branch. Its alerts are under the repository's **Security → Code scanning**, and its check fails a pull
+  request that adds an alert at or above the threshold set in the repository's settings.
+
+There's no Dependabot: Aegis watches its own dependencies, so a second bot opening upgrade pull requests would
+compete with it.
+
 ## Repository layout
 
 ```
