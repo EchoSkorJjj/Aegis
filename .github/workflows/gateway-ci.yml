@@ -5,10 +5,12 @@ on:
     paths:
       - "backend/gateway/**"
       - ".github/workflows/gateway-ci.yml"
+      - "security/access-control.md"   # the access tests read it
   pull_request:
     paths:
       - "backend/gateway/**"
       - ".github/workflows/gateway-ci.yml"
+      - "security/access-control.md"   # the access tests read it
 
 jobs:
   build-and-test:
