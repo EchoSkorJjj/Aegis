@@ -28,6 +28,10 @@ class IngestionFeedMetricsTest {
         for (String sourceId : List.of("nvd", "vendor-status")) {
             assertThat(health(sourceId)).isZero();
             assertThat(lastSuccess(sourceId)).isNaN();
+            assertThat(pollOutcome(sourceId, "success")).isZero();
+            assertThat(pollOutcome(sourceId, "failure")).isZero();
+            assertThat(pollRecords(sourceId, "stored")).isZero();
+            assertThat(pollRecords(sourceId, "duplicate")).isZero();
         }
     }
 

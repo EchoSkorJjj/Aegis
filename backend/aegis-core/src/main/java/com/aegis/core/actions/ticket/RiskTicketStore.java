@@ -14,6 +14,9 @@ import org.springframework.data.domain.Pageable;
  */
 public interface RiskTicketStore {
 
+    /** Responses in Review & approve, including tickets whose pull requests still need attention. */
+    long countPending();
+
     /** Insert a new ticket in the caller's organization. */
     RiskTicket create(RiskTicket ticket);
 

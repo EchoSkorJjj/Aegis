@@ -36,6 +36,7 @@ import com.aegis.core.scoring.ScoringDtos.SeverityInput;
 import com.aegis.core.signals.ChangeSignal;
 import com.aegis.core.signals.ChangeSignalFilter;
 import com.aegis.core.signals.ChangeSignalStore;
+import io.micrometer.core.annotation.Timed;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
@@ -94,6 +95,7 @@ public class ScoringService {
     }
 
     @Transactional(readOnly = true)
+    @Timed(value = "aegis.score.duration", histogram = true, extraTags = {"operation", "change"})
     public ChangeImpactResponse scoreChange(UUID signalId) {
         // Matching resolves the signal itself and is the one place that rejects an unmatchable
         // (security-news) signal, so it runs first and its 404/400 is the contract for a bad id.
@@ -156,6 +158,7 @@ public class ScoringService {
      * Postgres's READ COMMITTED every statement reads the latest committed data anyway, so the outer
      * transaction never gave the roll-up a single snapshot to begin with.
      */
+    @Timed(value = "aegis.score.duration", histogram = true, extraTags = {"operation", "rollup"})
     public EstateRollupResponse rollUpEstate(ChangeSignalFilter filter, Integer requestedLimit) {
         int maxSignals = scorer.weights().rollup().maxSignals();
         int limit = requestedLimit == null ? maxSignals : Math.clamp(requestedLimit, 1, maxSignals);

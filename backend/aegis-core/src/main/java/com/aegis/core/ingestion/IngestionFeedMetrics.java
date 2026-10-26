@@ -70,6 +70,13 @@ class IngestionFeedMetrics {
 
     private FeedState registerFeed(String sourceId) {
         FeedState state = new FeedState();
+        pollOutcomeCounter(sourceId, "success");
+        pollOutcomeCounter(sourceId, "failure");
+        pollRecordsCounter(sourceId, "stored");
+        pollRecordsCounter(sourceId, "duplicate");
+        normalizeRecordsCounter(sourceId, "normalized");
+        normalizeRecordsCounter(sourceId, "dropped");
+        normalizeRecordsCounter(sourceId, "deferred");
         Gauge.builder(LAST_SUCCESS, state.lastSuccessAt, ref -> {
                     Instant lastSuccess = ref.get();
                     return lastSuccess == null ? Double.NaN : lastSuccess.toEpochMilli() / 1000.0;

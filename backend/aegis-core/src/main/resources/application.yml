@@ -45,6 +45,10 @@ spring:
 
 # ---- Aegis Core configuration -------------------------------------------
 aegis:
+  metrics:
+    decision-queue:
+      enabled: ${AEGIS_METRICS_DECISION_QUEUE_ENABLED:false}
+      interval: ${AEGIS_METRICS_DECISION_QUEUE_INTERVAL:PT1M}
   dashboard:
     snapshots:
       enabled: ${AEGIS_DASHBOARD_SNAPSHOTS_ENABLED:false}
@@ -359,13 +363,16 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info,prometheus
   endpoint:
     health:
       show-details: when_authorized
   metrics:
     tags:
       application: aegis-core
+    distribution:
+      maximum-expected-value:
+        aegis.draft.duration: 5m
   tracing:
     sampling:
       probability: ${TRACING_SAMPLE_RATE:1.0}

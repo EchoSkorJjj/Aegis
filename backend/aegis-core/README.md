@@ -639,8 +639,8 @@ domain. See `ARCHITECTURE.md` for the topology.
 - **Auth** — OAuth2 resource server; validates identity-service's RS256 JWTs via its JWKS
   (`IDENTITY_JWKS_URI`), maps the `roles` claim, and authorizes per route.
 - **Observability** — `/actuator/health|info|prometheus`, traces to Zipkin (propagated to the
-  ai-service), and per-ingestion-feed health/counts/last-success metrics (see "Ingestion feed
-  health" below and `ops/README.md`).
+  ai-service), per-feed health/counts/last success, match/score/draft histograms, and an optional
+  aggregate decision queue gauge. Grafana, alert thresholds and runbooks: [`ops/README.md`](../../ops/README.md).
 
 ### Key environment variables
 
@@ -678,6 +678,8 @@ domain. See `ARCHITECTURE.md` for the topology.
 | `AEGIS_OSV_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → advisory drain for OSV |
 | `AEGIS_OSV_BASE_URL` | OSV's export bucket | Override the export host (a mirror, tests) |
 | `AEGIS_SCHEDULING_POOL_SIZE` | `6` | Scheduler threads, so OSV's long sync never starves the other feeds' drains |
+| `AEGIS_METRICS_DECISION_QUEUE_ENABLED` | `false` (Compose: `true`) | Collect Review & approve depth across organizations under the scheduler lease; needs the identity internal service token |
+| `AEGIS_METRICS_DECISION_QUEUE_INTERVAL` | `PT1M` | Background refresh cadence; keep at most one minute with the supplied alert freshness threshold |
 | `AEGIS_SCHEDULER_LEASE_DURATION` / `AEGIS_SCHEDULER_LEASE_RENEWAL` | `PT2M` / `PT30S` | How long the instance running the scheduled jobs holds the lease, and how often it renews it (V30) |
 | `AEGIS_SBOM_GENERATION_ENABLED` | `true` | Import SBOMs from a service's linked repository (git + syft in the image) |
 | `AEGIS_SBOM_ALLOWED_HOSTS` | `github.com,gitlab.com,bitbucket.org` | Hosts a repository may be linked on and cloned from — the SSRF boundary |

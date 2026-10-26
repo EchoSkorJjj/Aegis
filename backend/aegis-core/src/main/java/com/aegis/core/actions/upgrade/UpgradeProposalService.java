@@ -55,6 +55,7 @@ import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.scoring.ScoringService;
 import com.aegis.core.signals.ChangeSignal;
 import com.aegis.core.signals.ChangeSignalStore;
+import io.micrometer.core.annotation.Timed;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -374,6 +375,8 @@ public class UpgradeProposalService {
      * exact title and body, with an AI-drafted rationale when the ai-service can supply one. Writes nothing
      * outside Aegis. Empty when the plan has nothing Aegis can automate.
      */
+    @Timed(value = "aegis.draft.duration", histogram = true,
+            extraTags = {"kind", "upgrade"})
     public Optional<UpgradeProposal> draft(UpgradePlan plan, UUID riskTicketId, UUID drafter) {
         if (!plan.automatable()) {
             return Optional.empty();

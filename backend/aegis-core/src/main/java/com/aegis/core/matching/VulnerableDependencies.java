@@ -28,6 +28,7 @@ import com.aegis.core.matching.MatchingDtos.MatchConfidence;
 import com.aegis.core.matching.MatchingDtos.VulnerabilityRef;
 import com.aegis.core.matching.MatchingDtos.VulnerableDependency;
 import com.aegis.core.signals.ChangeSignalStore;
+import io.micrometer.core.annotation.Timed;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -125,6 +126,8 @@ public class VulnerableDependencies {
      * Every vulnerable dependency of these services, in a fixed number of batched lookups however many
      * services, dependencies and vulnerabilities there are.
      */
+    @Timed(value = "aegis.match.duration", histogram = true,
+            extraTags = {"operation", "dependencies"})
     @Transactional(readOnly = true)
     public Found find(Collection<UUID> serviceIds) {
         if (serviceIds.isEmpty()) {

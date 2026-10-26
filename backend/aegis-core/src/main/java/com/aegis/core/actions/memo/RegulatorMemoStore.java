@@ -13,6 +13,9 @@ import org.springframework.data.domain.Pageable;
  */
 public interface RegulatorMemoStore {
 
+    /** Proposed memos awaiting a decision. */
+    long countPending();
+
     /** Insert a new memo in the caller's organization. */
     RegulatorMemo create(RegulatorMemo memo);
 
