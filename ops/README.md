@@ -1,8 +1,133 @@
-# Prometheus
+# Operations monitoring
 
 Metrics for Aegis's backend services. Prometheus scrapes each service's Micrometer metrics
 (Spring Boot Actuator) and lets you query them with **PromQL**. This folder holds the scrape
-config ([`prometheus.yml`](prometheus.yml)); everything below is how to query it.
+config, alert rules, and a provisioned Grafana dashboard (CS203-151/152).
+
+## Local demo
+
+Run `docker compose up --build -d` from the repository root. Grafana is at
+http://localhost:3001/d/aegis-operations, in the **Aegis** folder. On a fresh Grafana volume, sign in with
+its initial `admin` / `admin` account and set a new password when prompted. Sign-up and anonymous access
+are disabled; the port binds to loopback. The Prometheus data source and **Aegis operations** dashboard
+load automatically from [`grafana/provisioning`](grafana/provisioning) and
+[`grafana/dashboards/aegis-operations.json`](grafana/dashboards/aegis-operations.json).
+
+Open http://localhost:9090/targets to check the three backend targets, and
+http://localhost:9090/alerts to see pending and firing alerts. The dashboard also graphs their states.
+Prometheus evaluates the rules; Grafana visualizes the same metrics. Notification delivery (email,
+chat, paging) requires an operator-configured Alertmanager and receiver; this stack does not send messages.
+
+Exercise matching and scoring by opening an advisory's change-impact view, then draft a response or
+regulator memo with an authorized account. Histogram series appear after the first corresponding
+operation. No page visit is needed for the queue count. Allow about a minute for its first refresh,
+plus the next scrape and rule evaluation. Disabled feeds have no series. An operation with no calls,
+a missing queue observation, and idle HTTP traffic display no data rather than fabricated zero latency
+or a zero error fraction.
+
+The dashboard is managed in files: edit its JSON and provisioning YAML. Restart Grafana after changing
+provisioning; it checks dashboard JSON every 30 seconds. After changing Prometheus configuration/rules,
+run `docker compose restart prometheus`. Its data volume keeps 15 days of metrics and alert state;
+Grafana's volume keeps account settings. Removing those volumes discards that history.
+
+## Pipeline metrics
+
+All durations are seconds and include success and failure. Micrometer adds `class`, `method` and
+`exception` (`none` on success); these are code-defined values, never response text or user identifiers.
+Each timer publishes `_seconds_bucket`, `_seconds_count`, `_seconds_sum` and `_seconds_max`.
+
+| Prometheus metric | Labels | Meaning |
+|---|---|---|
+| `aegis_ingestion_poll_records_total` | `source_id`, `result=stored\|duplicate` | Raw events observed, by feed |
+| `aegis_ingestion_normalize_records_total` | `source_id`, `result=normalized\|dropped\|deferred` | Raw events consumed, rejected or left for retry |
+| `aegis_match_duration_seconds_bucket` | `operation=change\|dependencies`, `le` | Change matching (`MatchingService.matchChange`) or batched estate matching (`VulnerableDependencies.find`) |
+| `aegis_score_duration_seconds_bucket` | `operation=change\|rollup`, `le` | Whole change scoring or estate rollup (`ScoringService`) |
+| `aegis_draft_duration_seconds_bucket` | `kind=ticket\|upgrade\|memo`, `le` | Whole draft operation, including AI calls, retries, deterministic fallback and persistence |
+| `aegis_decision_queue_depth` | service/scrape labels only | All organizations' Review & approve entries |
+| `aegis_decision_queue_last_refresh_timestamp_seconds` | service/scrape labels only | Last complete queue count, Unix seconds; 0 means unavailable |
+
+Ingestion counters are registered at zero for every configured feed at startup. Normalization counts
+measure raw-event outcomes, not newly discovered CVEs: updates and the same CVE from another feed still
+count as processing. Existing record counters are retained, so consumers need no migration.
+
+Stage timings overlap: scoring includes matching; a ticket includes its upgrade draft and any reachability
+assessment. Do not add these durations. Draft histograms extend to five minutes to cover AI rate-limit
+waits; the other timers use Micrometer's default buckets. These measure application operations, not
+HTTP latency or each pure score calculation inside recommendations.
+
+The queue counts a ticket once when the ticket or an attached pull request needs attention (proposed,
+filing/opening or failed); it adds pending **standalone** upgrade proposals and proposed regulator memos.
+Filed/approved/dismissed responses without pending work are excluded. Findings with no drafted response
+are outside Review & approve and outside this gauge. Counts use org-scoped stores and RLS without
+loading response bodies. A count is a sample over one pass, not a cross-organization transaction.
+
+`AEGIS_METRICS_DECISION_QUEUE_ENABLED` defaults to `false`; Compose sets it to `true`. It needs
+`IDENTITY_SERVICE_TOKEN` matching identity-service's `IDENTITY_INTERNAL_SERVICE_TOKEN`, just like owner
+notifications and posture snapshots. `AEGIS_METRICS_DECISION_QUEUE_INTERVAL` defaults to `PT1M`; keep it
+at most one minute with the supplied three-minute freshness threshold. Only the `SchedulerLease` holder
+refreshes; others publish unknown (`NaN`, timestamp 0). A failed pass publishes unknown, never a partial
+total. No database queries run during a scrape. The recording rule `aegis:decision_queue_depth` takes
+the maximum fresh replica value to avoid double counting at lease handover. No organization, service,
+owner, advisory, repository or response identifiers are labels.
+
+```promql
+# p95 matching latency by entry point
+histogram_quantile(0.95, sum by (le, operation) (rate(aegis_match_duration_seconds_bucket[5m])))
+
+# p95 scoring latency
+histogram_quantile(0.95, sum by (le, operation) (rate(aegis_score_duration_seconds_bucket[5m])))
+
+# p95 drafting latency by draft type
+histogram_quantile(0.95, sum by (le, kind) (rate(aegis_draft_duration_seconds_bucket[5m])))
+
+# Fresh global decision queue observation
+aegis:decision_queue_depth
+
+# Per-backend-service 5xx fraction, excluding Actuator requests
+aegis:http_5xx:ratio5m
+```
+
+## Alert runbook
+
+Rules live in [`alerts.yml`](alerts.yml), evaluated once a minute. A condition must remain true for
+the full `for` duration; recovery resets its pending time. Evaluation can add up to one minute.
+
+| Alert | Condition and hold time | First checks |
+|---|---|---|
+| `AegisFeedDown` | Configured feed health is 0 for **45m** | Feed health/last success, poll failures, core logs, publisher connectivity, API limits and credentials |
+| `AegisDecisionBacklogGrowing` | Both 10-minute slope and net change stay positive for **1h**, with a nonempty queue | Review & approve, owner assignments, failed Jira filings and PR openings; queue refresh freshness |
+| `AegisHighErrorRate` | Service's 5-minute HTTP 5xx fraction is strictly **>1% for 10m** | Service logs, request volume, Zipkin http://localhost:9411, downstream health. Do not blindly replay approved external actions |
+| `AegisServiceDown` | Backend scrape fails for **5m** | Container health, networking, target errors. Covers a down core that cannot emit feed health |
+| `AegisDecisionQueueMetricsStale` | No enabled replica refreshed within **3m**, for **5m** | Queue metrics switch, scheduler lease, identity internal token/API, database and core logs |
+
+The backlog rule means a sustained **upward trend**, not an increase on every sample; small dips may
+still have a positive 10-minute slope. It needs at least two observations before becoming pending,
+so the first possible firing after a new series is about 61 minutes. Stale observations are omitted.
+The 5xx denominator excludes `/actuator.*` so monitoring requests cannot dilute real failures. It sums
+instances **within each job**. Exactly 1%, idle traffic and 4xx do not trigger it.
+
+A feed with no successful poll starts unhealthy. A stopped poller becomes unhealthy after the existing
+`AEGIS_INGESTION_HEALTH_STALE_AFTER` (default 45m), then must stay unhealthy for another 45m to fire;
+an explicit failed poll starts that hold immediately. Disabled connectors are absent, not unhealthy.
+
+### Validation
+
+From the repository root (PowerShell and POSIX shells both accept these single-line commands):
+
+```text
+docker compose -f docker-compose.yml config --quiet
+docker run --rm --entrypoint promtool -v "./ops:/etc/prometheus:ro" prom/prometheus:latest check config /etc/prometheus/prometheus.yml
+docker run --rm --entrypoint promtool -v "./ops:/etc/prometheus:ro" -w /etc/prometheus prom/prometheus:latest test rules alerts.test.yml
+```
+
+[`alerts.test.yml`](alerts.test.yml) checks exact hold times, resets, recovery, threshold equality,
+zero traffic, scrape failure, stale queue data and replica deduplication using synthetic time.
+CI runs these checks and parses dashboard JSON in
+[`observability-ci.yml`](../.github/workflows/observability-ci.yml). Core's `mvn verify` covers real
+histogram export, queue refresh/scope/failure behavior and persistence counts.
+
+Reference: [Grafana provisioning](https://grafana.com/docs/grafana/latest/administration/provisioning/)
+and [Prometheus rule testing](https://prometheus.io/docs/prometheus/latest/configuration/unit_testing_rules/).
 
 ## How it's wired
 
@@ -92,7 +217,7 @@ rate(identity_ratelimit_blocked_total[5m])
 
 ### Ingestion feed health (aegis-core, CS203-47)
 
-Emitted by `IngestionFeedMetrics`, one series per feed (`source_id` = `nvd`, `vendor-status`, or
+Emitted by `IngestionFeedMetrics`, one series per feed (`source_id` = `nvd`, `osv`, `vendor-status`, or
 `security-news` today — one per registered `IngestionSource`). Registered eagerly at startup, so
 every feed reports even before its first poll.
 
@@ -172,7 +297,7 @@ Common `type` values:
 
 (The `AuditEventType` enum is the source of truth — check it for the full, current list.)
 
-**`aegis_ingestion_*`** — all tagged `source_id` (the feed: `nvd`, `vendor-status`,
+**`aegis_ingestion_*`** — all tagged `source_id` (the feed: `nvd`, `osv`, `vendor-status`,
 `security-news`). `aegis_ingestion_poll_total`'s `outcome` is `success` or `failure`;
 `aegis_ingestion_poll_records_total`'s `result` is `stored` or `duplicate` (raw events observed
 while polling); `aegis_ingestion_normalize_records_total`'s `result` is `normalized`, `dropped`, or
@@ -185,9 +310,9 @@ while polling); `aegis_ingestion_normalize_records_total`'s `result` is `normali
   `http_server_requests_*` stay at zero until the matching action happens (log in, trip the rate
   limiter, hit an endpoint, run a poll cycle). Exercise the app first, then query. The two ingestion
   *gauges* (`aegis_ingestion_health`, `aegis_ingestion_last_success_timestamp_seconds`) are the
-  exception — they're registered for every configured feed at startup, before any polling happens.
-- **Percentile latency** (`histogram_quantile(0.95, …_bucket)`) needs percentile histograms
+  exception — they and the ingestion counters are registered for every configured feed at startup.
+- **HTTP percentile latency** (`histogram_quantile(0.95, …_bucket)`) needs HTTP histograms
   enabled — set `management.metrics.distribution.percentiles-histogram.http.server.requests=true`.
-  Without it, use the average-latency form above.
+  Without it, use the average-latency form above. Pipeline histograms are already enabled in code.
 - `rate()`/`increase()` windows should be at least ~4× the 15s scrape interval (≥1m); the examples
   use `5m`.

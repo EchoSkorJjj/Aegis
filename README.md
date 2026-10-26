@@ -87,6 +87,7 @@ docker compose up --build
 | PostgreSQL | localhost:5432 | User and password `identity` |
 | Mailhog | http://localhost:8025 | Catches every email, whatever the address |
 | Prometheus, Zipkin | http://localhost:9090, http://localhost:9411 | Metrics and traces |
+| Grafana | http://localhost:3001/d/aegis-operations | Provisioned feed, pipeline, decision queue and error dashboard |
 
 ai-service has no address on your machine: only aegis-core can reach it.
 
@@ -127,7 +128,7 @@ likely to change:
 | `TRUSTED_PROXY_HOPS`, `GATEWAY_TRUSTED_PROXIES` | frontend, gateway | 1, any private address | Which `X-Forwarded-For` address the sign-in rate limit trusts: the proxies in front of the frontend, and the addresses the gateway accepts the header from |
 
 Scoring weights and tiers: [SCORING-CALIBRATION.md](backend/aegis-core/SCORING-CALIBRATION.md). Metrics and ready-made
-PromQL: [ops/README.md](ops/README.md).
+PromQL, Grafana and alert runbooks: [ops/README.md](ops/README.md).
 
 ## Deploy to AWS
 
@@ -219,7 +220,7 @@ security/             threat model, data classification, and the access-control 
 .github/workflows/    CI per service, and security scanning (secrets, dependencies, code)
 .gitleaks.toml        the test fixtures gitleaks allows, each with why
 terraform/            AWS: bootstrap, global, environments/dev and prod, modules
-ops/                  Prometheus configuration and PromQL
+ops/                  Prometheus metrics/alerts, Grafana dashboard/provisioning and runbooks
 assets/diagrams/      the README's diagrams: SVG sources and their PNGs
 docker-compose.yml    the whole stack, locally
 ```

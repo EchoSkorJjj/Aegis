@@ -1,0 +1,63 @@
+groups:
+  - name: aegis-operations
+    interval: 1m
+    rules:
+      # Every replica reports the same global total. Only the scheduler lease holder refreshes it;
+      # max avoids double counting at handover. Unknown/stale observations are omitted, never zeroed.
+      - record: aegis:decision_queue_depth
+        expr: max(aegis_decision_queue_depth and on (job, instance) (time() - aegis_decision_queue_last_refresh_timestamp_seconds < 180))
+
+      - record: aegis:http_requests:rate5m
+        expr: sum by (job) (rate(http_server_requests_seconds_count{job=~"identity-service|aegis-core|gateway",uri!~"/actuator.*"}[5m]))
+
+      - record: aegis:http_5xx:ratio5m
+        expr: |
+          (
+            sum by (job) (rate(http_server_requests_seconds_count{job=~"identity-service|aegis-core|gateway",uri!~"/actuator.*",status=~"5.."}[5m]))
+            or on (job) (0 * aegis:http_requests:rate5m)
+          ) / aegis:http_requests:rate5m
+
+      - alert: AegisFeedDown
+        expr: aegis_ingestion_health == 0
+        for: 45m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Feed {{ $labels.source_id }} has been unhealthy for 45 minutes'
+          description: 'Check feed poll failures, last success, connectivity and credentials. See ops/README.md#alert-runbook.'
+
+      - alert: AegisDecisionBacklogGrowing
+        expr: deriv(aegis:decision_queue_depth[10m]) > 0 and delta(aegis:decision_queue_depth[10m]) > 0 and aegis:decision_queue_depth > 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: Decision queue has kept growing for an hour
+          description: 'The 10-minute queue trend has remained positive for an hour. Check Review & approve, owner assignments and failed filings. See ops/README.md#alert-runbook.'
+
+      - alert: AegisHighErrorRate
+        expr: aegis:http_5xx:ratio5m > 0.01 and on (job) aegis:http_requests:rate5m > 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: '{{ $labels.job }} has exceeded 1% HTTP 5xx for 10 minutes'
+          description: 'The 5-minute 5xx fraction excludes Actuator traffic. Inspect service logs and Zipkin before retrying external actions. See ops/README.md#alert-runbook.'
+
+      - alert: AegisServiceDown
+        expr: up{job=~"identity-service|aegis-core|gateway"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: '{{ $labels.job }} cannot be scraped for 5 minutes'
+          description: 'Check the container and scrape target; feed metrics cannot report failure while aegis-core itself is unavailable. See ops/README.md#alert-runbook.'
+
+      - alert: AegisDecisionQueueMetricsStale
+        expr: max(aegis_decision_queue_last_refresh_timestamp_seconds) < time() - 180
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Decision queue depth is unavailable
+          description: 'Check the scheduler lease, identity internal token and database. No partial queue total is published. See ops/README.md#alert-runbook.'

@@ -93,6 +93,7 @@ services:
       IDENTITY_SERVICE_TOKEN: dev-identity-internal-token-change-me
       AEGIS_NOTIFICATIONS_ENABLED: "true"
       AEGIS_DASHBOARD_SNAPSHOTS_ENABLED: "true"
+      AEGIS_METRICS_DECISION_QUEUE_ENABLED: "true"
       AEGIS_DASHBOARD_SNAPSHOTS_CRON: "${AEGIS_DASHBOARD_SNAPSHOTS_CRON:-0 55 23 * * *}"
       AEGIS_NOTIFICATIONS_INTERVAL: PT1M
       # Export distributed traces to Zipkin — view them at http://localhost:9411
@@ -232,10 +233,31 @@ services:
       - gateway
     volumes:
       - ./ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./ops/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
     ports:
       - "9090:9090" # Prometheus UI — open http://localhost:9090
     # On `edge` only, so it cannot reach ai-service (by design). ai-service metrics are therefore
     # not scraped; see ops/prometheus.yml.
+    networks: [edge]
+
+  grafana:
+    image: grafana/grafana:13.2.4
+    depends_on:
+      - prometheus
+    environment:
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3001:3000"
     networks: [edge]
 
 networks:
@@ -248,3 +270,5 @@ networks:
 
 volumes:
   pgdata:
+  prometheus-data:
+  grafana-data:

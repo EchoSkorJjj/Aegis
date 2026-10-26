@@ -79,6 +79,17 @@ Companion to [threat-model.md](threat-model.md); story CS203-146 (E12-2). As of 
 | Traces and metrics | Internal | Zipkin and Prometheus locally; tracing is off in AWS (`TRACING_SAMPLE_RATE=0`) | Operators | Local only | — |
 | Database backups | All of the above | RDS automated backups, encrypted | The AWS account's operators | 7 days | — |
 
+### Operational monitoring (CS203-151/152)
+
+| Data | Class | Where it's kept | Who reads it | Kept for | Leaves Aegis to |
+|---|---|---|---|---|---|
+| Feed counters/health, pipeline histograms, aggregate Review & approve depth, HTTP rates and alert states | Internal operational data; queue totals are confidential | Prometheus `prometheus-data` volume; dashboard definitions in Git, Grafana settings in `grafana-data` | Deployment operators; Grafana login on loopback, backend scrape endpoints on the existing operator network | Prometheus: 15 days; Grafana settings until its volume is removed | Local Prometheus/Grafana only; no external notification receiver configured |
+
+New labels contain no organization/service/owner/repository identifiers, personal data, source text or response
+content. Queue collection uses the existing internal organization directory and each org's RLS-scoped count
+queries; the only exported value is a global total and its refresh timestamp. The AI network stays isolated.
+Monitoring services need operator access controls before remote hosting (threat model B12).
+
 ## What leaves Aegis
 
 | Destination | What | When | Safeguards |
