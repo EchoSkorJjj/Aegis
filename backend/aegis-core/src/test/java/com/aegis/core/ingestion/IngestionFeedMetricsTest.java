@@ -1,5 +1,6 @@
 package com.aegis.core.ingestion;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -8,17 +9,22 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class IngestionFeedMetricsTest {
 
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    private final Clock clock = mock(Clock.class);
+    private final Instant now = Instant.now();
 
     private IngestionFeedMetrics metrics(Duration staleAfter, String... sourceIds) {
         List<IngestionSource> sources = List.of(sourceIds).stream()
                 .<IngestionSource>map(FakeSource::new)
                 .toList();
         IngestionProperties properties = new IngestionProperties(null, 5, new IngestionProperties.Health(staleAfter));
-        return new IngestionFeedMetrics(registry, sources, properties);
+        when(clock.instant()).thenReturn(now);
+        return new IngestionFeedMetrics(registry, sources, properties, clock);
     }
 
     @Test
@@ -75,15 +81,44 @@ class IngestionFeedMetricsTest {
     }
 
     @Test
-    void aFeedIsUnhealthyOnceItsLastSuccessIsOlderThanTheStaleAfterThreshold() throws InterruptedException {
-        // A real (if tiny) sleep guarantees some elapsed time has actually passed, so this doesn't
-        // race the clock's resolution the way asserting against a zero elapsed time would.
-        IngestionFeedMetrics metrics = metrics(Duration.ofMillis(1), "nvd");
+    void aFeedIsUnhealthyOnceItsLastSuccessIsOlderThanTheStaleAfterThreshold() {
+        IngestionFeedMetrics metrics = metrics(Duration.ofMinutes(45), "nvd");
 
         metrics.recordPollSuccess("nvd", 1, 0);
-        Thread.sleep(20);
+        when(clock.instant()).thenReturn(now.plus(Duration.ofMinutes(45)).plusNanos(1));
 
         assertThat(health("nvd")).isZero();
+    }
+
+    @Test
+    void aDailyFeedStaysHealthyUntilItsNextPollPlusTheGracePeriod() {
+        IngestionFeedMetrics metrics = metrics(Duration.ofMinutes(45));
+        metrics.registerSource("osv", Duration.ofDays(1));
+        assertThat(health("osv")).isZero();
+        metrics.recordPollSuccess("osv", 1, 0);
+
+        when(clock.instant()).thenReturn(now.plus(Duration.ofDays(1)));
+        assertThat(health("osv")).isEqualTo(1);
+        when(clock.instant()).thenReturn(now.plus(Duration.ofDays(1)).plus(Duration.ofMinutes(45)));
+        assertThat(health("osv")).isEqualTo(1);
+        when(clock.instant()).thenReturn(now.plus(Duration.ofDays(1)).plus(Duration.ofMinutes(45)).plusNanos(1));
+        assertThat(health("osv")).isZero();
+    }
+
+    @Test
+    void registeringTheCadenceAfterNormalizationKeepsTheSameFeedState() {
+        IngestionFeedMetrics metrics = metrics(Duration.ofMinutes(45));
+        metrics.recordNormalizeOutcome("osv", 5, 0, 0);
+        metrics.registerSource("osv", Duration.ofHours(12));
+        metrics.recordPollSuccess("osv", 1, 0);
+
+        when(clock.instant()).thenReturn(now.plus(Duration.ofHours(12)));
+        assertThat(health("osv")).isEqualTo(1);
+        assertThat(normalizeRecords("osv", "normalized")).isEqualTo(5);
+        metrics.recordPollFailure("osv");
+        assertThat(health("osv")).isZero();
+        metrics.recordPollSuccess("osv", 0, 1);
+        assertThat(health("osv")).isEqualTo(1);
     }
 
     @Test

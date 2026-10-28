@@ -670,7 +670,7 @@ domain. See `ARCHITECTURE.md` for the topology.
 | `AEGIS_VENDOR_STATUS_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → vendor-incident drain |
 | `AEGIS_INGESTION_NEWS_ENABLED` | `false` | Poll security news feeds (Docker Compose sets `true`) |
 | `AEGIS_NEWS_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → news-item drain |
-| `AEGIS_INGESTION_HEALTH_STALE_AFTER` | `PT45M` | How long since a feed's last success before `aegis_ingestion_health` reports unhealthy |
+| `AEGIS_INGESTION_HEALTH_STALE_AFTER` | `PT45M` | How long since a feed's last success before health reports unhealthy; self-scheduled OSV adds its poll interval to this grace |
 | `AEGIS_INGESTION_OSV_ENABLED` | `false` | Sync OSV's per-ecosystem exports ([OSV connector](#osv-connector-ecosystem-advisories)) |
 | `AEGIS_OSV_ECOSYSTEMS` | `npm,PyPI,crates.io,RubyGems,Go,Maven` | Exact OSV bucket names to sync, comma-separated |
 | `AEGIS_OSV_INCLUDE_MALICIOUS` | `false` | Also import OSV's malicious-package reports (`MAL-*`) |
@@ -1156,11 +1156,14 @@ per-source APIs above.
 Per-feed health, record counts, and last-success time — exposed as Micrometer metrics on the
 existing `/actuator/prometheus` endpoint (no new REST surface; nothing here needs a JWT, since
 `/actuator/prometheus` is already public — see `SecurityConfig`). `IngestionFeedMetrics` registers
-one series per `IngestionSource` bean (`nvd`, `vendor-status`, `security-news` today) at startup:
+one series per `IngestionSource` bean (`nvd`, `vendor-status`, `security-news`) at startup;
+self-scheduled OSV registers its series and cadence when its connector is enabled:
 
 - `aegis_ingestion_health{source_id}` — 1 (healthy) or 0. Unhealthy if the feed has never
   succeeded, its most recent poll attempt failed, or it's been longer than
-  `aegis.ingestion.health.stale-after` (default 45m) since its last success.
+  `aegis.ingestion.health.stale-after` (default 45m) since its last success. OSV records its own
+  bulk-sync outcomes and adds its poll interval to that grace (24h 45m by default), so it stays
+  healthy between successful daily syncs; an explicit sync failure still makes it unhealthy immediately.
 - `aegis_ingestion_last_success_timestamp_seconds{source_id}` — epoch seconds of the last
   successful poll.
 - `aegis_ingestion_poll_total{source_id,outcome}` and `aegis_ingestion_poll_records_total

@@ -95,20 +95,27 @@ the full `for` duration; recovery resets its pending time. Evaluation can add up
 | Alert | Condition and hold time | First checks |
 |---|---|---|
 | `AegisFeedDown` | Configured feed health is 0 for **45m** | Feed health/last success, poll failures, core logs, publisher connectivity, API limits and credentials |
-| `AegisDecisionBacklogGrowing` | Both 10-minute slope and net change stay positive for **1h**, with a nonempty queue | Review & approve, owner assignments, failed Jira filings and PR openings; queue refresh freshness |
+| `AegisDecisionBacklogGrowing` | Queue is larger than **1h** ago and its hourly slope is positive for **5m**, with a complete hour of fresh observations | Review & approve, owner assignments, failed Jira filings and PR openings; queue refresh freshness |
 | `AegisHighErrorRate` | Service's 5-minute HTTP 5xx fraction is strictly **>1% for 10m** | Service logs, request volume, Zipkin http://localhost:9411, downstream health. Do not blindly replay approved external actions |
 | `AegisServiceDown` | Backend scrape fails for **5m** | Container health, networking, target errors. Covers a down core that cannot emit feed health |
 | `AegisDecisionQueueMetricsStale` | No enabled replica refreshed within **3m**, for **5m** | Queue metrics switch, scheduler lease, identity internal token/API, database and core logs |
 
-The backlog rule means a sustained **upward trend**, not an increase on every sample; small dips may
-still have a positive 10-minute slope. It needs at least two observations before becoming pending,
-so the first possible firing after a new series is about 61 minutes. Stale observations are omitted.
+The backlog rule compares the queue with an hour ago and checks its **hourly upward trend**, so
+drafts ten or thirty minutes apart can still alert. It requires 60 fresh minute observations and
+an observation an hour ago, then a five-minute hold; the first possible firing after a new series
+is about 65 minutes. A gap in fresh history restarts the full-hour observation requirement.
+A large but flat queue is not growth and does not trigger this alert.
 The 5xx denominator excludes `/actuator.*` so monitoring requests cannot dilute real failures. It sums
 instances **within each job**. Exactly 1%, idle traffic and 4xx do not trigger it.
 
 A feed with no successful poll starts unhealthy. A stopped poller becomes unhealthy after the existing
 `AEGIS_INGESTION_HEALTH_STALE_AFTER` (default 45m), then must stay unhealthy for another 45m to fire;
-an explicit failed poll starts that hold immediately. Disabled connectors are absent, not unhealthy.
+an explicit failed poll starts that hold immediately. OSV reports its own bulk-sync outcomes and
+allows its configured daily poll interval **plus** the staleness grace before becoming stale
+(24h 45m by default), so successful daily syncs stay healthy between polls.
+It rechecks for the scheduler lease on the lease-renewal cadence (30s by default), so a delayed
+lease acquisition at startup does not postpone its first sync for a day; downloads still run daily.
+Disabled connectors are absent, not unhealthy.
 
 ### Validation
 
@@ -244,8 +251,8 @@ aegis_ingestion_normalize_records_total{result="normalized"}
 A feed is unhealthy (`aegis_ingestion_health` = 0) if it has never had a successful poll, its most
 recent poll attempt failed, or it's been longer than `aegis.ingestion.health.stale-after` (default
 45 minutes — override via `AEGIS_INGESTION_HEALTH_STALE_AFTER`, an ISO-8601 duration) since its
-last success. The gauge is sampled fresh on every scrape, so it reflects staleness even between
-poll cycles, not just at the moment a poll runs.
+last success. Self-scheduled OSV adds its own poll interval to that grace period. The gauge is sampled
+fresh on every scrape, so it reflects staleness even between poll cycles, not just at the moment a poll runs.
 
 ### HTTP traffic & latency
 

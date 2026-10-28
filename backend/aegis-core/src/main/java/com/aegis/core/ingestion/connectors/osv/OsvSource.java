@@ -3,12 +3,18 @@ package com.aegis.core.ingestion.connectors.osv;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 
+import com.aegis.core.ingestion.IngestionFeedMetrics;
 import com.aegis.core.ingestion.RawEvent;
 import com.aegis.core.ingestion.RawEventStore;
 import com.aegis.core.platform.scheduling.SchedulerLease;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -43,31 +49,50 @@ class OsvSource {
     private final RawEventStore store;
     private final OsvProperties properties;
     private final SchedulerLease lease;
+    private final IngestionFeedMetrics metrics;
+    private final Duration pollInterval;
+    private final Clock clock;
+    private Instant nextSyncAt = Instant.MIN;
 
-    OsvSource(OsvClient client, RawEventStore store, OsvProperties properties, SchedulerLease lease) {
+    @Autowired
+    OsvSource(OsvClient client, RawEventStore store, OsvProperties properties, SchedulerLease lease,
+            IngestionFeedMetrics metrics, @Value("${aegis.ingestion.osv.poll-interval:P1D}") Duration pollInterval) {
+        this(client, store, properties, lease, metrics, pollInterval, Clock.systemUTC());
+    }
+
+    OsvSource(OsvClient client, RawEventStore store, OsvProperties properties, SchedulerLease lease,
+            IngestionFeedMetrics metrics, Duration pollInterval, Clock clock) {
         this.client = client;
         this.store = store;
         this.properties = properties;
         this.lease = lease;
+        this.metrics = metrics;
+        this.pollInterval = pollInterval;
+        this.clock = clock;
+        metrics.registerSource(SOURCE_ID, pollInterval);
     }
 
     /**
      * Downloads each configured ecosystem's snapshot on the OSV cadence (daily by default), after a
      * short initial delay so startup is unaffected. A failure is logged and isolated — the next run
      * retries, and unchanged records de-duplicate, so nothing is lost. Only the instance holding the
-     * {@link SchedulerLease} syncs.
+     * {@link SchedulerLease} syncs. Recheck on the lease-renewal cadence, so missing the lease at
+     * startup or taking it over later does not postpone the first sync for a whole day.
      */
     @Scheduled(
-            fixedDelayString = "${aegis.ingestion.osv.poll-interval:P1D}",
+            fixedDelayString = "${aegis.scheduling.lease-renewal:PT30S}",
             initialDelayString = "${aegis.ingestion.osv.initial-delay:PT30S}")
     void scheduledSync() {
-        if (!lease.held()) {
+        if (Instant.now(clock).isBefore(nextSyncAt) || !lease.held()) {
             return;
         }
         try {
             sync();
         } catch (Exception ex) {
+            metrics.recordPollFailure(SOURCE_ID);
             log.error("osv: sync failed: {}", ex.toString());
+        } finally {
+            nextSyncAt = Instant.now(clock).plus(pollInterval);
         }
     }
 
@@ -106,6 +131,7 @@ class OsvSource {
         }
         log.info("osv: {} new, {} duplicate(s), {} malicious-package report(s) skipped across {} ecosystem(s)",
                 stored, duplicates, skipped, properties.ecosystems().size());
+        metrics.recordPollSuccess(SOURCE_ID, stored, duplicates);
         return stored;
     }
 
