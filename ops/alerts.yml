@@ -27,19 +27,19 @@ groups:
           description: 'Check feed poll failures, last success, connectivity and credentials. See ops/README.md#alert-runbook.'
 
       - alert: AegisDecisionBacklogGrowing
-        # Compare a complete hour instead of requiring growth in every rolling 10-minute window.
-        # Sixty fresh minute observations prevent missing/stale history from looking like growth.
+        # Growth in each half of the last hour: drafts minutes or half an hour apart still alert, one draft
+        # awaiting a decision doesn't, and a shrinking queue clears it. Sixty fresh minute observations prevent
+        # missing/stale history from looking like growth.
         expr: |
-          deriv(aegis:decision_queue_depth[1h]) > 0
-          and aegis:decision_queue_depth > aegis:decision_queue_depth offset 1h
-          and aegis:decision_queue_depth > 0
+          aegis:decision_queue_depth > aegis:decision_queue_depth offset 30m
+          and aegis:decision_queue_depth offset 30m > aegis:decision_queue_depth offset 1h
           and count_over_time(aegis:decision_queue_depth[1h]) >= 60
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: Decision queue has grown over the last hour
-          description: 'The queue is larger than an hour ago and its hourly trend has stayed positive for 5 minutes. Check Review & approve, owner assignments and failed filings. See ops/README.md#alert-runbook.'
+          summary: Decision queue has kept growing for an hour
+          description: 'The queue grew in each half of the last hour. Check Review & approve, owner assignments and failed filings. See ops/README.md#alert-runbook.'
 
       - alert: AegisHighErrorRate
         expr: aegis:http_5xx:ratio5m > 0.01 and on (job) aegis:http_requests:rate5m > 0

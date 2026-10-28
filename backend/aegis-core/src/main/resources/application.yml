@@ -263,6 +263,10 @@ aegis:
       # Snapshots change slowly, and one sync downloads every listed ecosystem — keep it a day or more.
       poll-interval: ${AEGIS_OSV_POLL_INTERVAL:P1D}
       # Feed health allows this interval plus ingestion.health.stale-after between successful syncs.
+      # After a failed sync, try again this long after it, doubled for each further failure in a row and never
+      # longer than poll-interval: a brief outage doesn't leave OSV stale for a day, a lasting one doesn't
+      # re-download every few minutes.
+      retry-delay: ${AEGIS_OSV_RETRY_DELAY:PT15M}
       # Wait this long after startup before the first sync, so boot (and any restart) isn't slowed by it.
       initial-delay: ${AEGIS_OSV_INITIAL_DELAY:PT30S}
       connect-timeout: PT5S

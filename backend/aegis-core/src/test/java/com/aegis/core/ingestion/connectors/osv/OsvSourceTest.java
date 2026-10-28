@@ -3,7 +3,9 @@ package com.aegis.core.ingestion.connectors.osv;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.aegis.core.ingestion.IngestionFeedMetrics;
 import com.aegis.core.ingestion.IngestionProperties;
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -42,7 +45,8 @@ class OsvSourceTest {
 
     private OsvSource source(OsvClient client, RawEventStore store, OsvProperties properties) {
         when(clock.instant()).thenReturn(now);
-        return new OsvSource(client, store, properties, lease, metrics, Duration.ofDays(1), clock);
+        return new OsvSource(client, store, properties, lease, metrics, Duration.ofDays(1), Duration.ofMinutes(15),
+                clock);
     }
 
     @Test
@@ -219,6 +223,62 @@ class OsvSourceTest {
         when(clock.instant()).thenReturn(now.plus(Duration.ofDays(1)));
         source.scheduledSync();
         assertThat(pollCount("success")).isEqualTo(2);
+    }
+
+    @Test
+    void aFailedSyncIsRetriedAfterTheRetryDelayInsteadOfTheNextDay() throws Exception {
+        RawEventStore store = mock(RawEventStore.class);
+        when(lease.held()).thenReturn(true);
+        OsvClient client = mock(OsvClient.class);
+        doThrow(new IllegalStateException("unavailable")).doNothing()
+                .when(client).forEachRecord(eq("npm"), anyInt(), anyInt(), any());
+        OsvSource source = source(client, store, properties("npm"));
+
+        source.scheduledSync();
+        assertThat(pollCount("failure")).isEqualTo(1);
+        when(clock.instant()).thenReturn(now.plus(Duration.ofMinutes(14)));
+        source.scheduledSync();
+        verify(client, times(1)).forEachRecord(eq("npm"), anyInt(), anyInt(), any());
+
+        when(clock.instant()).thenReturn(now.plus(Duration.ofMinutes(15)));
+        source.scheduledSync();
+        assertThat(pollCount("success")).isEqualTo(1);
+        assertThat(registry.get("aegis.ingestion.health").tag("source_id", "osv").gauge().value()).isEqualTo(1);
+
+        // Recovered, so back to the daily cadence.
+        when(clock.instant()).thenReturn(now.plus(Duration.ofMinutes(15)).plus(Duration.ofHours(23)));
+        source.scheduledSync();
+        assertThat(pollCount("success")).isEqualTo(1);
+    }
+
+    @Test
+    void repeatedFailuresBackOffButNeverWaitLongerThanThePollInterval() {
+        AtomicReference<Instant> time = new AtomicReference<>(now);
+        when(clock.instant()).thenAnswer(call -> time.get());
+        when(lease.held()).thenReturn(true);
+        List<Long> attemptedAtMinute = new ArrayList<>();
+        OsvClient client = (ecosystem, maxRecords, maxRecordBytes, consumer) -> {
+            attemptedAtMinute.add(Duration.between(now, time.get()).toMinutes());
+            throw new IllegalStateException("unavailable");
+        };
+        OsvSource source = new OsvSource(client, mock(RawEventStore.class), properties("npm"), lease, metrics,
+                Duration.ofHours(1), Duration.ofMinutes(15), clock);
+
+        for (int minute = 0; minute <= 180; minute++) {
+            time.set(now.plus(Duration.ofMinutes(minute)));
+            source.scheduledSync();
+        }
+
+        // 15, then 30 minutes apart; then capped at the hourly poll interval.
+        assertThat(attemptedAtMinute).containsExactly(0L, 15L, 45L, 105L, 165L);
+        assertThat(pollCount("failure")).isEqualTo(5);
+    }
+
+    @Test
+    void aRetryDelayMustBePositive() {
+        assertThatThrownBy(() -> new OsvSource((ecosystem, maxRecords, maxRecordBytes, consumer) -> { },
+                mock(RawEventStore.class), properties("npm"), lease, metrics, Duration.ofDays(1), Duration.ZERO, clock))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     private double pollCount(String outcome) {

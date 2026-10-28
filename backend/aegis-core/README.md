@@ -675,6 +675,7 @@ domain. See `ARCHITECTURE.md` for the topology.
 | `AEGIS_OSV_ECOSYSTEMS` | `npm,PyPI,crates.io,RubyGems,Go,Maven` | Exact OSV bucket names to sync, comma-separated |
 | `AEGIS_OSV_INCLUDE_MALICIOUS` | `false` | Also import OSV's malicious-package reports (`MAL-*`) |
 | `AEGIS_OSV_POLL_INTERVAL` / `AEGIS_OSV_INITIAL_DELAY` | `P1D` / `PT30S` | How often the bulk sync runs, and how long after startup it first does |
+| `AEGIS_OSV_RETRY_DELAY` | `PT15M` | How long after a failed sync to try again; doubled for each further failure in a row, never longer than the poll interval |
 | `AEGIS_OSV_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → advisory drain for OSV |
 | `AEGIS_OSV_BASE_URL` | OSV's export bucket | Override the export host (a mirror, tests) |
 | `AEGIS_SCHEDULING_POOL_SIZE` | `6` | Scheduler threads, so OSV's long sync never starves the other feeds' drains |
@@ -1048,7 +1049,8 @@ change signal (ADR §6a).
   so the connector runs on its own schedule (`AEGIS_OSV_POLL_INTERVAL`, daily) instead of the 15-minute poll
   loop, and streams each record straight into the raw-event store (constant memory). The raw-event id is
   `{osvId}@{sha256 prefix of the record}`, so a revised record re-normalises and an unchanged one
-  de-duplicates.
+  de-duplicates. A failed sync is retried after `AEGIS_OSV_RETRY_DELAY` (15 minutes), doubled for each
+  further failure in a row up to the poll interval, rather than waiting for the next day.
 - **Off by default** like every feed: `AEGIS_INGESTION_OSV_ENABLED=true`, and `AEGIS_OSV_ECOSYSTEMS` with
   OSV's exact bucket names. Malicious-package reports (`MAL-*`, most of npm's records) are skipped unless
   `AEGIS_OSV_INCLUDE_MALICIOUS=true`: they are malware reports, not vulnerabilities.

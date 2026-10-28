@@ -65,8 +65,8 @@ tests:
           - exp_labels:
               severity: "warning"
             exp_annotations:
-              summary: "Decision queue has grown over the last hour"
-              description: "The queue is larger than an hour ago and its hourly trend has stayed positive for 5 minutes. Check Review & approve, owner assignments and failed filings. See ops/README.md#alert-runbook."
+              summary: "Decision queue has kept growing for an hour"
+              description: "The queue grew in each half of the last hour. Check Review & approve, owner assignments and failed filings. See ops/README.md#alert-runbook."
   - name: Growth every ten minutes survives the pauses between drafts
     interval: 1m
     input_series:
@@ -84,8 +84,8 @@ tests:
           - exp_labels:
               severity: "warning"
             exp_annotations:
-              summary: "Decision queue has grown over the last hour"
-              description: "The queue is larger than an hour ago and its hourly trend has stayed positive for 5 minutes. Check Review & approve, owner assignments and failed filings. See ops/README.md#alert-runbook."
+              summary: "Decision queue has kept growing for an hour"
+              description: "The queue grew in each half of the last hour. Check Review & approve, owner assignments and failed filings. See ops/README.md#alert-runbook."
   - name: Growth every thirty minutes also alerts
     interval: 1m
     input_series:
@@ -100,8 +100,33 @@ tests:
           - exp_labels:
               severity: "warning"
             exp_annotations:
-              summary: "Decision queue has grown over the last hour"
-              description: "The queue is larger than an hour ago and its hourly trend has stayed positive for 5 minutes. Check Review & approve, owner assignments and failed filings. See ops/README.md#alert-runbook."
+              summary: "Decision queue has kept growing for an hour"
+              description: "The queue grew in each half of the last hour. Check Review & approve, owner assignments and failed filings. See ops/README.md#alert-runbook."
+  - name: One draft left undecided is not a growing backlog
+    interval: 1m
+    input_series:
+      - series: 'aegis_decision_queue_depth{job="aegis-core",instance="core:8082"}'
+        values: '5x89 6x60'
+      - series: 'aegis_decision_queue_last_refresh_timestamp_seconds{job="aegis-core",instance="core:8082"}'
+        values: '0+60x149'
+    alert_rule_test:
+      - eval_time: 96m
+        alertname: AegisDecisionBacklogGrowing
+        exp_alerts: []
+      - eval_time: 140m
+        alertname: AegisDecisionBacklogGrowing
+        exp_alerts: []
+  - name: A draft decided ten minutes later is not a growing backlog
+    interval: 1m
+    input_series:
+      - series: 'aegis_decision_queue_depth{job="aegis-core",instance="core:8082"}'
+        values: '20x89 21x9 20x50'
+      - series: 'aegis_decision_queue_last_refresh_timestamp_seconds{job="aegis-core",instance="core:8082"}'
+        values: '0+60x149'
+    alert_rule_test:
+      - eval_time: 99m
+        alertname: AegisDecisionBacklogGrowing
+        exp_alerts: []
   - name: Flat and declining queues do not alert
     interval: 1m
     input_series:
@@ -130,9 +155,9 @@ tests:
           - exp_labels:
               severity: "warning"
             exp_annotations:
-              summary: "Decision queue has grown over the last hour"
-              description: "The queue is larger than an hour ago and its hourly trend has stayed positive for 5 minutes. Check Review & approve, owner assignments and failed filings. See ops/README.md#alert-runbook."
-      - eval_time: 110m
+              summary: "Decision queue has kept growing for an hour"
+              description: "The queue grew in each half of the last hour. Check Review & approve, owner assignments and failed filings. See ops/README.md#alert-runbook."
+      - eval_time: 90m
         alertname: AegisDecisionBacklogGrowing
         exp_alerts: []
   - name: Stale refresh is not an empty or growing queue
@@ -178,8 +203,8 @@ tests:
           - exp_labels:
               severity: "warning"
             exp_annotations:
-              summary: "Decision queue has grown over the last hour"
-              description: "The queue is larger than an hour ago and its hourly trend has stayed positive for 5 minutes. Check Review & approve, owner assignments and failed filings. See ops/README.md#alert-runbook."
+              summary: "Decision queue has kept growing for an hour"
+              description: "The queue grew in each half of the last hour. Check Review & approve, owner assignments and failed filings. See ops/README.md#alert-runbook."
   - name: Replica handover does not double count global depth
     interval: 1m
     input_series:

@@ -95,16 +95,17 @@ the full `for` duration; recovery resets its pending time. Evaluation can add up
 | Alert | Condition and hold time | First checks |
 |---|---|---|
 | `AegisFeedDown` | Configured feed health is 0 for **45m** | Feed health/last success, poll failures, core logs, publisher connectivity, API limits and credentials |
-| `AegisDecisionBacklogGrowing` | Queue is larger than **1h** ago and its hourly slope is positive for **5m**, with a complete hour of fresh observations | Review & approve, owner assignments, failed Jira filings and PR openings; queue refresh freshness |
+| `AegisDecisionBacklogGrowing` | Queue grew in **each half** of the last hour, held for **5m**, with a complete hour of fresh observations | Review & approve, owner assignments, failed Jira filings and PR openings; queue refresh freshness |
 | `AegisHighErrorRate` | Service's 5-minute HTTP 5xx fraction is strictly **>1% for 10m** | Service logs, request volume, Zipkin http://localhost:9411, downstream health. Do not blindly replay approved external actions |
 | `AegisServiceDown` | Backend scrape fails for **5m** | Container health, networking, target errors. Covers a down core that cannot emit feed health |
 | `AegisDecisionQueueMetricsStale` | No enabled replica refreshed within **3m**, for **5m** | Queue metrics switch, scheduler lease, identity internal token/API, database and core logs |
 
-The backlog rule compares the queue with an hour ago and checks its **hourly upward trend**, so
-drafts ten or thirty minutes apart can still alert. It requires 60 fresh minute observations and
-an observation an hour ago, then a five-minute hold; the first possible firing after a new series
-is about 65 minutes. A gap in fresh history restarts the full-hour observation requirement.
-A large but flat queue is not growth and does not trigger this alert.
+The backlog rule asks whether the queue is larger now than 30 minutes ago, **and** larger then than an
+hour ago, so drafts ten or thirty minutes apart still alert while one draft awaiting a decision (or a
+burst of drafts at once) does not, and a shrinking queue clears it. It requires 60 fresh minute
+observations, then a five-minute hold; the first possible firing after a new series is about 65 minutes.
+A gap in fresh history restarts the full-hour observation requirement. A large but flat queue is not
+growth and does not trigger this alert.
 The 5xx denominator excludes `/actuator.*` so monitoring requests cannot dilute real failures. It sums
 instances **within each job**. Exactly 1%, idle traffic and 4xx do not trigger it.
 
@@ -115,6 +116,9 @@ allows its configured daily poll interval **plus** the staleness grace before be
 (24h 45m by default), so successful daily syncs stay healthy between polls.
 It rechecks for the scheduler lease on the lease-renewal cadence (30s by default), so a delayed
 lease acquisition at startup does not postpone its first sync for a day; downloads still run daily.
+A failed OSV sync is retried after `AEGIS_OSV_RETRY_DELAY` (15m by default), then 30m, 60m and so on,
+never longer than its poll interval: when the first retry succeeds, OSV is healthy again before
+`AegisFeedDown`'s 45-minute hold ends; an outage that outlasts it fires the alert as for any feed.
 Disabled connectors are absent, not unhealthy.
 
 ### Validation
