@@ -50,13 +50,37 @@ jobs:
           java-version: "21"
           cache: maven
 
-      - name: Build identity-service
-        working-directory: backend/identity-service
-        run: mvn -B -q -DskipTests package
+      - name: Build backend services
+        shell: bash
+        run: |
+          set -euo pipefail
 
-      - name: Build gateway
-        working-directory: backend/gateway
-        run: mvn -B -q -DskipTests package
+          package_backend() {
+            local service="$1"
+            local log="$RUNNER_TEMP/${service}-package.log"
+            local attempt status
+
+            for attempt in 1 2 3; do
+              # -U retries missing releases even when Maven cached an earlier transfer failure.
+              if mvn -B -ntp -U -f "backend/$service/pom.xml" -DskipTests package 2>&1 | tee "$log"; then
+                return 0
+              else
+                status=$?
+              fi
+
+              # Retry repository throttling/outages only. Compilation, test and missing-artifact
+              # errors still fail immediately, and the last failed attempt fails the job.
+              if [[ "$attempt" -eq 3 ]] || ! grep -Eq 'Could not transfer artifact.*(HTTP Status:|status code:)[[:space:]]*(429|5[0-9]{2})([^0-9]|$)' "$log"; then
+                return "$status"
+              fi
+
+              echo "Transient Maven repository failure building $service; retrying in $((attempt * 20)) seconds."
+              sleep "$((attempt * 20))"
+            done
+          }
+
+          package_backend identity-service
+          package_backend gateway
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
