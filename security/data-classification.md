@@ -129,3 +129,15 @@ data, when each gets a retention period and a job that enforces it:
 | `owner_notifications`, `risk_tickets`, `upgrade_proposals`, `regulator_memos`, `reachability_assessments` | Keep with no limit for now; removed with their service. Revisit before prod. | Core |
 | Expired `refresh_tokens`, `auth_tokens`, `login_challenges` rows | Keep (they are hashes and grant nothing once expired). Revisit: a clean-up job. | Identity |
 | Feed tables and `raw_events` | Keep with no limit (public data). Revisit if storage grows. | Core |
+
+### Pipeline trace correlation (CS203-153)
+
+| Data | Class | Where it is kept | Who reads it | Kept for | Leaves Aegis to |
+|---|---|---|---|---|---|
+| Trace/span IDs, raw-event/change-signal/service UUIDs, stage names, error types, durations, AI route templates and HTTP statuses | Internal operational data; service UUIDs are tenant-linked | Local Zipkin and container logs; AWS container logs under existing settings | Deployment operators | Local Zipkin uses its default in-memory storage (lost on restart); AWS logs retain 14 days | Local Zipkin collector only; no AI provider receives these added fields |
+
+The AI container can reach Zipkin on `internal`; it still has no public host port or gateway
+route and does not join `edge`. New pipeline tracing records no request/response body, feed
+text, prompts, credentials, personal names, or exception messages. Correlation UUIDs are not
+metric labels. Incoming trace IDs are diagnostic metadata, never identity or authorization.
+This change enables AI tracing only in local Compose, not Terraform.

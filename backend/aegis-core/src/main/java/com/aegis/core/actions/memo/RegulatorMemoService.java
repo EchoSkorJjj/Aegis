@@ -29,6 +29,7 @@ import com.aegis.core.matching.MatchingDtos.ComponentRef;
 import com.aegis.core.matching.MatchingDtos.EvidenceChain;
 import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.platform.common.SensitiveText;
+import com.aegis.core.platform.config.PipelineSpan;
 import com.aegis.core.scoring.ScoringDtos.ChangeImpactResponse;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.scoring.ScoringDtos.SeverityInput;
@@ -78,6 +79,7 @@ public class RegulatorMemoService {
 
     @Timed(value = "aegis.draft.duration", histogram = true,
             extraTags = {"kind", "memo"})
+    @PipelineSpan(value = "aegis.draft.memo", signalArgument = 0)
     public RegulatorMemo propose(UUID changeSignalId, UUID drafterId) {
         ChangeImpactResponse impact = scoring.scoreChange(changeSignalId);
         SignalType type = impact.change().signalType();

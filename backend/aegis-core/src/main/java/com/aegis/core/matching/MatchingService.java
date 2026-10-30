@@ -39,6 +39,7 @@ import com.aegis.core.matching.MatchingDtos.ServiceRef;
 import com.aegis.core.matching.MatchingDtos.VendorRef;
 import com.aegis.core.matching.MatchingDtos.VersionMatch;
 import com.aegis.core.platform.common.ApiExceptions;
+import com.aegis.core.platform.config.PipelineSpan;
 import com.aegis.core.signals.ChangeSignal;
 import com.aegis.core.signals.ChangeSignalStore;
 import io.micrometer.core.annotation.Timed;
@@ -78,6 +79,7 @@ public class MatchingService {
 
     @Transactional(readOnly = true)
     @Timed(value = "aegis.match.duration", histogram = true, extraTags = {"operation", "change"})
+    @PipelineSpan(value = "aegis.match.change", signalArgument = 0)
     public ChangeMatchResponse matchChange(UUID signalId) {
         ChangeSignal signal = signals.findById(signalId)
                 .orElseThrow(() -> new ApiExceptions.NotFound("Change signal not found: " + signalId));

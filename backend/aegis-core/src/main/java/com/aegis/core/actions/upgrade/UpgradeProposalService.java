@@ -49,6 +49,7 @@ import com.aegis.core.matching.UpgradeTargets;
 import com.aegis.core.matching.UpgradeTargets.UpgradeTarget;
 import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.platform.common.SensitiveText;
+import com.aegis.core.platform.config.PipelineSpan;
 import com.aegis.core.scoring.ScoringDtos.ChangeImpactResponse;
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
@@ -377,10 +378,13 @@ public class UpgradeProposalService {
      */
     @Timed(value = "aegis.draft.duration", histogram = true,
             extraTags = {"kind", "upgrade"})
+    @PipelineSpan("aegis.draft.upgrade")
     public Optional<UpgradeProposal> draft(UpgradePlan plan, UUID riskTicketId, UUID drafter) {
         if (!plan.automatable()) {
             return Optional.empty();
         }
+        log.info("pipeline stage=draft.upgrade changeSignalId={} serviceId={} riskTicketId={}",
+                plan.changeSignalId(), plan.serviceId(), riskTicketId);
         UpgradePlan.Facts planned = plan.facts();
         UUID id = UUID.randomUUID();
         Facts facts = new Facts(id, plan.vulnerabilityId(), planned.checked(), planned.notCleared(),

@@ -22,6 +22,7 @@ import com.aegis.core.matching.MatchingDtos.OwnerRef;
 import com.aegis.core.matching.MatchingDtos.ServiceRef;
 import com.aegis.core.matching.MatchingService;
 import com.aegis.core.platform.common.ApiExceptions;
+import com.aegis.core.platform.config.PipelineSpan;
 import com.aegis.core.scoring.ScoringDtos.ChangeImpactResponse;
 import com.aegis.core.scoring.ScoringDtos.EstateRollupResponse;
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
@@ -96,6 +97,7 @@ public class ScoringService {
 
     @Transactional(readOnly = true)
     @Timed(value = "aegis.score.duration", histogram = true, extraTags = {"operation", "change"})
+    @PipelineSpan(value = "aegis.score.change", signalArgument = 0)
     public ChangeImpactResponse scoreChange(UUID signalId) {
         // Matching resolves the signal itself and is the one place that rejects an unmatchable
         // (security-news) signal, so it runs first and its 404/400 is the contract for a bad id.
@@ -159,6 +161,7 @@ public class ScoringService {
      * transaction never gave the roll-up a single snapshot to begin with.
      */
     @Timed(value = "aegis.score.duration", histogram = true, extraTags = {"operation", "rollup"})
+    @PipelineSpan("aegis.score.rollup")
     public EstateRollupResponse rollUpEstate(ChangeSignalFilter filter, Integer requestedLimit) {
         int maxSignals = scorer.weights().rollup().maxSignals();
         int limit = requestedLimit == null ? maxSignals : Math.clamp(requestedLimit, 1, maxSignals);

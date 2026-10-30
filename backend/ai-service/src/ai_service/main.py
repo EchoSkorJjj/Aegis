@@ -25,6 +25,8 @@ def create_app(config: Settings | None = None, *, llm_client: LlmClient | None =
             yield
         finally:
             await provider.aclose()
+            if app.state.tracing_provider is not None:
+                app.state.tracing_provider.shutdown()
 
     app = FastAPI(
         title="Aegis AI Service",

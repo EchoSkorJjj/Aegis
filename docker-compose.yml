@@ -149,6 +149,8 @@ services:
       context: ./backend/ai-service
     environment:
       SERVICE_TOKEN: dev-internal-token-change-me
+      TRACING_ENABLED: "true"
+      ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
       # Offline stub by default. Compose reads the repo-root .env; set LLM_PROVIDER=groq
       # and GROQ_API_KEY there for real calls. No optional SDK extra is needed.
       LLM_PROVIDER: ${LLM_PROVIDER:-stub}
@@ -223,7 +225,7 @@ services:
     image: openzipkin/zipkin:latest
     ports:
       - "9411:9411" # trace UI + span collector — open http://localhost:9411
-    networks: [edge]
+    networks: [edge, internal]
 
   prometheus:
     image: prom/prometheus:latest

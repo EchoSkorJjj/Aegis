@@ -34,6 +34,7 @@ import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.matching.MatchingDtos.EvidenceChain;
 import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.platform.common.SensitiveText;
+import com.aegis.core.platform.config.PipelineSpan;
 import com.aegis.core.scoring.ScoringDtos.ChangeImpactResponse;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.scoring.ScoringService;
@@ -117,6 +118,7 @@ public class RiskTicketService {
 
     @Timed(value = "aegis.draft.duration", histogram = true,
             extraTags = {"kind", "ticket"})
+    @PipelineSpan(value = "aegis.draft.ticket", signalArgument = 0, serviceArgument = 1)
     public RiskTicket propose(UUID changeSignalId, UUID serviceId, UUID drafterId) {
         inventory.getBusinessService(serviceId); // 404 outside the caller's organization, before any work
         ChangeImpactResponse impact = scoring.scoreChange(changeSignalId);

@@ -10,6 +10,7 @@ import java.time.Instant;
 import com.aegis.core.ingestion.IngestionFeedMetrics;
 import com.aegis.core.ingestion.RawEvent;
 import com.aegis.core.ingestion.RawEventStore;
+import com.aegis.core.platform.config.PipelineSpan;
 import com.aegis.core.platform.scheduling.SchedulerLease;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -92,6 +93,7 @@ class OsvSource {
     @Scheduled(
             fixedDelayString = "${aegis.scheduling.lease-renewal:PT30S}",
             initialDelayString = "${aegis.ingestion.osv.initial-delay:PT30S}")
+    @PipelineSpan("aegis.ingest.osv")
     void scheduledSync() {
         if (Instant.now(clock).isBefore(nextSyncAt) || !lease.held()) {
             return;

@@ -30,6 +30,70 @@ provisioning; it checks dashboard JSON every 30 seconds. After changing Promethe
 run `docker compose restart prometheus`. Its data volume keeps 15 days of metrics and alert state;
 Grafana's volume keeps account settings. Removing those volumes discards that history.
 
+## Pipeline tracing (CS203-153)
+
+Compose exports gateway, aegis-core and ai-service spans to Zipkin at http://localhost:9411.
+The AI image installs its `tracing` extra, Compose enables `TRACING_ENABLED`, and Zipkin joins
+both networks to accept AI telemetry. ai-service stays on `internal` with no host port or gateway
+route. W3C `traceparent` carries the trace ID through the gateway, core's observed `RestClient`,
+and FastAPI. AI providers are outside this trace; no service token or request body is captured.
+
+Core adds spans named `aegis.ingest.poll`, `aegis.ingest.osv`, `aegis.ingest.normalize`,
+`aegis.match.change`, `aegis.score.change`, `aegis.score.rollup`, and `aegis.draft.ticket|upgrade|memo`.
+Stage logs record start/success/failure, UUID correlation fields and elapsed milliseconds. Errors
+on these spans record only their class, so the tracing advice never exports exception messages.
+UUIDs are trace tags and log fields, never Prometheus labels.
+
+Gateway/core logs include `[traceId=... spanId=...]`. ai-service applies the same fields to all its
+application logs using request-local context, including failed requests; its route/status log
+replaces Uvicorn's default access log in the image. Startup/background logs outside a request
+have empty IDs (`-` in Python). With tracing disabled or its optional SDK absent, AI logs still
+validate and reuse an incoming W3C trace ID, or generate one locally; they export no spans.
+
+**Ingestion and later requests have separate lifetimes.** A scheduled poll captures raw events;
+a later normalization run writes the signal, and a person's request scores or drafts it. These
+are separate traces. Search `rawEventId` to join `ingest.capture` and `ingest.record`, then search
+`changeSignalId` to follow that normalized record into scoring/drafting. An advisory ID is a
+candidate signal ID; when another feed becomes the representative of the same CVE, its signal
+ID changes. Use the stored advisory's canonical ID to resolve that transition. There is no
+long-lived span waiting for a human to request a draft.
+
+### Local demonstration
+
+1. Run `docker compose up --build -d`. Rebuild ai-service to include its tracing dependencies.
+2. With an authorized analyst or service owner, open an advisory and draft a response. This makes
+   a fresh gateway request that includes scoring and, when needed, AI assessment/drafting.
+3. Run `docker compose logs --since 5m gateway aegis-core ai-service`. Copy the trace ID from an
+   `aegis.draft.ticket` stage log; find the same ID in the AI `stage=ai.request` logs. A fallback
+   draft may succeed while the AI's HTTP span reports a failure; the logs distinguish those outcomes.
+4. In Zipkin, choose **Find a trace** and search that trace ID. The gateway/core HTTP spans,
+   pipeline child spans and ai-service server spans belong to the same trace.
+5. To exercise scheduled ingestion, enable/configure a feed and inspect `ingest.capture` and
+   `ingest.record` logs. Their UUID fields connect the separate poll, normalization and draft traces.
+
+Java sampling uses `TRACING_SAMPLE_RATE` (Compose's default is 1.0). The AI follows an incoming
+parent's sampling decision. Keep AI tracing off outside the local demo unless an operator has
+configured its collector and access controls; this change does not enable tracing in Terraform.
+
+Tracing regression checks (run from each backend module):
+
+```text
+# backend/aegis-core (no Docker needed)
+./mvnw -Dtest=PipelineTracingTest,PackageStructureArchTest,HttpAiClientTest test
+# backend/ai-service
+python -m pip install -e '.[dev,tracing]'
+python -m pytest -q
+python -m ruff check .
+```
+
+`PipelineTracingTest` checks nested span parenting, MDC restoration, safe error tags and outbound
+W3C headers from the real AI client configuration. `test_observability.py` uses an in-memory
+exporter to verify FastAPI parent extraction, exported/logged ID agreement, error correlation
+and overlapping-request isolation. CI installs the tracing extra so this coverage runs there too.
+
+References: [Spring Boot tracing](https://docs.spring.io/spring-boot/reference/actuator/tracing.html)
+and [OpenTelemetry FastAPI instrumentation](https://opentelemetry-python-contrib.readthedocs.io/en/latest/instrumentation/fastapi/fastapi.html).
+
 ## Pipeline metrics
 
 All durations are seconds and include success and failure. Micrometer adds `class`, `method` and
