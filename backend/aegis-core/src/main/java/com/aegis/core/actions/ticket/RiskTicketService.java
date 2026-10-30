@@ -34,12 +34,14 @@ import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.matching.MatchingDtos.EvidenceChain;
 import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.platform.common.SensitiveText;
+import com.aegis.core.platform.config.PipelineSpan;
 import com.aegis.core.scoring.ScoringDtos.ChangeImpactResponse;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.scoring.ScoringService;
 import com.aegis.core.signals.ChangeSignal;
 import com.aegis.core.signals.ChangeSignal.SignalType;
 import com.aegis.core.signals.ChangeSignalStore;
+import io.micrometer.core.annotation.Timed;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -114,6 +116,9 @@ public class RiskTicketService {
         this.assessments = assessments;
     }
 
+    @Timed(value = "aegis.draft.duration", histogram = true,
+            extraTags = {"kind", "ticket"})
+    @PipelineSpan(value = "aegis.draft.ticket", signalArgument = 0, serviceArgument = 1)
     public RiskTicket propose(UUID changeSignalId, UUID serviceId, UUID drafterId) {
         inventory.getBusinessService(serviceId); // 404 outside the caller's organization, before any work
         ChangeImpactResponse impact = scoring.scoreChange(changeSignalId);

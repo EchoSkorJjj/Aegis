@@ -55,6 +55,11 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
+        <!-- Enables Micrometer's @Timed advice on pipeline services. Version managed by Boot. -->
+        <dependency>
+            <groupId>org.aspectj</groupId>
+            <artifactId>aspectjweaver</artifactId>
+        </dependency>
         <!-- Distributed tracing to Zipkin. Boot 4 provides this as a single starter (it pulls the
              Brave bridge and the Zipkin sender); it replaces the Boot-3 micrometer-tracing-bridge-brave
              + zipkin-reporter-brave pair, and pairs with management.tracing.export.zipkin.endpoint. -->

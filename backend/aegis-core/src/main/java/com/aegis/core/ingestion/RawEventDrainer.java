@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+import com.aegis.core.platform.config.PipelineSpan;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -60,6 +61,7 @@ public class RawEventDrainer {
      *
      * @return how many events the handler accepted without throwing
      */
+    @PipelineSpan("aegis.ingest.normalize")
     public int drain(String sourceId, int batchSize, RawEventHandler handler) {
         int handled = 0;
         int dropped = 0;

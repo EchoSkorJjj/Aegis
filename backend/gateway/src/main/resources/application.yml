@@ -27,7 +27,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info,prometheus
   endpoint:
     health:
       show-details: when_authorized
@@ -35,8 +35,14 @@ management:
     tags:
       application: gateway
   tracing:
+    propagation:
+      type: W3C
     sampling:
       probability: ${TRACING_SAMPLE_RATE:1.0}
     export:
       zipkin:
         endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+
+logging:
+  pattern:
+    correlation: "[traceId=%X{traceId:-} spanId=%X{spanId:-}] "

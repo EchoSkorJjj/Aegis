@@ -79,6 +79,17 @@ Companion to [threat-model.md](threat-model.md); story CS203-146 (E12-2). As of 
 | Traces and metrics | Internal | Zipkin and Prometheus locally; tracing is off in AWS (`TRACING_SAMPLE_RATE=0`) | Operators | Local only | — |
 | Database backups | All of the above | RDS automated backups, encrypted | The AWS account's operators | 7 days | — |
 
+### Operational monitoring (CS203-151/152)
+
+| Data | Class | Where it's kept | Who reads it | Kept for | Leaves Aegis to |
+|---|---|---|---|---|---|
+| Feed counters/health, pipeline histograms, aggregate Review & approve depth, HTTP rates and alert states | Internal operational data; queue totals are confidential | Prometheus `prometheus-data` volume; dashboard definitions in Git, Grafana settings in `grafana-data` | Deployment operators; Grafana login on loopback, backend scrape endpoints on the existing operator network | Prometheus: 15 days; Grafana settings until its volume is removed | Local Prometheus/Grafana only; no external notification receiver configured |
+
+New labels contain no organization/service/owner/repository identifiers, personal data, source text or response
+content. Queue collection uses the existing internal organization directory and each org's RLS-scoped count
+queries; the only exported value is a global total and its refresh timestamp. The AI network stays isolated.
+Monitoring services need operator access controls before remote hosting (threat model B12).
+
 ## What leaves Aegis
 
 | Destination | What | When | Safeguards |
@@ -118,3 +129,15 @@ data, when each gets a retention period and a job that enforces it:
 | `owner_notifications`, `risk_tickets`, `upgrade_proposals`, `regulator_memos`, `reachability_assessments` | Keep with no limit for now; removed with their service. Revisit before prod. | Core |
 | Expired `refresh_tokens`, `auth_tokens`, `login_challenges` rows | Keep (they are hashes and grant nothing once expired). Revisit: a clean-up job. | Identity |
 | Feed tables and `raw_events` | Keep with no limit (public data). Revisit if storage grows. | Core |
+
+### Pipeline trace correlation (CS203-153)
+
+| Data | Class | Where it is kept | Who reads it | Kept for | Leaves Aegis to |
+|---|---|---|---|---|---|
+| Trace/span IDs, raw-event/change-signal/service UUIDs, stage names, error types, durations, AI route templates and HTTP statuses | Internal operational data; service UUIDs are tenant-linked | Local Zipkin and container logs; AWS container logs under existing settings | Deployment operators | Local Zipkin uses its default in-memory storage (lost on restart); AWS logs retain 14 days | Local Zipkin collector only; no AI provider receives these added fields |
+
+The AI container can reach Zipkin on `internal`; it still has no public host port or gateway
+route and does not join `edge`. New pipeline tracing records no request/response body, feed
+text, prompts, credentials, personal names, or exception messages. Correlation UUIDs are not
+metric labels. Incoming trace IDs are diagnostic metadata, never identity or authorization.
+This change enables AI tracing only in local Compose, not Terraform.

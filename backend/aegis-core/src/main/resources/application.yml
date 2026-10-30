@@ -45,6 +45,10 @@ spring:
 
 # ---- Aegis Core configuration -------------------------------------------
 aegis:
+  metrics:
+    decision-queue:
+      enabled: ${AEGIS_METRICS_DECISION_QUEUE_ENABLED:false}
+      interval: ${AEGIS_METRICS_DECISION_QUEUE_INTERVAL:PT1M}
   dashboard:
     snapshots:
       enabled: ${AEGIS_DASHBOARD_SNAPSHOTS_ENABLED:false}
@@ -258,6 +262,11 @@ aegis:
       # OSV self-schedules its bulk sync on this cadence, independent of the 15-minute feed poll loop.
       # Snapshots change slowly, and one sync downloads every listed ecosystem — keep it a day or more.
       poll-interval: ${AEGIS_OSV_POLL_INTERVAL:P1D}
+      # Feed health allows this interval plus ingestion.health.stale-after between successful syncs.
+      # After a failed sync, try again this long after it, doubled for each further failure in a row and never
+      # longer than poll-interval: a brief outage doesn't leave OSV stale for a day, a lasting one doesn't
+      # re-download every few minutes.
+      retry-delay: ${AEGIS_OSV_RETRY_DELAY:PT15M}
       # Wait this long after startup before the first sync, so boot (and any restart) isn't slowed by it.
       initial-delay: ${AEGIS_OSV_INITIAL_DELAY:PT30S}
       connect-timeout: PT5S
@@ -359,14 +368,19 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info,prometheus
   endpoint:
     health:
       show-details: when_authorized
   metrics:
     tags:
       application: aegis-core
+    distribution:
+      maximum-expected-value:
+        aegis.draft.duration: 5m
   tracing:
+    propagation:
+      type: W3C
     sampling:
       probability: ${TRACING_SAMPLE_RATE:1.0}
     export:
@@ -374,6 +388,8 @@ management:
         endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
 
 logging:
+  pattern:
+    correlation: "[traceId=%X{traceId:-} spanId=%X{spanId:-}] "
   level:
     # PDFBox (evidence export) warns on every standard font that no system font backs it: that only matters for
     # drawing glyphs, which Aegis never does (the PDF names Helvetica and the reader's viewer supplies it).

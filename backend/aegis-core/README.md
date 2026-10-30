@@ -639,8 +639,8 @@ domain. See `ARCHITECTURE.md` for the topology.
 - **Auth** — OAuth2 resource server; validates identity-service's RS256 JWTs via its JWKS
   (`IDENTITY_JWKS_URI`), maps the `roles` claim, and authorizes per route.
 - **Observability** — `/actuator/health|info|prometheus`, traces to Zipkin (propagated to the
-  ai-service), and per-ingestion-feed health/counts/last-success metrics (see "Ingestion feed
-  health" below and `ops/README.md`).
+  ai-service), per-feed health/counts/last success, match/score/draft histograms, and an optional
+  aggregate decision queue gauge. Grafana, alert thresholds and runbooks: [`ops/README.md`](../../ops/README.md).
 
 ### Key environment variables
 
@@ -670,14 +670,17 @@ domain. See `ARCHITECTURE.md` for the topology.
 | `AEGIS_VENDOR_STATUS_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → vendor-incident drain |
 | `AEGIS_INGESTION_NEWS_ENABLED` | `false` | Poll security news feeds (Docker Compose sets `true`) |
 | `AEGIS_NEWS_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → news-item drain |
-| `AEGIS_INGESTION_HEALTH_STALE_AFTER` | `PT45M` | How long since a feed's last success before `aegis_ingestion_health` reports unhealthy |
+| `AEGIS_INGESTION_HEALTH_STALE_AFTER` | `PT45M` | How long since a feed's last success before health reports unhealthy; self-scheduled OSV adds its poll interval to this grace |
 | `AEGIS_INGESTION_OSV_ENABLED` | `false` | Sync OSV's per-ecosystem exports ([OSV connector](#osv-connector-ecosystem-advisories)) |
 | `AEGIS_OSV_ECOSYSTEMS` | `npm,PyPI,crates.io,RubyGems,Go,Maven` | Exact OSV bucket names to sync, comma-separated |
 | `AEGIS_OSV_INCLUDE_MALICIOUS` | `false` | Also import OSV's malicious-package reports (`MAL-*`) |
 | `AEGIS_OSV_POLL_INTERVAL` / `AEGIS_OSV_INITIAL_DELAY` | `P1D` / `PT30S` | How often the bulk sync runs, and how long after startup it first does |
+| `AEGIS_OSV_RETRY_DELAY` | `PT15M` | How long after a failed sync to try again; doubled for each further failure in a row, never longer than the poll interval |
 | `AEGIS_OSV_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → advisory drain for OSV |
 | `AEGIS_OSV_BASE_URL` | OSV's export bucket | Override the export host (a mirror, tests) |
 | `AEGIS_SCHEDULING_POOL_SIZE` | `6` | Scheduler threads, so OSV's long sync never starves the other feeds' drains |
+| `AEGIS_METRICS_DECISION_QUEUE_ENABLED` | `false` (Compose: `true`) | Collect Review & approve depth across organizations under the scheduler lease; needs the identity internal service token |
+| `AEGIS_METRICS_DECISION_QUEUE_INTERVAL` | `PT1M` | Background refresh cadence; keep at most one minute with the supplied alert freshness threshold |
 | `AEGIS_SCHEDULER_LEASE_DURATION` / `AEGIS_SCHEDULER_LEASE_RENEWAL` | `PT2M` / `PT30S` | How long the instance running the scheduled jobs holds the lease, and how often it renews it (V30) |
 | `AEGIS_SBOM_GENERATION_ENABLED` | `true` | Import SBOMs from a service's linked repository (git + syft in the image) |
 | `AEGIS_SBOM_ALLOWED_HOSTS` | `github.com,gitlab.com,bitbucket.org` | Hosts a repository may be linked on and cloned from — the SSRF boundary |
@@ -1046,7 +1049,8 @@ change signal (ADR §6a).
   so the connector runs on its own schedule (`AEGIS_OSV_POLL_INTERVAL`, daily) instead of the 15-minute poll
   loop, and streams each record straight into the raw-event store (constant memory). The raw-event id is
   `{osvId}@{sha256 prefix of the record}`, so a revised record re-normalises and an unchanged one
-  de-duplicates.
+  de-duplicates. A failed sync is retried after `AEGIS_OSV_RETRY_DELAY` (15 minutes), doubled for each
+  further failure in a row up to the poll interval, rather than waiting for the next day.
 - **Off by default** like every feed: `AEGIS_INGESTION_OSV_ENABLED=true`, and `AEGIS_OSV_ECOSYSTEMS` with
   OSV's exact bucket names. Malicious-package reports (`MAL-*`, most of npm's records) are skipped unless
   `AEGIS_OSV_INCLUDE_MALICIOUS=true`: they are malware reports, not vulnerabilities.
@@ -1154,11 +1158,14 @@ per-source APIs above.
 Per-feed health, record counts, and last-success time — exposed as Micrometer metrics on the
 existing `/actuator/prometheus` endpoint (no new REST surface; nothing here needs a JWT, since
 `/actuator/prometheus` is already public — see `SecurityConfig`). `IngestionFeedMetrics` registers
-one series per `IngestionSource` bean (`nvd`, `vendor-status`, `security-news` today) at startup:
+one series per `IngestionSource` bean (`nvd`, `vendor-status`, `security-news`) at startup;
+self-scheduled OSV registers its series and cadence when its connector is enabled:
 
 - `aegis_ingestion_health{source_id}` — 1 (healthy) or 0. Unhealthy if the feed has never
   succeeded, its most recent poll attempt failed, or it's been longer than
-  `aegis.ingestion.health.stale-after` (default 45m) since its last success.
+  `aegis.ingestion.health.stale-after` (default 45m) since its last success. OSV records its own
+  bulk-sync outcomes and adds its poll interval to that grace (24h 45m by default), so it stays
+  healthy between successful daily syncs; an explicit sync failure still makes it unhealthy immediately.
 - `aegis_ingestion_last_success_timestamp_seconds{source_id}` — epoch seconds of the last
   successful poll.
 - `aegis_ingestion_poll_total{source_id,outcome}` and `aegis_ingestion_poll_records_total

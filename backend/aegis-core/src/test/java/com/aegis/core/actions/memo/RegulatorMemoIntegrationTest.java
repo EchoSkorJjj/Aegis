@@ -63,6 +63,7 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
     @Autowired private TestOwners owners;
     @Autowired private CurrentOrg currentOrg;
     @Autowired private RegulatorMemoService memos;
+    @Autowired private RegulatorMemoStore memoStore;
 
     private final UUID analyst = UUID.randomUUID();
     private final UUID secondAnalyst = UUID.randomUUID();
@@ -124,6 +125,7 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
     @Test
     void aVulnerabilityIsDraftedAsACyberThreatAndFinalOnlyWhenASecondAnalystApproves() throws Exception {
         Vulnerability v = vulnerability();
+        long before = memoStore.countPending();
 
         String created = mvc.perform(post(PATH).with(as("ANALYST", analyst)).contentType(MediaType.APPLICATION_JSON)
                         .content(request(v.advisory().id())))
@@ -160,6 +162,8 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
                     .contains("A flaw in memo-lib.").contains("- " + v.service().getName() + ": HIGH criticality");
         });
 
+        assertThat(memoStore.countPending()).isEqualTo(before + 1);
+        currentOrg.runAs(UUID.randomUUID(), () -> assertThat(memoStore.countPending()).isZero());
         mvc.perform(post(PATH + "/{id}/approve", id).with(as("ANALYST", analyst)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.message").value(containsString("someone else has to approve it")));
@@ -167,6 +171,7 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("APPROVED"))
                 .andExpect(jsonPath("$.decidedBy").value(secondAnalyst.toString()));
+        assertThat(memoStore.countPending()).isEqualTo(before);
         mvc.perform(post(PATH + "/{id}/dismiss", id).with(as("ANALYST", secondAnalyst))
                         .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"too late\"}"))
                 .andExpect(status().isConflict())

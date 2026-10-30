@@ -334,3 +334,19 @@ src/ai_service/
 
 Dependencies flow `api → capabilities → llm`, with shared plumbing in `core` and wire models in
 `schemas`. There is no database or vector store in this service.
+
+## Trace correlation (CS203-153)
+
+The Docker image includes the `tracing` extra, and local Compose enables tracing to Zipkin.
+FastAPI extracts W3C `traceparent` from aegis-core and exports a child server span. Application
+logs include `traceId` and `spanId` from request-local context, including error responses.
+The image uses `--no-access-log`: the correlated route-template/status/duration log replaces
+Uvicorn's raw access log. Request bodies, service tokens and raw unmatched paths are not logged
+by this middleware. The per-app tracer provider flushes and shuts down with the app.
+
+For a local Python run, install `.[dev,tracing]` and set `TRACING_ENABLED=true` and
+`ZIPKIN_ENDPOINT` to the collector. Without tracing enabled or its SDK installed, the logs
+still reuse valid incoming trace IDs (or generate one) without exporting spans. Normal
+configuration defaults stay opt-in; AWS tracing settings are unchanged.
+
+See [the tracing demo and regression commands](../../ops/README.md#pipeline-tracing-cs203-153).

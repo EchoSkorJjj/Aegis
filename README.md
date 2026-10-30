@@ -37,8 +37,9 @@ decides or acts.
 | Dashboard | Open material items by service and owner, critical/high counts, unassigned items and response stages; links to filtered triage. A 7-, 30- or 90-day trend of daily observed totals, with gaps where no observation exists |
 | Findings | The **triage queue**: each service's material vulnerable dependencies, with the version that fixes them, and the vendor outages still in progress, highest impact first; filters by service, owner, ecosystem and impact; each item's response, or **Draft response**; **My services**, a service owner's own page: each service they own with what needs a response, the responses awaiting a decision and whether its SBOM and repository are in place, then its items; item detail with the affected services and owners, score factors, evidence and drafted responses. **Notifications**: each owner is told once, under the bell and by email, about every item in their services that needs a decision |
 | Responses | Drafted responses awaiting a decision, and their history; risk tickets filed in Jira; draft upgrade pull requests on GitHub for Maven `pom.xml`, npm `package.json` and PyPI `requirements.txt`; DORA regulator memos; four-eyes approval. Before deciding, a reviewer may edit the drafted text or override the priority and due date with a reason (and withdraw the override), both kept on record; each response and triage item shows its stage (New → In review → Approved or Overridden → Actioned or Closed). Every step a response takes is recorded in an append-only decision trail, with who took it, why, and the response as it stood then; analysts and compliance admins search it under **Reports → Audit log** by service, person, decision and date, and export a service's evidence for a period as PDF or CSV from **Reports → Evidence**. Each service's page lists its own vulnerable dependencies too, including those another package pulls in |
-| AI | Drafting through Groq, or an offline stub by default, with citations the server resolves and rate and token budgets |
-| Not yet | Stored findings with a lifecycle status (the triage queue is recomputed on every request); reachability in the score (the assessment endpoint exists, but nothing calls it yet) |
+| AI | Drafting through Groq, or an offline stub by default, with citations the server resolves and rate and token budgets; on request, a suggestion of whether a service's code reaches a vulnerability's vulnerable part, citing the lines it read (it never changes the score) |
+| Security | Every pull request, and every push to `develop` and `main`, is scanned for committed secrets, vulnerable dependencies and vulnerable code; a STRIDE threat model with the LLM risks, a data classification, and every endpoint's roles in one table that each service's access tests check ([`security/`](security/), [below](#security-scanning)) |
+| Not yet | Stored findings with a lifecycle status (the triage queue is recomputed on every request); single sign-on; retention limits on the decision trail, the dashboard history and the sign-in log (accepted until prod: [`security/data-classification.md`](security/data-classification.md)) |
 
 ## Architecture
 
@@ -86,6 +87,7 @@ docker compose up --build
 | PostgreSQL | localhost:5432 | User and password `identity` |
 | Mailhog | http://localhost:8025 | Catches every email, whatever the address |
 | Prometheus, Zipkin | http://localhost:9090, http://localhost:9411 | Metrics and traces |
+| Grafana | http://localhost:3001/d/aegis-operations | Provisioned feed, pipeline, decision queue and error dashboard |
 
 ai-service has no address on your machine: only aegis-core can reach it.
 
@@ -126,7 +128,7 @@ likely to change:
 | `TRUSTED_PROXY_HOPS`, `GATEWAY_TRUSTED_PROXIES` | frontend, gateway | 1, any private address | Which `X-Forwarded-For` address the sign-in rate limit trusts: the proxies in front of the frontend, and the addresses the gateway accepts the header from |
 
 Scoring weights and tiers: [SCORING-CALIBRATION.md](backend/aegis-core/SCORING-CALIBRATION.md). Metrics and ready-made
-PromQL: [ops/README.md](ops/README.md).
+PromQL, Grafana and alert runbooks: [ops/README.md](ops/README.md).
 
 ## Deploy to AWS
 
@@ -166,7 +168,9 @@ Where to go next:
 
 Run each from the service's folder. Every service has its own workflow in [`.github/workflows`](.github/workflows),
 run on the pushes and pull requests that touch it: `identity-service-ci`, `gateway-ci`, `aegis-core-ci`,
-`ai-service-ci` (ruff and pytest) and `frontend-e2e` (Playwright).
+`ai-service-ci` (ruff and pytest) and `frontend-e2e` (Playwright). `security-scanning` runs on every pull request
+and every push to `develop` and `main` (below). The three Java services' `verify` includes their access tests,
+which read [`security/access-control.md`](security/access-control.md).
 
 ### Security scanning
 
@@ -212,8 +216,11 @@ backend/
   aegis-core/         the domain: estate, feeds, matching, scoring, responses
   ai-service/         drafting, in Python
 frontend/             Next.js UI and backend-for-frontend
+security/             threat model, data classification, and the access-control table the access tests read
+.github/workflows/    CI per service, and security scanning (secrets, dependencies, code)
+.gitleaks.toml        the test fixtures gitleaks allows, each with why
 terraform/            AWS: bootstrap, global, environments/dev and prod, modules
-ops/                  Prometheus configuration and PromQL
+ops/                  Prometheus metrics/alerts, Grafana dashboard/provisioning and runbooks
 assets/diagrams/      the README's diagrams: SVG sources and their PNGs
 docker-compose.yml    the whole stack, locally
 ```

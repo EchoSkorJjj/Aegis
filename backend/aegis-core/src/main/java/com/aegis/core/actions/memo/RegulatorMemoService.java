@@ -29,6 +29,7 @@ import com.aegis.core.matching.MatchingDtos.ComponentRef;
 import com.aegis.core.matching.MatchingDtos.EvidenceChain;
 import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.platform.common.SensitiveText;
+import com.aegis.core.platform.config.PipelineSpan;
 import com.aegis.core.scoring.ScoringDtos.ChangeImpactResponse;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.scoring.ScoringDtos.SeverityInput;
@@ -36,6 +37,7 @@ import com.aegis.core.scoring.ScoringService;
 import com.aegis.core.signals.ChangeSignal;
 import com.aegis.core.signals.ChangeSignal.SignalType;
 import com.aegis.core.signals.ChangeSignalStore;
+import io.micrometer.core.annotation.Timed;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -75,6 +77,9 @@ public class RegulatorMemoService {
         this.trail = trail;
     }
 
+    @Timed(value = "aegis.draft.duration", histogram = true,
+            extraTags = {"kind", "memo"})
+    @PipelineSpan(value = "aegis.draft.memo", signalArgument = 0)
     public RegulatorMemo propose(UUID changeSignalId, UUID drafterId) {
         ChangeImpactResponse impact = scoring.scoreChange(changeSignalId);
         SignalType type = impact.change().signalType();

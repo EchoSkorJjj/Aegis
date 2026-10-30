@@ -3,12 +3,19 @@ package com.aegis.core.ingestion.connectors.osv;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 
+import com.aegis.core.ingestion.IngestionFeedMetrics;
 import com.aegis.core.ingestion.RawEvent;
 import com.aegis.core.ingestion.RawEventStore;
+import com.aegis.core.platform.config.PipelineSpan;
 import com.aegis.core.platform.scheduling.SchedulerLease;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -43,32 +50,72 @@ class OsvSource {
     private final RawEventStore store;
     private final OsvProperties properties;
     private final SchedulerLease lease;
+    private final IngestionFeedMetrics metrics;
+    private final Duration pollInterval;
+    private final Duration retryDelay;
+    private final Clock clock;
+    private Instant nextSyncAt = Instant.MIN;
+    private int failuresInARow;
 
-    OsvSource(OsvClient client, RawEventStore store, OsvProperties properties, SchedulerLease lease) {
+    @Autowired
+    OsvSource(OsvClient client, RawEventStore store, OsvProperties properties, SchedulerLease lease,
+            IngestionFeedMetrics metrics, @Value("${aegis.ingestion.osv.poll-interval:P1D}") Duration pollInterval,
+            @Value("${aegis.ingestion.osv.retry-delay:PT15M}") Duration retryDelay) {
+        this(client, store, properties, lease, metrics, pollInterval, retryDelay, Clock.systemUTC());
+    }
+
+    OsvSource(OsvClient client, RawEventStore store, OsvProperties properties, SchedulerLease lease,
+            IngestionFeedMetrics metrics, Duration pollInterval, Duration retryDelay, Clock clock) {
+        if (retryDelay.isNegative() || retryDelay.isZero()) {
+            throw new IllegalArgumentException("aegis.ingestion.osv.retry-delay must be positive");
+        }
         this.client = client;
         this.store = store;
         this.properties = properties;
         this.lease = lease;
+        this.metrics = metrics;
+        this.pollInterval = pollInterval;
+        this.retryDelay = retryDelay;
+        this.clock = clock;
+        metrics.registerSource(SOURCE_ID, pollInterval);
     }
 
     /**
      * Downloads each configured ecosystem's snapshot on the OSV cadence (daily by default), after a
-     * short initial delay so startup is unaffected. A failure is logged and isolated — the next run
-     * retries, and unchanged records de-duplicate, so nothing is lost. Only the instance holding the
-     * {@link SchedulerLease} syncs.
+     * short initial delay so startup is unaffected. A failure is logged and isolated, and unchanged records
+     * de-duplicate on the next download, so nothing is lost: a failed sync is retried after the retry delay
+     * (15 minutes by default), doubled for each further failure in a row and never longer than the poll
+     * interval, so a brief outage doesn't leave OSV stale for a day and a lasting one doesn't re-download
+     * every few minutes. Only the instance holding the {@link SchedulerLease} syncs. Recheck on the
+     * lease-renewal cadence, so missing the lease at startup or taking it over later does not postpone the
+     * first sync for a whole day.
      */
     @Scheduled(
-            fixedDelayString = "${aegis.ingestion.osv.poll-interval:P1D}",
+            fixedDelayString = "${aegis.scheduling.lease-renewal:PT30S}",
             initialDelayString = "${aegis.ingestion.osv.initial-delay:PT30S}")
+    @PipelineSpan("aegis.ingest.osv")
     void scheduledSync() {
-        if (!lease.held()) {
+        if (Instant.now(clock).isBefore(nextSyncAt) || !lease.held()) {
             return;
         }
+        Duration wait = pollInterval;
         try {
             sync();
+            failuresInARow = 0;
         } catch (Exception ex) {
-            log.error("osv: sync failed: {}", ex.toString());
+            failuresInARow++;
+            wait = retryWait();
+            metrics.recordPollFailure(SOURCE_ID);
+            log.error("osv: sync failed: {}; retrying in {}", ex.toString(), wait);
+        } finally {
+            nextSyncAt = Instant.now(clock).plus(wait);
         }
+    }
+
+    /** The retry delay, doubled for each failure in a row after the first, never longer than the poll interval. */
+    private Duration retryWait() {
+        Duration wait = retryDelay.multipliedBy(1L << Math.min(failuresInARow - 1, 20));
+        return wait.compareTo(pollInterval) < 0 ? wait : pollInterval;
     }
 
     /** Stream every configured ecosystem's bulk export into the raw-event store; returns new events stored. */
@@ -106,6 +153,7 @@ class OsvSource {
         }
         log.info("osv: {} new, {} duplicate(s), {} malicious-package report(s) skipped across {} ecosystem(s)",
                 stored, duplicates, skipped, properties.ecosystems().size());
+        metrics.recordPollSuccess(SOURCE_ID, stored, duplicates);
         return stored;
     }
 

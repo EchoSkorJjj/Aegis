@@ -49,7 +49,6 @@ no row matches is refused without a token and answers 404 with one.
 | GET | `/actuator/health` | yes | yes | yes | yes | yes | yes | yes | the gateway itself |
 | GET | `/actuator/info` | yes | yes | yes | yes | yes | yes | yes | the gateway itself |
 | GET | `/actuator/prometheus` | yes | yes | yes | yes | yes | yes | yes | the gateway itself |
-| GET | `/actuator/metrics` | no | yes | yes | yes | yes | yes | yes | the gateway itself (exposed in `application.yml`; any token reads it — see the review below) |
 | any | `/internal/**` | no | yes | yes | yes | yes | yes | yes | nothing (404): identity-service's internal API is never routed |
 
 ## identity-service
@@ -222,7 +221,7 @@ frontend (React text only, app-relative links).
 
 | # | Finding | Decision | Owner |
 |---|---|---|---|
-| 1 | The gateway exposes `/actuator/metrics` to any token, even a role-less `USER` (`application.yml` exposes `health,info,metrics,prometheus`). It is reachable only inside the network: the BFF doesn't proxy `/actuator`. | Fix: expose only `health,info,prometheus`, or require `PLATFORM_ADMIN` for the rest. | Gateway |
+| 1 | The gateway exposed `/actuator/metrics` to any token, even a role-less `USER`. | Resolved in CS203-151/152: gateway and core expose only `health,info,prometheus`; `/actuator/metrics` is no longer an endpoint. | Gateway |
 | 2 | `/api/ping` and `/api/ai/ping` have no `@PreAuthorize`, so any token reaches them, including a role-less `USER` and a platform admin; `/api/ai/ping` calls the ai-service. | Accepted: health checks that return no data. Revisit if they ever do. | Core |
 | 3 | The gateway's `/api/admin/**` rule protects nothing today: aegis-core has no `/api/admin` endpoint. | Keep it: it's the guard any future admin endpoint gets for free. | Gateway |
 | 4 | identity-service's `GET /audit` (the security log, `PLATFORM_ADMIN`) isn't routed by the gateway, so no one outside the network can use it. | Accepted: less access, not more. Route `/audit` when the admin console shows the log. | Identity |

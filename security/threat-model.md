@@ -57,6 +57,7 @@ Each owner is the team member who maintains that component; put their name here 
 | B9 | Feeds and fix commits → aegis-core | untrusted advisories, incidents, news and diffs |
 | B10 | Data stores and AWS | the database, secrets, logs, the network edge |
 | B11 | Source, dependencies and CI | third-party code, workflows, secrets in the repository |
+| B12 | Backend metrics → Prometheus → Grafana | Aggregate operational counts, timings and alert states; no tenant labels or response content |
 
 ## Threats
 
@@ -206,6 +207,22 @@ There is no retrieval-augmented generation yet, so LLM08 (vector and embedding w
 | LLM08 Vector and embedding weaknesses | Not applicable: no retrieval-augmented generation yet |
 | LLM09 Misinformation | B6.5 |
 | LLM10 Unbounded consumption | B6.7 |
+
+### B12 — Operational monitoring (CS203-151/152)
+
+| ID | STRIDE | Threat | Mitigation or decision | Owner | Status |
+|---|---|---|---|---|---|
+| B12.1 | I | Metrics reveal tenant identifiers or response content | New pipeline metrics use fixed operation/kind labels; the decision count aggregates org-scoped, RLS-protected count queries. No tenant/service/owner/repository labels or response bodies leave the core. | Core | Mitigated |
+| B12.2 | I, E | A public dashboard exposes operational data or admin access | Compose binds Grafana to loopback, disables anonymous access/sign-up, and Grafana requires changing its initial admin password. Prometheus remains on the existing operator network. No new gateway routes or AI-network attachment. Before remote hosting, restrict monitoring endpoints to operators with authentication/TLS. | Platform | Mitigated (local deployment) |
+| B12.3 | T | Failed refresh or duplicate replicas misstate the backlog | Scheduler lease, complete-pass publication, unknown on failure, timestamp freshness filter, max across replicas, and stale-data alert. Promtool tests thresholds/recovery; backend tests verify scope and failure behavior. | Core | Mitigated |
+
+
+### Pipeline tracing (CS203-153)
+
+| ID | STRIDE | Threat | Mitigation or decision | Owner | Status |
+|---|---|---|---|---|---|
+| B12.4 | I | Tracing exposes prompts, credentials or tenant records | New spans/logs carry stage names, UUID correlation fields, status, duration and error class only; tracing advice never attaches exceptions or arguments. Trace IDs are never authorization. AI request logs use fixed route templates, and unknown paths are omitted. No new identifier metric labels. | Core / AI | Mitigated |
+| B12.5 | I, E | Sending AI telemetry widens the AI network boundary | Only Zipkin joins both Compose networks for collection. AI remains internal-only with no host port or gateway route; its service-token check remains required. Collector access must be restricted to operators before remote hosting. Terraform does not enable AI tracing. | Platform | Mitigated (local deployment) |
 
 ## Accepted risks
 

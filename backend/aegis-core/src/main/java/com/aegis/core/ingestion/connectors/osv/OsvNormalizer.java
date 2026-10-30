@@ -5,6 +5,8 @@ import com.aegis.core.advisories.AdvisoryStore;
 import com.aegis.core.ingestion.RawEventDrainer;
 import com.aegis.core.ingestion.UnparseableEventException;
 import com.aegis.core.platform.scheduling.SchedulerLease;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -16,6 +18,8 @@ import org.springframework.stereotype.Component;
 @Component
 @ConditionalOnProperty(name = "aegis.ingestion.osv.enabled", havingValue = "true")
 class OsvNormalizer {
+
+    private static final Logger log = LoggerFactory.getLogger(OsvNormalizer.class);
 
     private final RawEventDrainer drainer;
     private final AdvisoryStore advisories;
@@ -54,7 +58,9 @@ class OsvNormalizer {
             } catch (RuntimeException parseError) {
                 throw new UnparseableEventException(OsvSource.SOURCE_ID, event.externalId(), parseError);
             }
-            advisories.upsert(advisory);
+            Advisory saved = advisories.upsert(advisory);
+            log.info("pipeline stage=ingest.record sourceId={} rawEventId={} changeSignalId={}",
+                    saved.sourceId(), event.id(), saved.id());
         });
     }
 }
