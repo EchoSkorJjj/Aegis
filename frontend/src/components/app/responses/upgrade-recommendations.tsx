@@ -24,11 +24,11 @@ import { ApiError, ticketApi, upgradeApi } from "@/lib/api";
 import type { ImpactTier, ImportScanSummary, UpgradeRecommendation } from "@/lib/types";
 
 const TIER_CLASS: Record<ImpactTier, string> = {
-  CRITICAL: "bg-red-500/10 text-red-600 dark:text-red-400",
-  HIGH: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  MEDIUM: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+  CRITICAL: "bg-red-500/10 text-red-800 dark:text-red-400",
+  HIGH: "bg-amber-500/10 text-amber-800 dark:text-amber-400",
+  MEDIUM: "bg-sky-500/10 text-sky-800 dark:text-sky-400",
   LOW: "bg-muted text-muted-foreground",
-  NEGLIGIBLE: "bg-muted text-muted-foreground/70",
+  NEGLIGIBLE: "bg-muted text-muted-foreground",
 };
 
 const PAGE_SIZE = 10;

@@ -26,15 +26,15 @@ import { RecommendedUpgrades } from "@/components/app/responses/upgrade-recommen
 
 const CRITICALITY_CLASS: Record<BusinessCriticality, string> = {
   LOW: "bg-muted text-muted-foreground",
-  MEDIUM: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
-  HIGH: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  CRITICAL: "bg-red-500/10 text-red-600 dark:text-red-400",
+  MEDIUM: "bg-sky-500/10 text-sky-800 dark:text-sky-400",
+  HIGH: "bg-amber-500/10 text-amber-800 dark:text-amber-400",
+  CRITICAL: "bg-red-500/10 text-red-800 dark:text-red-400",
 };
 
 const EXPOSURE_CLASS: Record<ServiceExposure, string> = {
   ISOLATED: "bg-muted text-muted-foreground",
-  INTERNAL: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
-  INTERNET_FACING: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  INTERNAL: "bg-sky-500/10 text-sky-800 dark:text-sky-400",
+  INTERNET_FACING: "bg-amber-500/10 text-amber-800 dark:text-amber-400",
 };
 
 const EXPOSURE_LABEL: Record<ServiceExposure, string> = {
@@ -67,7 +67,7 @@ const componentsConfig: RelationshipConfig = {
         <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
           {component.ecosystem}
         </span>
-        <span className="font-medium">{component.name}</span>
+        <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{component.name}</span>
         <span className="text-muted-foreground">{component.version}</span>
       </span>
     );

@@ -1,0 +1,1678 @@
+{
+ "ids": {
+  "service": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+  "signal": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+  "ticket": "be2dcfdf-d40e-4c7e-96d8-bd0a3e4b0dc6",
+  "memo": "4cc86311-eb81-4cc8-9053-f9839ccde3d8"
+ },
+ "responses": {
+  "analyst:/api/auth/me": {
+   "id": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+   "email": "journey-analyst@example.com",
+   "displayName": "Journey Analyst",
+   "roles": [
+    "USER",
+    "ANALYST"
+   ],
+   "enabled": true,
+   "emailVerified": false,
+   "orgId": "ffe9745c-49cf-4340-b84c-f04437d23250",
+   "createdAt": "2026-11-05T05:28:49.997393Z"
+  },
+  "analyst:/api/orgs": [
+   {
+    "id": "ffe9745c-49cf-4340-b84c-f04437d23250",
+    "name": "Journey org",
+    "roles": [
+     "ANALYST"
+    ],
+    "status": "ACTIVE"
+   }
+  ],
+  "/api/findings/posture?days=30": {
+   "asOf": "2026-11-05T05:32:43.580251621Z",
+   "totals": {
+    "openItems": 0,
+    "criticalItems": 0,
+    "highItems": 0,
+    "newItems": 0,
+    "inReviewItems": 0,
+    "approvedItems": 0,
+    "unassignedItems": 0,
+    "affectedServices": 0,
+    "totalServices": 1
+   },
+   "services": [
+    {
+     "id": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+     "name": "Journey payments settlement and reconciliation platform",
+     "openItems": 0,
+     "criticalItems": 0,
+     "highItems": 0,
+     "topScore": null
+    }
+   ],
+   "owners": [
+    {
+     "id": null,
+     "name": "Unassigned",
+     "openItems": 0,
+     "criticalItems": 0,
+     "highItems": 0,
+     "topScore": null
+    }
+   ],
+   "from": "2026-10-07",
+   "to": "2026-11-05",
+   "trend": [
+    {
+     "day": "2026-11-05",
+     "capturedAt": "2026-11-05T05:32:43.580252Z",
+     "openItems": 0,
+     "criticalItems": 0,
+     "highItems": 0
+    }
+   ],
+   "history": [
+    {
+     "total": {
+      "day": "2026-11-05",
+      "capturedAt": "2026-11-05T05:32:43.580252Z",
+      "openItems": 0,
+      "criticalItems": 0,
+      "highItems": 0
+     },
+     "services": [
+      {
+       "id": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+       "name": "Journey payments settlement and reconciliation platform",
+       "openItems": 0,
+       "criticalItems": 0,
+       "highItems": 0,
+       "topScore": null
+      }
+     ],
+     "owners": [
+      {
+       "id": null,
+       "name": "Unassigned",
+       "openItems": 0,
+       "criticalItems": 0,
+       "highItems": 0,
+       "topScore": null
+      }
+     ]
+    }
+   ]
+  },
+  "/api/inventory/services?page=0&size=10&sort=name%2Casc": {
+   "content": [
+    {
+     "id": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+     "name": "Journey payments settlement and reconciliation platform",
+     "criticality": "CRITICAL",
+     "exposure": "INTERNET_FACING",
+     "repositoryUrl": null,
+     "repositoryBranch": null,
+     "sbomImportedAt": null,
+     "sbomImportSource": null,
+     "importScan": null,
+     "createdAt": "2026-11-05T05:29:37.306116Z",
+     "updatedAt": "2026-11-05T05:29:37.306116Z"
+    }
+   ],
+   "empty": false,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 1,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 10,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 10,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 1,
+   "totalPages": 1
+  },
+  "/api/inventory/services/a42f9620-7cce-47a1-bc1e-21a6206df5b5": {
+   "id": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+   "name": "Journey payments settlement and reconciliation platform",
+   "criticality": "CRITICAL",
+   "exposure": "INTERNET_FACING",
+   "repositoryUrl": null,
+   "repositoryBranch": null,
+   "sbomImportedAt": null,
+   "sbomImportSource": null,
+   "importScan": null,
+   "createdAt": "2026-11-05T05:29:37.306116Z",
+   "updatedAt": "2026-11-05T05:29:37.306116Z"
+  },
+  "/api/inventory/services/a42f9620-7cce-47a1-bc1e-21a6206df5b5/owners?page=0&size=20": {
+   "content": [],
+   "empty": true,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 0,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 20,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 20,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 0,
+   "totalPages": 0
+  },
+  "/api/inventory/services/a42f9620-7cce-47a1-bc1e-21a6206df5b5/components?page=0&size=20": {
+   "content": [
+    {
+     "id": "e0073501-fdcf-4485-9f50-0539a5cc0c3f",
+     "ecosystem": "maven",
+     "name": "com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name",
+     "version": "1.2.3",
+     "createdAt": "2026-11-05T05:29:34.752246Z",
+     "updatedAt": "2026-11-05T05:29:34.752246Z"
+    }
+   ],
+   "empty": false,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 1,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 20,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 20,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 1,
+   "totalPages": 1
+  },
+  "/api/inventory/services/a42f9620-7cce-47a1-bc1e-21a6206df5b5/vendors?page=0&size=20": {
+   "content": [],
+   "empty": true,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 0,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 20,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 20,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 0,
+   "totalPages": 0
+  },
+  "/api/actions/upgrade-recommendations?serviceId=a42f9620-7cce-47a1-bc1e-21a6206df5b5": [
+   {
+    "serviceId": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+    "serviceName": "Journey payments settlement and reconciliation platform",
+    "component": {
+     "id": "e0073501-fdcf-4485-9f50-0539a5cc0c3f",
+     "ecosystem": "maven",
+     "name": "com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name",
+     "version": "1.2.3"
+    },
+    "via": null,
+    "manifestPaths": [],
+    "confidence": "CONFIRMED",
+    "vulnerabilities": [
+     {
+      "id": "CVE-2026-90001",
+      "changeSignalId": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+      "confidence": "CONFIRMED",
+      "cvssVersion": "3.1",
+      "cvssBaseScore": 9.8,
+      "severity": "CRITICAL"
+     }
+    ],
+    "score": 98,
+    "tier": "CRITICAL",
+    "material": true,
+    "toVersion": "1.2.4",
+    "changeSignalId": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+    "readiness": "NO_REPOSITORY",
+    "reason": "Link the service's repository so Aegis can draft the pull request",
+    "overrideIn": [],
+    "usage": {
+     "status": "UNKNOWN",
+     "reason": "The service's code hasn't been read: link its repository and import the SBOM from it",
+     "importedAs": [
+      "com.aegisjourney"
+     ],
+     "siteCount": 0,
+     "sites": []
+    },
+    "viaUsage": null,
+    "reachability": {
+     "status": "UNKNOWN",
+     "reason": "The service's code hasn't been read: link its repository and import the SBOM from it",
+     "through": null,
+     "usage": {
+      "status": "UNKNOWN",
+      "reason": "The service's code hasn't been read: link its repository and import the SBOM from it",
+      "importedAs": [
+       "com.aegisjourney"
+      ],
+      "siteCount": 0,
+      "sites": []
+     }
+    },
+    "proposal": null,
+    "response": {
+     "ticketId": "be2dcfdf-d40e-4c7e-96d8-bd0a3e4b0dc6",
+     "changeSignalId": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+     "status": "FILED",
+     "stage": "ACTIONED",
+     "issueKey": "AEG-2",
+     "issueUrl": "https://journey.atlassian.net/browse/AEG-2"
+    },
+    "canDraft": true
+   }
+  ],
+  "/api/inventory/components/ecosystems": [
+   "maven"
+  ],
+  "/api/inventory/components?page=0&size=10&sort=name%2Casc": {
+   "content": [
+    {
+     "id": "e0073501-fdcf-4485-9f50-0539a5cc0c3f",
+     "ecosystem": "maven",
+     "name": "com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name",
+     "version": "1.2.3",
+     "createdAt": "2026-11-05T05:29:34.752246Z",
+     "updatedAt": "2026-11-05T05:29:34.752246Z"
+    }
+   ],
+   "empty": false,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 1,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 10,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 10,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 1,
+   "totalPages": 1
+  },
+  "/api/inventory/vendors?page=0&size=10&sort=name%2Casc": {
+   "content": [],
+   "empty": true,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 0,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 10,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 10,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 0,
+   "totalPages": 0
+  },
+  "/api/inventory/owners?page=0&size=10&sort=name%2Casc": {
+   "content": [],
+   "empty": true,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 0,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 10,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 10,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 0,
+   "totalPages": 0
+  },
+  "/api/change-signals?page=0&size=20": {
+   "content": [
+    {
+     "id": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+     "signalType": "VULNERABILITY",
+     "sourceId": "nvd",
+     "externalId": "CVE-2026-90001",
+     "title": "CVE-2026-90001",
+     "summary": "Remote code execution in journey-lib before 1.2.4.",
+     "severity": "CRITICAL",
+     "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-90001",
+     "occurredAt": "2026-01-01T00:00:00Z",
+     "createdAt": "2026-11-05T05:03:57.151128Z",
+     "updatedAt": "2026-11-05T05:03:57.151128Z"
+    }
+   ],
+   "empty": false,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 1,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 20,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 20,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 1,
+   "totalPages": 1
+  },
+  "/api/change-signals/facets": {
+   "sources": [
+    "nvd"
+   ],
+   "severities": [
+    "CRITICAL"
+   ],
+   "ecosystems": []
+  },
+  "/api/scoring/change-signals/c5d514e1-4b54-4e63-85a7-9404cb22e6b4": {
+   "change": {
+    "id": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+    "signalType": "VULNERABILITY",
+    "sourceId": "nvd",
+    "externalId": "CVE-2026-90001",
+    "title": "CVE-2026-90001"
+   },
+   "matchedComponentCount": 1,
+   "matchedVendorCount": 0,
+   "severity": {
+    "source": "CVSS",
+    "cvssVersion": "3.1",
+    "cvssBaseScore": 9.8,
+    "label": null,
+    "factor": 0.98
+   },
+   "services": [
+    {
+     "service": {
+      "id": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+      "name": "Journey payments settlement and reconciliation platform",
+      "criticality": "CRITICAL",
+      "exposure": "INTERNET_FACING"
+     },
+     "score": 98,
+     "tier": "CRITICAL",
+     "material": true,
+     "confidence": "CONFIRMED",
+     "breakdown": {
+      "severityFactor": 0.98,
+      "exposure": "INTERNET_FACING",
+      "exposureFactor": 1,
+      "exposureApplies": true,
+      "reachability": "UNKNOWN",
+      "reachabilityFactor": 1,
+      "reachabilityApplies": true,
+      "criticality": "CRITICAL",
+      "criticalityFactor": 1,
+      "confidence": "CONFIRMED",
+      "confidenceFactor": 1
+     },
+     "factors": [
+      {
+       "factor": "SEVERITY",
+       "input": "CVSS 3.1 base 9.8",
+       "weight": 0.98,
+       "headroom": 2,
+       "limiting": true,
+       "setting": null
+      },
+      {
+       "factor": "EXPOSURE",
+       "input": "INTERNET_FACING",
+       "weight": 1,
+       "headroom": 0,
+       "limiting": false,
+       "setting": "aegis.scoring.exposure.internet-facing"
+      },
+      {
+       "factor": "REACHABILITY",
+       "input": "UNKNOWN",
+       "weight": 1,
+       "headroom": 0,
+       "limiting": false,
+       "setting": "aegis.scoring.reachability.imported"
+      },
+      {
+       "factor": "CRITICALITY",
+       "input": "CRITICAL",
+       "weight": 1,
+       "headroom": 0,
+       "limiting": false,
+       "setting": "aegis.scoring.criticality.critical"
+      },
+      {
+       "factor": "CONFIDENCE",
+       "input": "CONFIRMED",
+       "weight": 1,
+       "headroom": 0,
+       "limiting": false,
+       "setting": "aegis.scoring.confidence.confirmed"
+      }
+     ],
+     "reachability": {
+      "status": "UNKNOWN",
+      "reason": "The service's code hasn't been read: link its repository and import the SBOM from it",
+      "through": null,
+      "usage": {
+       "status": "UNKNOWN",
+       "reason": "The service's code hasn't been read: link its repository and import the SBOM from it",
+       "importedAs": [
+        "com.aegisjourney"
+       ],
+       "siteCount": 0,
+       "sites": []
+      }
+     },
+     "explanation": "CVE-2026-90001 scores 98.0 (CRITICAL) for Journey payments settlement and reconciliation platform: severity 0.98 (CVSS 3.1 base 9.8) x exposure 1.00 (INTERNET_FACING) x criticality 1.00 (CRITICAL); severity (CVSS 3.1 base 9.8) holds it down most, costing 2.0 points",
+     "owners": [],
+     "evidence": [
+      {
+       "kind": "ADVISORY_COMPONENT",
+       "confidence": "CONFIRMED",
+       "explanation": "CVE-2026-90001 affects com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3; dependency path com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name reaches service Journey payments settlement and reconciliation platform; owners: unassigned",
+       "affectedProduct": {
+        "cpe": "cpe:2.3:a:aegisjourney:journey-lib:*:*:*:*:*:*:*:*",
+        "vendor": "aegisjourney",
+        "product": "journey-lib",
+        "versionRange": "(-inf,1.2.4)",
+        "identityMatch": "EXACT_PACKAGE",
+        "versionMatch": "IN_RANGE"
+       },
+       "componentPath": [
+        {
+         "id": "e0073501-fdcf-4485-9f50-0539a5cc0c3f",
+         "ecosystem": "maven",
+         "name": "com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name",
+         "version": "1.2.3"
+        }
+       ],
+       "vendor": null
+      }
+     ]
+    }
+   ],
+   "owners": []
+  },
+  "/api/actions/risk-tickets?changeSignalId=c5d514e1-4b54-4e63-85a7-9404cb22e6b4&size=100&page=0&status=PROPOSED%2CFILING%2CFILED%2CFAILED": {
+   "content": [
+    {
+     "id": "be2dcfdf-d40e-4c7e-96d8-bd0a3e4b0dc6",
+     "serviceId": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+     "changeSignalId": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+     "signalType": "VULNERABILITY",
+     "changeTitle": "CVE-2026-90001",
+     "title": "CVE-2026-90001 affects Journey payments settlement and reconciliation platform",
+     "priority": "HIGHEST",
+     "dueDate": "2026-11-12",
+     "score": 98,
+     "tier": "CRITICAL",
+     "labels": [
+      "aegis",
+      "vulnerability",
+      "impact-critical",
+      "CVE-2026-90001"
+     ],
+     "summary": "Development stub: no AI assessment or action has been performed.",
+     "risk": "Development stub: no AI assessment or action has been performed.",
+     "impact": "Development stub: no AI assessment or action has been performed.",
+     "actions": [
+      "Development stub: no AI assessment or action has been performed."
+     ],
+     "evidence": [
+      "CVE-2026-90001 affects com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3; dependency path com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name reaches service Journey payments settlement and reconciliation platform; owners: unassigned",
+      "Impact score 98.0 (CRITICAL, material). CVE-2026-90001 scores 98.0 (CRITICAL) for Journey payments settlement and reconciliation platform: severity 0.98 (CVSS 3.1 base 9.8) x exposure 1.00 (INTERNET_FACING) x criticality 1.00 (CRITICAL); severity (CVSS 3.1 base 9.8) holds it down most, costing 2.0 points",
+      "Affected service: Journey payments settlement and reconciliation platform (a42f9620-7cce-47a1-bc1e-21a6206df5b5), CRITICAL criticality, INTERNET_FACING.",
+      "Service owners: none assigned.",
+      "Match confidence: CONFIRMED.",
+      "Code reachability: UNKNOWN. The service's code hasn't been read: link its repository and import the SBOM from it.",
+      "Score calculation: severity 0.98 x exposure 1 x reachability 1 x criticality 1 x confidence 1 x 100 = 98.0 (rounded to one decimal).",
+      "Score factor SEVERITY: CVSS 3.1 base 9.8; weight 0.98; limiting factor.",
+      "Score factor EXPOSURE: INTERNET_FACING; weight 1; setting aegis.scoring.exposure.internet-facing.",
+      "Score factor REACHABILITY: UNKNOWN; weight 1; setting aegis.scoring.reachability.imported.",
+      "Score factor CRITICALITY: CRITICAL; weight 1; setting aegis.scoring.criticality.critical.",
+      "Score factor CONFIDENCE: CONFIRMED; weight 1; setting aegis.scoring.confidence.confirmed.",
+      "Not automated: Link the service's repository so Aegis can draft the upgrade pull request for com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name",
+      "Change: VULNERABILITY CVE-2026-90001 (c5d514e1-4b54-4e63-85a7-9404cb22e6b4).",
+      "Source: nvd / CVE-2026-90001.",
+      "Source URL: not recorded",
+      "Source time: 2026-01-01T00:00:00Z",
+      "Source excerpt: Remote code execution in journey-lib before 1.2.4.",
+      "AI reachability suggestion for com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name: not assessed. The service's code hasn't been read: link its repository and import the SBOM from it."
+     ],
+     "aiDrafted": true,
+     "citations": [
+      "Vulnerability CVE-2026-90001, 2026-01-01: Remote code execution in journey-lib before 1.2.4.\nAffected service: Journey payments settlement and reconciliation platform (CRITICAL criticality, INTERNET_FACING).\nImpact score 98.0 (CRITICAL, material), worked out by Aegis.\nEvidence:\n- CVE-2026-90001 affects com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3; dependency path com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name reaches service Journey payments settlement and reconciliation platform; owners: unassigned\n- Impact score 98.0 (CRITICAL, material). CVE-2026-90001 scores 98.0 (CRITICAL) for Journey payments settlement and reconciliation platform: severity 0.98 (CVSS 3.1 base 9.8) x exposure 1.00 (INTERNET_FACING) x criticality 1.00 (CRITICAL); severity (CVSS 3.1 base 9.8) holds it down most, costing 2.0 points\n- Affected service: Journey payments settlement and reconciliation platform (a42f9620-7cce-47a1-bc1e-21a6206df5b5), CRITICAL criticality, INTERNET_FACING.\n- Service owners: none assigned.\n- Match confidence: CONFIRMED.\n- Code reachability: UNKNOWN. The service's code hasn't been read: link its repository and impor"
+     ],
+     "status": "FILED",
+     "createdBy": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+     "createdAt": "2026-11-05T05:29:53.881415Z",
+     "decidedBy": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+     "decidedAt": "2026-11-05T05:30:05.886349Z",
+     "dismissReason": null,
+     "issueKey": "AEG-2",
+     "issueUrl": "https://journey.atlassian.net/browse/AEG-2",
+     "failureMessage": null,
+     "edit": null,
+     "override": null,
+     "approval": {
+      "by": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+      "at": "2026-11-05T05:30:05.886349Z"
+     },
+     "version": 2,
+     "serviceName": "Journey payments settlement and reconciliation platform",
+     "stage": "ACTIONED",
+     "pullRequests": []
+    }
+   ],
+   "empty": false,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 1,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 100,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 100,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 1,
+   "totalPages": 1
+  },
+  "/api/actions/regulator-memos?changeSignalId=c5d514e1-4b54-4e63-85a7-9404cb22e6b4&size=1&status=PROPOSED%2CAPPROVED": {
+   "content": [
+    {
+     "id": "4cc86311-eb81-4cc8-9053-f9839ccde3d8",
+     "changeSignalId": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+     "signalType": "VULNERABILITY",
+     "changeTitle": "CVE-2026-90001",
+     "kind": "CYBER_THREAT",
+     "reference": "AEGIS-4CC86311",
+     "detectedAt": "2026-01-01T00:00:00Z",
+     "services": [
+      {
+       "serviceId": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+       "name": "Journey payments settlement and reconciliation platform",
+       "criticality": "CRITICAL",
+       "exposure": "INTERNET_FACING",
+       "score": 98,
+       "tier": "CRITICAL",
+       "material": true
+      }
+     ],
+     "summary": "Development stub: no AI assessment or action has been performed.",
+     "impact": "Development stub: no AI assessment or action has been performed.",
+     "measures": "Development stub: no AI assessment or action has been performed.",
+     "nextSteps": "Development stub: no AI assessment or action has been performed.",
+     "aiDrafted": true,
+     "citations": [
+      "Cyber threat: vulnerability CVE-2026-90001, detected 2026-01-01T00:00:00Z: Remote code execution in journey-lib before 1.2.4.\nSeverity: CVSS 3.1 base score 9.8 (CRITICAL)\nAffected services, as Aegis scored them:\n- Journey payments settlement and reconciliation platform: CRITICAL criticality, INTERNET_FACING, impact score 98.0 (CRITICAL, material)\nAffected components:\n- com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3 (maven)\nEvidence:\n- Change: VULNERABILITY CVE-2026-90001 (c5d514e1-4b54-4e63-85a7-9404cb22e6b4).\n- Source: nvd / CVE-2026-90001.\n- Source URL: not recorded\n- Source time: 2026-01-01T00:00:00Z\n- Source excerpt: Remote code execution in journey-lib before 1.2.4.\n- Journey payments settlement and reconciliation platform: CVE-2026-90001 affects com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3; dependency path com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name reaches service Journey payments settlement and reconciliation platform; owners: unassigned\n- Journey payments settlement and reconciliation platform: Impact score 98.0 (CRITICAL, material). CVE-2026-90001 scores 98.0 (CRITICAL) for Journey payments settlement and reconciliation platform: seve"
+     ],
+     "body": "# Voluntary notification of a significant cyber threat\n\nDraft prepared by Aegis for review. It has not been submitted. Complete every \"[To be confirmed]\", then\nsubmit it through your competent authority's reporting channel, if you decide to notify (DORA,\nRegulation (EU) 2022/2554, Article 19(2)).\n\n## 1. Reporting entity\n\n- Financial entity: [To be confirmed: name and LEI]\n- Notification reference: AEGIS-4CC86311\n- Contact person: [To be confirmed]\n\n## 2. The threat\n\n- Vulnerability: CVE-2026-90001\n- Severity published: CVSS 3.1 base score 9.8 (CRITICAL)\n- Published: 2026-01-01 00:00 UTC\n- Exploited at the entity: [To be confirmed]\n\nDevelopment stub: no AI assessment or action has been performed.\n\n## 3. Potentially affected services\n\n| Service | Criticality | Exposure | Impact score | Material |\n|---|---|---|---|---|\n| Journey payments settlement and reconciliation platform | CRITICAL | INTERNET_FACING | 98.0 (CRITICAL) | yes |\n\n## 4. Affected components\n\n- com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3 (maven)\n\n## 5. Potential impact\n\nDevelopment stub: no AI assessment or action has been performed.\n\n## 6. Measures taken or planned\n\nDevelopment stub: no AI assessment or action has been performed.\n\n## 7. Next steps\n\nDevelopment stub: no AI assessment or action has been performed.\n\n## Evidence\n\n- Change: VULNERABILITY CVE-2026-90001 (c5d514e1-4b54-4e63-85a7-9404cb22e6b4).\n- Source: nvd / CVE-2026-90001.\n- Source URL: not recorded\n- Source time: 2026-01-01T00:00:00Z\n- Source excerpt: Remote code execution in journey-lib before 1.2.4.\n- Journey payments settlement and reconciliation platform: CVE-2026-90001 affects com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3; dependency path com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name reaches service Journey payments settlement and reconciliation platform; owners: unassigned\n- Journey payments settlement and reconciliation platform: Impact score 98.0 (CRITICAL, material). CVE-2026-90001 scores 98.0 (CRITICAL) for Journey payments settlement and reconciliation platform: severity 0.98 (CVSS 3.1 base 9.8) x exposure 1.00 (INTERNET_FACING) x criticality 1.00 (CRITICAL); severity (CVSS 3.1 base 9.8) holds it down most, costing 2.0 points\n- Journey payments settlement and reconciliation platform: Affected service: Journey payments settlement and reconciliation platform (a42f9620-7cce-47a1-bc1e-21a6206df5b5), CRITICAL criticality, INTERNET_FACING.\n- Journey payments settlement and reconciliation platform: Service owners: none assigned.\n- Journey payments settlement and reconciliation platform: Match confidence: CONFIRMED.\n- Journey payments settlement and reconciliation platform: Code reachability: UNKNOWN. The service's code hasn't been read: link its repository and import the SBOM from it.\n- Journey payments settlement and reconciliation platform: Score calculation: severity 0.98 x exposure 1 x reachability 1 x criticality 1 x confidence 1 x 100 = 98.0 (rounded to one decimal).\n- Journey payments settlement and reconciliation platform: Score factor SEVERITY: CVSS 3.1 base 9.8; weight 0.98; limiting factor.\n- Journey payments settlement and reconciliation platform: Score factor EXPOSURE: INTERNET_FACING; weight 1; setting aegis.scoring.exposure.internet-facing.\n- Journey payments settlement and reconciliation platform: Score factor REACHABILITY: UNKNOWN; weight 1; setting aegis.scoring.reachability.imported.\n- Journey payments settlement and reconciliation platform: Score factor CRITICALITY: CRITICAL; weight 1; setting aegis.scoring.criticality.critical.\n- Journey payments settlement and reconciliation platform: Score factor CONFIDENCE: CONFIRMED; weight 1; setting aegis.scoring.confidence.confirmed.\n\n\n### Sources the AI draft quotes (unverified)\n\n> Cyber threat: vulnerability CVE-2026-90001, detected 2026-01-01T00:00:00Z: Remote code execution in journey-lib before 1.2.4.\n> Severity: CVSS 3.1 base score 9.8 (CRITICAL)\n> Affected services, as Aegis scored them:\n> - Journey payments settlement and reconciliation platform: CRITICAL criticality, INTERNET_FACING, impact score 98.0 (CRITICAL, material)\n> Affected components:\n> - com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3 (maven)\n> Evidence:\n> - Change: VULNERABILITY CVE-2026-90001 (c5d514e1-4b54-4e63-85a7-9404cb22e6b4).\n> - Source: nvd / CVE-2026-90001.\n> - Source URL: not recorded\n> - Source time: 2026-01-01T00:00:00Z\n> - Source excerpt: Remote code execution in journey-lib before 1.2.4.\n> - Journey payments settlement and reconciliation platform: CVE-2026-90001 affects com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3; dependency path com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name reaches service Journey payments settlement and reconciliation platform; owners: unassigned\n> - Journey payments settlement and reconciliation platform: Impact score 98.0 (CRITICAL, material). CVE-2026-90001 scores 98.0 (CRITICAL) for Journey payments settlement and reconciliation platform: seve\n\n",
+     "status": "PROPOSED",
+     "createdBy": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+     "createdAt": "2026-11-05T05:32:41.547964Z",
+     "decidedBy": null,
+     "decidedAt": null,
+     "dismissReason": null,
+     "version": 0
+    }
+   ],
+   "empty": false,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 1,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 1,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 1,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 1,
+   "totalPages": 1
+  },
+  "/api/actions/reachability-assessments?changeSignalId=c5d514e1-4b54-4e63-85a7-9404cb22e6b4": [
+   {
+    "serviceId": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+    "ecosystem": "maven",
+    "packageName": "com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name",
+    "status": "NOT_ASSESSED",
+    "verdict": null,
+    "rationale": null,
+    "citedLines": [],
+    "checks": [],
+    "searches": [],
+    "assessedAt": null,
+    "reason": "The service's code hasn't been read: link its repository and import the SBOM from it",
+    "assessable": false
+   }
+  ],
+  "/api/findings?page=0&size=20": {
+   "items": {
+    "content": [
+     {
+      "kind": "VULNERABILITY",
+      "changeSignalId": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+      "service": {
+       "id": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+       "name": "Journey payments settlement and reconciliation platform",
+       "criticality": "CRITICAL",
+       "exposure": "INTERNET_FACING"
+      },
+      "owners": [],
+      "score": 98,
+      "tier": "CRITICAL",
+      "confidence": "CONFIRMED",
+      "upgrade": {
+       "serviceId": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+       "serviceName": "Journey payments settlement and reconciliation platform",
+       "component": {
+        "id": "e0073501-fdcf-4485-9f50-0539a5cc0c3f",
+        "ecosystem": "maven",
+        "name": "com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name",
+        "version": "1.2.3"
+       },
+       "via": null,
+       "manifestPaths": [],
+       "confidence": "CONFIRMED",
+       "vulnerabilities": [
+        {
+         "id": "CVE-2026-90001",
+         "changeSignalId": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+         "confidence": "CONFIRMED",
+         "cvssVersion": "3.1",
+         "cvssBaseScore": 9.8,
+         "severity": "CRITICAL"
+        }
+       ],
+       "score": 98,
+       "tier": "CRITICAL",
+       "material": true,
+       "toVersion": "1.2.4",
+       "changeSignalId": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+       "readiness": "NO_REPOSITORY",
+       "reason": "Link the service's repository so Aegis can draft the pull request",
+       "overrideIn": [],
+       "usage": {
+        "status": "UNKNOWN",
+        "reason": "The service's code hasn't been read: link its repository and import the SBOM from it",
+        "importedAs": [
+         "com.aegisjourney"
+        ],
+        "siteCount": 0,
+        "sites": []
+       },
+       "viaUsage": null,
+       "reachability": {
+        "status": "UNKNOWN",
+        "reason": "The service's code hasn't been read: link its repository and import the SBOM from it",
+        "through": null,
+        "usage": {
+         "status": "UNKNOWN",
+         "reason": "The service's code hasn't been read: link its repository and import the SBOM from it",
+         "importedAs": [
+          "com.aegisjourney"
+         ],
+         "siteCount": 0,
+         "sites": []
+        }
+       },
+       "proposal": null,
+       "response": {
+        "ticketId": "be2dcfdf-d40e-4c7e-96d8-bd0a3e4b0dc6",
+        "changeSignalId": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+        "status": "FILED",
+        "stage": "ACTIONED",
+        "issueKey": "AEG-2",
+        "issueUrl": "https://journey.atlassian.net/browse/AEG-2"
+       }
+      },
+      "outage": null,
+      "response": {
+       "ticketId": "be2dcfdf-d40e-4c7e-96d8-bd0a3e4b0dc6",
+       "changeSignalId": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+       "status": "FILED",
+       "stage": "ACTIONED",
+       "issueKey": "AEG-2",
+       "issueUrl": "https://journey.atlassian.net/browse/AEG-2"
+      },
+      "stage": "ACTIONED",
+      "canDraft": true
+     }
+    ],
+    "empty": false,
+    "first": true,
+    "last": true,
+    "number": 0,
+    "numberOfElements": 1,
+    "pageable": {
+     "offset": 0,
+     "pageNumber": 0,
+     "pageSize": 20,
+     "paged": true,
+     "sort": {
+      "empty": true,
+      "sorted": false,
+      "unsorted": true
+     },
+     "unpaged": false
+    },
+    "size": 20,
+    "sort": {
+     "empty": true,
+     "sorted": false,
+     "unsorted": true
+    },
+    "totalElements": 1,
+    "totalPages": 1
+   },
+   "services": [
+    {
+     "id": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+     "name": "Journey payments settlement and reconciliation platform",
+     "criticality": "CRITICAL",
+     "exposure": "INTERNET_FACING"
+    }
+   ],
+   "owners": [],
+   "ecosystems": [
+    "maven"
+   ]
+  },
+  "/api/change-signals/c5d514e1-4b54-4e63-85a7-9404cb22e6b4": {
+   "id": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+   "signalType": "VULNERABILITY",
+   "sourceId": "nvd",
+   "externalId": "CVE-2026-90001",
+   "title": "CVE-2026-90001",
+   "summary": "Remote code execution in journey-lib before 1.2.4.",
+   "severity": "CRITICAL",
+   "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-90001",
+   "occurredAt": "2026-01-01T00:00:00Z",
+   "createdAt": "2026-11-05T05:03:57.151128Z",
+   "updatedAt": "2026-11-05T05:03:57.151128Z"
+  },
+  "/api/actions/regulator-memos?page=0&size=20&status=PROPOSED": {
+   "content": [
+    {
+     "id": "4cc86311-eb81-4cc8-9053-f9839ccde3d8",
+     "changeSignalId": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+     "signalType": "VULNERABILITY",
+     "changeTitle": "CVE-2026-90001",
+     "kind": "CYBER_THREAT",
+     "reference": "AEGIS-4CC86311",
+     "detectedAt": "2026-01-01T00:00:00Z",
+     "services": [
+      {
+       "serviceId": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+       "name": "Journey payments settlement and reconciliation platform",
+       "criticality": "CRITICAL",
+       "exposure": "INTERNET_FACING",
+       "score": 98,
+       "tier": "CRITICAL",
+       "material": true
+      }
+     ],
+     "summary": "Development stub: no AI assessment or action has been performed.",
+     "impact": "Development stub: no AI assessment or action has been performed.",
+     "measures": "Development stub: no AI assessment or action has been performed.",
+     "nextSteps": "Development stub: no AI assessment or action has been performed.",
+     "aiDrafted": true,
+     "citations": [
+      "Cyber threat: vulnerability CVE-2026-90001, detected 2026-01-01T00:00:00Z: Remote code execution in journey-lib before 1.2.4.\nSeverity: CVSS 3.1 base score 9.8 (CRITICAL)\nAffected services, as Aegis scored them:\n- Journey payments settlement and reconciliation platform: CRITICAL criticality, INTERNET_FACING, impact score 98.0 (CRITICAL, material)\nAffected components:\n- com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3 (maven)\nEvidence:\n- Change: VULNERABILITY CVE-2026-90001 (c5d514e1-4b54-4e63-85a7-9404cb22e6b4).\n- Source: nvd / CVE-2026-90001.\n- Source URL: not recorded\n- Source time: 2026-01-01T00:00:00Z\n- Source excerpt: Remote code execution in journey-lib before 1.2.4.\n- Journey payments settlement and reconciliation platform: CVE-2026-90001 affects com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3; dependency path com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name reaches service Journey payments settlement and reconciliation platform; owners: unassigned\n- Journey payments settlement and reconciliation platform: Impact score 98.0 (CRITICAL, material). CVE-2026-90001 scores 98.0 (CRITICAL) for Journey payments settlement and reconciliation platform: seve"
+     ],
+     "body": "# Voluntary notification of a significant cyber threat\n\nDraft prepared by Aegis for review. It has not been submitted. Complete every \"[To be confirmed]\", then\nsubmit it through your competent authority's reporting channel, if you decide to notify (DORA,\nRegulation (EU) 2022/2554, Article 19(2)).\n\n## 1. Reporting entity\n\n- Financial entity: [To be confirmed: name and LEI]\n- Notification reference: AEGIS-4CC86311\n- Contact person: [To be confirmed]\n\n## 2. The threat\n\n- Vulnerability: CVE-2026-90001\n- Severity published: CVSS 3.1 base score 9.8 (CRITICAL)\n- Published: 2026-01-01 00:00 UTC\n- Exploited at the entity: [To be confirmed]\n\nDevelopment stub: no AI assessment or action has been performed.\n\n## 3. Potentially affected services\n\n| Service | Criticality | Exposure | Impact score | Material |\n|---|---|---|---|---|\n| Journey payments settlement and reconciliation platform | CRITICAL | INTERNET_FACING | 98.0 (CRITICAL) | yes |\n\n## 4. Affected components\n\n- com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3 (maven)\n\n## 5. Potential impact\n\nDevelopment stub: no AI assessment or action has been performed.\n\n## 6. Measures taken or planned\n\nDevelopment stub: no AI assessment or action has been performed.\n\n## 7. Next steps\n\nDevelopment stub: no AI assessment or action has been performed.\n\n## Evidence\n\n- Change: VULNERABILITY CVE-2026-90001 (c5d514e1-4b54-4e63-85a7-9404cb22e6b4).\n- Source: nvd / CVE-2026-90001.\n- Source URL: not recorded\n- Source time: 2026-01-01T00:00:00Z\n- Source excerpt: Remote code execution in journey-lib before 1.2.4.\n- Journey payments settlement and reconciliation platform: CVE-2026-90001 affects com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3; dependency path com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name reaches service Journey payments settlement and reconciliation platform; owners: unassigned\n- Journey payments settlement and reconciliation platform: Impact score 98.0 (CRITICAL, material). CVE-2026-90001 scores 98.0 (CRITICAL) for Journey payments settlement and reconciliation platform: severity 0.98 (CVSS 3.1 base 9.8) x exposure 1.00 (INTERNET_FACING) x criticality 1.00 (CRITICAL); severity (CVSS 3.1 base 9.8) holds it down most, costing 2.0 points\n- Journey payments settlement and reconciliation platform: Affected service: Journey payments settlement and reconciliation platform (a42f9620-7cce-47a1-bc1e-21a6206df5b5), CRITICAL criticality, INTERNET_FACING.\n- Journey payments settlement and reconciliation platform: Service owners: none assigned.\n- Journey payments settlement and reconciliation platform: Match confidence: CONFIRMED.\n- Journey payments settlement and reconciliation platform: Code reachability: UNKNOWN. The service's code hasn't been read: link its repository and import the SBOM from it.\n- Journey payments settlement and reconciliation platform: Score calculation: severity 0.98 x exposure 1 x reachability 1 x criticality 1 x confidence 1 x 100 = 98.0 (rounded to one decimal).\n- Journey payments settlement and reconciliation platform: Score factor SEVERITY: CVSS 3.1 base 9.8; weight 0.98; limiting factor.\n- Journey payments settlement and reconciliation platform: Score factor EXPOSURE: INTERNET_FACING; weight 1; setting aegis.scoring.exposure.internet-facing.\n- Journey payments settlement and reconciliation platform: Score factor REACHABILITY: UNKNOWN; weight 1; setting aegis.scoring.reachability.imported.\n- Journey payments settlement and reconciliation platform: Score factor CRITICALITY: CRITICAL; weight 1; setting aegis.scoring.criticality.critical.\n- Journey payments settlement and reconciliation platform: Score factor CONFIDENCE: CONFIRMED; weight 1; setting aegis.scoring.confidence.confirmed.\n\n\n### Sources the AI draft quotes (unverified)\n\n> Cyber threat: vulnerability CVE-2026-90001, detected 2026-01-01T00:00:00Z: Remote code execution in journey-lib before 1.2.4.\n> Severity: CVSS 3.1 base score 9.8 (CRITICAL)\n> Affected services, as Aegis scored them:\n> - Journey payments settlement and reconciliation platform: CRITICAL criticality, INTERNET_FACING, impact score 98.0 (CRITICAL, material)\n> Affected components:\n> - com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3 (maven)\n> Evidence:\n> - Change: VULNERABILITY CVE-2026-90001 (c5d514e1-4b54-4e63-85a7-9404cb22e6b4).\n> - Source: nvd / CVE-2026-90001.\n> - Source URL: not recorded\n> - Source time: 2026-01-01T00:00:00Z\n> - Source excerpt: Remote code execution in journey-lib before 1.2.4.\n> - Journey payments settlement and reconciliation platform: CVE-2026-90001 affects com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3; dependency path com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name reaches service Journey payments settlement and reconciliation platform; owners: unassigned\n> - Journey payments settlement and reconciliation platform: Impact score 98.0 (CRITICAL, material). CVE-2026-90001 scores 98.0 (CRITICAL) for Journey payments settlement and reconciliation platform: seve\n\n",
+     "status": "PROPOSED",
+     "createdBy": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+     "createdAt": "2026-11-05T05:32:41.547964Z",
+     "decidedBy": null,
+     "decidedAt": null,
+     "dismissReason": null,
+     "version": 0
+    }
+   ],
+   "empty": false,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 1,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 20,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 20,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 1,
+   "totalPages": 1
+  },
+  "/api/actions/risk-tickets?page=0&size=20&pending=true": {
+   "content": [],
+   "empty": true,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 0,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 20,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 20,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 0,
+   "totalPages": 0
+  },
+  "/api/actions/upgrade-proposals?page=0&size=20&status=PROPOSED%2CFAILED%2COPENING&standalone=true": {
+   "content": [],
+   "empty": true,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 0,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 20,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 20,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 0,
+   "totalPages": 0
+  },
+  "/api/actions/upgrade-proposals?page=0&size=20&status=OPENED%2CDISMISSED&standalone=true": {
+   "content": [],
+   "empty": true,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 0,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 20,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 20,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 0,
+   "totalPages": 0
+  },
+  "/api/actions/regulator-memos?page=0&size=20&status=APPROVED%2CDISMISSED": {
+   "content": [],
+   "empty": true,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 0,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 20,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 20,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 0,
+   "totalPages": 0
+  },
+  "/api/actions/risk-tickets?page=0&size=20&status=FILED%2CDISMISSED&pending=false": {
+   "content": [
+    {
+     "id": "be2dcfdf-d40e-4c7e-96d8-bd0a3e4b0dc6",
+     "serviceId": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+     "changeSignalId": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+     "signalType": "VULNERABILITY",
+     "changeTitle": "CVE-2026-90001",
+     "title": "CVE-2026-90001 affects Journey payments settlement and reconciliation platform",
+     "priority": "HIGHEST",
+     "dueDate": "2026-11-12",
+     "score": 98,
+     "tier": "CRITICAL",
+     "labels": [
+      "aegis",
+      "vulnerability",
+      "impact-critical",
+      "CVE-2026-90001"
+     ],
+     "summary": "Development stub: no AI assessment or action has been performed.",
+     "risk": "Development stub: no AI assessment or action has been performed.",
+     "impact": "Development stub: no AI assessment or action has been performed.",
+     "actions": [
+      "Development stub: no AI assessment or action has been performed."
+     ],
+     "evidence": [
+      "CVE-2026-90001 affects com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3; dependency path com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name reaches service Journey payments settlement and reconciliation platform; owners: unassigned",
+      "Impact score 98.0 (CRITICAL, material). CVE-2026-90001 scores 98.0 (CRITICAL) for Journey payments settlement and reconciliation platform: severity 0.98 (CVSS 3.1 base 9.8) x exposure 1.00 (INTERNET_FACING) x criticality 1.00 (CRITICAL); severity (CVSS 3.1 base 9.8) holds it down most, costing 2.0 points",
+      "Affected service: Journey payments settlement and reconciliation platform (a42f9620-7cce-47a1-bc1e-21a6206df5b5), CRITICAL criticality, INTERNET_FACING.",
+      "Service owners: none assigned.",
+      "Match confidence: CONFIRMED.",
+      "Code reachability: UNKNOWN. The service's code hasn't been read: link its repository and import the SBOM from it.",
+      "Score calculation: severity 0.98 x exposure 1 x reachability 1 x criticality 1 x confidence 1 x 100 = 98.0 (rounded to one decimal).",
+      "Score factor SEVERITY: CVSS 3.1 base 9.8; weight 0.98; limiting factor.",
+      "Score factor EXPOSURE: INTERNET_FACING; weight 1; setting aegis.scoring.exposure.internet-facing.",
+      "Score factor REACHABILITY: UNKNOWN; weight 1; setting aegis.scoring.reachability.imported.",
+      "Score factor CRITICALITY: CRITICAL; weight 1; setting aegis.scoring.criticality.critical.",
+      "Score factor CONFIDENCE: CONFIRMED; weight 1; setting aegis.scoring.confidence.confirmed.",
+      "Not automated: Link the service's repository so Aegis can draft the upgrade pull request for com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name",
+      "Change: VULNERABILITY CVE-2026-90001 (c5d514e1-4b54-4e63-85a7-9404cb22e6b4).",
+      "Source: nvd / CVE-2026-90001.",
+      "Source URL: not recorded",
+      "Source time: 2026-01-01T00:00:00Z",
+      "Source excerpt: Remote code execution in journey-lib before 1.2.4.",
+      "AI reachability suggestion for com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name: not assessed. The service's code hasn't been read: link its repository and import the SBOM from it."
+     ],
+     "aiDrafted": true,
+     "citations": [
+      "Vulnerability CVE-2026-90001, 2026-01-01: Remote code execution in journey-lib before 1.2.4.\nAffected service: Journey payments settlement and reconciliation platform (CRITICAL criticality, INTERNET_FACING).\nImpact score 98.0 (CRITICAL, material), worked out by Aegis.\nEvidence:\n- CVE-2026-90001 affects com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3; dependency path com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name reaches service Journey payments settlement and reconciliation platform; owners: unassigned\n- Impact score 98.0 (CRITICAL, material). CVE-2026-90001 scores 98.0 (CRITICAL) for Journey payments settlement and reconciliation platform: severity 0.98 (CVSS 3.1 base 9.8) x exposure 1.00 (INTERNET_FACING) x criticality 1.00 (CRITICAL); severity (CVSS 3.1 base 9.8) holds it down most, costing 2.0 points\n- Affected service: Journey payments settlement and reconciliation platform (a42f9620-7cce-47a1-bc1e-21a6206df5b5), CRITICAL criticality, INTERNET_FACING.\n- Service owners: none assigned.\n- Match confidence: CONFIRMED.\n- Code reachability: UNKNOWN. The service's code hasn't been read: link its repository and impor"
+     ],
+     "status": "FILED",
+     "createdBy": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+     "createdAt": "2026-11-05T05:29:53.881415Z",
+     "decidedBy": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+     "decidedAt": "2026-11-05T05:30:05.886349Z",
+     "dismissReason": null,
+     "issueKey": "AEG-2",
+     "issueUrl": "https://journey.atlassian.net/browse/AEG-2",
+     "failureMessage": null,
+     "edit": null,
+     "override": null,
+     "approval": {
+      "by": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+      "at": "2026-11-05T05:30:05.886349Z"
+     },
+     "version": 2,
+     "serviceName": "Journey payments settlement and reconciliation platform",
+     "stage": "ACTIONED",
+     "pullRequests": []
+    }
+   ],
+   "empty": false,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 1,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 20,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 20,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 1,
+   "totalPages": 1
+  },
+  "/api/users?size=100": {
+   "content": [
+    {
+     "id": "7de703db-7dce-4813-a5e0-4f21d5ab9b81",
+     "email": "journey-admin@example.com",
+     "displayName": "Journey Admin",
+     "roles": [
+      "ORG_ADMIN",
+      "USER"
+     ],
+     "enabled": true,
+     "emailVerified": false,
+     "orgId": "ffe9745c-49cf-4340-b84c-f04437d23250",
+     "createdAt": "2026-11-05T05:28:51.609773Z"
+    },
+    {
+     "id": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+     "email": "journey-analyst@example.com",
+     "displayName": "Journey Analyst",
+     "roles": [
+      "USER",
+      "ANALYST"
+     ],
+     "enabled": true,
+     "emailVerified": false,
+     "orgId": "ffe9745c-49cf-4340-b84c-f04437d23250",
+     "createdAt": "2026-11-05T05:28:49.997393Z"
+    }
+   ],
+   "empty": false,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 2,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 100,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 100,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 2,
+   "totalPages": 1
+  },
+  "/api/actions/risk-tickets/be2dcfdf-d40e-4c7e-96d8-bd0a3e4b0dc6": {
+   "id": "be2dcfdf-d40e-4c7e-96d8-bd0a3e4b0dc6",
+   "serviceId": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+   "changeSignalId": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+   "signalType": "VULNERABILITY",
+   "changeTitle": "CVE-2026-90001",
+   "title": "CVE-2026-90001 affects Journey payments settlement and reconciliation platform",
+   "priority": "HIGHEST",
+   "dueDate": "2026-11-12",
+   "score": 98,
+   "tier": "CRITICAL",
+   "labels": [
+    "aegis",
+    "vulnerability",
+    "impact-critical",
+    "CVE-2026-90001"
+   ],
+   "summary": "Development stub: no AI assessment or action has been performed.",
+   "risk": "Development stub: no AI assessment or action has been performed.",
+   "impact": "Development stub: no AI assessment or action has been performed.",
+   "actions": [
+    "Development stub: no AI assessment or action has been performed."
+   ],
+   "evidence": [
+    "CVE-2026-90001 affects com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3; dependency path com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name reaches service Journey payments settlement and reconciliation platform; owners: unassigned",
+    "Impact score 98.0 (CRITICAL, material). CVE-2026-90001 scores 98.0 (CRITICAL) for Journey payments settlement and reconciliation platform: severity 0.98 (CVSS 3.1 base 9.8) x exposure 1.00 (INTERNET_FACING) x criticality 1.00 (CRITICAL); severity (CVSS 3.1 base 9.8) holds it down most, costing 2.0 points",
+    "Affected service: Journey payments settlement and reconciliation platform (a42f9620-7cce-47a1-bc1e-21a6206df5b5), CRITICAL criticality, INTERNET_FACING.",
+    "Service owners: none assigned.",
+    "Match confidence: CONFIRMED.",
+    "Code reachability: UNKNOWN. The service's code hasn't been read: link its repository and import the SBOM from it.",
+    "Score calculation: severity 0.98 x exposure 1 x reachability 1 x criticality 1 x confidence 1 x 100 = 98.0 (rounded to one decimal).",
+    "Score factor SEVERITY: CVSS 3.1 base 9.8; weight 0.98; limiting factor.",
+    "Score factor EXPOSURE: INTERNET_FACING; weight 1; setting aegis.scoring.exposure.internet-facing.",
+    "Score factor REACHABILITY: UNKNOWN; weight 1; setting aegis.scoring.reachability.imported.",
+    "Score factor CRITICALITY: CRITICAL; weight 1; setting aegis.scoring.criticality.critical.",
+    "Score factor CONFIDENCE: CONFIRMED; weight 1; setting aegis.scoring.confidence.confirmed.",
+    "Not automated: Link the service's repository so Aegis can draft the upgrade pull request for com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name",
+    "Change: VULNERABILITY CVE-2026-90001 (c5d514e1-4b54-4e63-85a7-9404cb22e6b4).",
+    "Source: nvd / CVE-2026-90001.",
+    "Source URL: not recorded",
+    "Source time: 2026-01-01T00:00:00Z",
+    "Source excerpt: Remote code execution in journey-lib before 1.2.4.",
+    "AI reachability suggestion for com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name: not assessed. The service's code hasn't been read: link its repository and import the SBOM from it."
+   ],
+   "aiDrafted": true,
+   "citations": [
+    "Vulnerability CVE-2026-90001, 2026-01-01: Remote code execution in journey-lib before 1.2.4.\nAffected service: Journey payments settlement and reconciliation platform (CRITICAL criticality, INTERNET_FACING).\nImpact score 98.0 (CRITICAL, material), worked out by Aegis.\nEvidence:\n- CVE-2026-90001 affects com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3; dependency path com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name reaches service Journey payments settlement and reconciliation platform; owners: unassigned\n- Impact score 98.0 (CRITICAL, material). CVE-2026-90001 scores 98.0 (CRITICAL) for Journey payments settlement and reconciliation platform: severity 0.98 (CVSS 3.1 base 9.8) x exposure 1.00 (INTERNET_FACING) x criticality 1.00 (CRITICAL); severity (CVSS 3.1 base 9.8) holds it down most, costing 2.0 points\n- Affected service: Journey payments settlement and reconciliation platform (a42f9620-7cce-47a1-bc1e-21a6206df5b5), CRITICAL criticality, INTERNET_FACING.\n- Service owners: none assigned.\n- Match confidence: CONFIRMED.\n- Code reachability: UNKNOWN. The service's code hasn't been read: link its repository and impor"
+   ],
+   "status": "FILED",
+   "createdBy": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+   "createdAt": "2026-11-05T05:29:53.881415Z",
+   "decidedBy": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+   "decidedAt": "2026-11-05T05:30:05.886349Z",
+   "dismissReason": null,
+   "issueKey": "AEG-2",
+   "issueUrl": "https://journey.atlassian.net/browse/AEG-2",
+   "failureMessage": null,
+   "edit": null,
+   "override": null,
+   "approval": {
+    "by": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+    "at": "2026-11-05T05:30:05.886349Z"
+   },
+   "version": 2,
+   "serviceName": "Journey payments settlement and reconciliation platform",
+   "stage": "ACTIONED",
+   "pullRequests": [],
+   "serviceNow": {
+    "short_description": "CVE-2026-90001 affects Journey payments settlement and reconciliation platform",
+    "description": "Development stub: no AI assessment or action has been performed.\n\nRisk\nDevelopment stub: no AI assessment or action has been performed.\n\nImpact\nDevelopment stub: no AI assessment or action has been performed.\n\nRecommended actions\n- Development stub: no AI assessment or action has been performed.\n\nEvidence\n- CVE-2026-90001 affects com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3; dependency path com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name reaches service Journey payments settlement and reconciliation platform; owners: unassigned\n- Impact score 98.0 (CRITICAL, material). CVE-2026-90001 scores 98.0 (CRITICAL) for Journey payments settlement and reconciliation platform: severity 0.98 (CVSS 3.1 base 9.8) x exposure 1.00 (INTERNET_FACING) x criticality 1.00 (CRITICAL); severity (CVSS 3.1 base 9.8) holds it down most, costing 2.0 points\n- Affected service: Journey payments settlement and reconciliation platform (a42f9620-7cce-47a1-bc1e-21a6206df5b5), CRITICAL criticality, INTERNET_FACING.\n- Service owners: none assigned.\n- Match confidence: CONFIRMED.\n- Code reachability: UNKNOWN. The service's code hasn't been read: link its repository and import the SBOM from it.\n- Score calculation: severity 0.98 x exposure 1 x reachability 1 x criticality 1 x confidence 1 x 100 = 98.0 (rounded to one decimal).\n- Score factor SEVERITY: CVSS 3.1 base 9.8; weight 0.98; limiting factor.\n- Score factor EXPOSURE: INTERNET_FACING; weight 1; setting aegis.scoring.exposure.internet-facing.\n- Score factor REACHABILITY: UNKNOWN; weight 1; setting aegis.scoring.reachability.imported.\n- Score factor CRITICALITY: CRITICAL; weight 1; setting aegis.scoring.criticality.critical.\n- Score factor CONFIDENCE: CONFIRMED; weight 1; setting aegis.scoring.confidence.confirmed.\n- Not automated: Link the service's repository so Aegis can draft the upgrade pull request for com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name\n- Change: VULNERABILITY CVE-2026-90001 (c5d514e1-4b54-4e63-85a7-9404cb22e6b4).\n- Source: nvd / CVE-2026-90001.\n- Source URL: not recorded\n- Source time: 2026-01-01T00:00:00Z\n- Source excerpt: Remote code execution in journey-lib before 1.2.4.\n- AI reachability suggestion for com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name: not assessed. The service's code hasn't been read: link its repository and import the SBOM from it.\n\nSources the draft quotes\n- Vulnerability CVE-2026-90001, 2026-01-01: Remote code execution in journey-lib before 1.2.4.\nAffected service: Journey payments settlement and reconciliation platform (CRITICAL criticality, INTERNET_FACING).\nImpact score 98.0 (CRITICAL, material), worked out by Aegis.\nEvidence:\n- CVE-2026-90001 affects com.aegisjourney:jou…\nService: Journey payments settlement and reconciliation platform. Drafted by Aegis (the summary, risk, impact and actions are an AI draft a person reviewed) and approved there by the person who requested it.",
+    "impact": "1",
+    "urgency": "1",
+    "cmdb_ci": "Journey payments settlement and reconciliation platform",
+    "due_date": "2026-11-12 00:00:00"
+   }
+  },
+  "/api/integrations/jira": {
+   "enabled": true,
+   "connected": true,
+   "siteName": "Journey",
+   "siteUrl": "https://journey.atlassian.net",
+   "projectKey": "AEG",
+   "issueType": "Task",
+   "connectedBy": "7de703db-7dce-4813-a5e0-4f21d5ab9b81",
+   "connectedAt": "2026-11-05T05:29:18.303258Z"
+  },
+  "/api/actions/regulator-memos/4cc86311-eb81-4cc8-9053-f9839ccde3d8": {
+   "id": "4cc86311-eb81-4cc8-9053-f9839ccde3d8",
+   "changeSignalId": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+   "signalType": "VULNERABILITY",
+   "changeTitle": "CVE-2026-90001",
+   "kind": "CYBER_THREAT",
+   "reference": "AEGIS-4CC86311",
+   "detectedAt": "2026-01-01T00:00:00Z",
+   "services": [
+    {
+     "serviceId": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+     "name": "Journey payments settlement and reconciliation platform",
+     "criticality": "CRITICAL",
+     "exposure": "INTERNET_FACING",
+     "score": 98,
+     "tier": "CRITICAL",
+     "material": true
+    }
+   ],
+   "summary": "Development stub: no AI assessment or action has been performed.",
+   "impact": "Development stub: no AI assessment or action has been performed.",
+   "measures": "Development stub: no AI assessment or action has been performed.",
+   "nextSteps": "Development stub: no AI assessment or action has been performed.",
+   "aiDrafted": true,
+   "citations": [
+    "Cyber threat: vulnerability CVE-2026-90001, detected 2026-01-01T00:00:00Z: Remote code execution in journey-lib before 1.2.4.\nSeverity: CVSS 3.1 base score 9.8 (CRITICAL)\nAffected services, as Aegis scored them:\n- Journey payments settlement and reconciliation platform: CRITICAL criticality, INTERNET_FACING, impact score 98.0 (CRITICAL, material)\nAffected components:\n- com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3 (maven)\nEvidence:\n- Change: VULNERABILITY CVE-2026-90001 (c5d514e1-4b54-4e63-85a7-9404cb22e6b4).\n- Source: nvd / CVE-2026-90001.\n- Source URL: not recorded\n- Source time: 2026-01-01T00:00:00Z\n- Source excerpt: Remote code execution in journey-lib before 1.2.4.\n- Journey payments settlement and reconciliation platform: CVE-2026-90001 affects com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3; dependency path com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name reaches service Journey payments settlement and reconciliation platform; owners: unassigned\n- Journey payments settlement and reconciliation platform: Impact score 98.0 (CRITICAL, material). CVE-2026-90001 scores 98.0 (CRITICAL) for Journey payments settlement and reconciliation platform: seve"
+   ],
+   "body": "# Voluntary notification of a significant cyber threat\n\nDraft prepared by Aegis for review. It has not been submitted. Complete every \"[To be confirmed]\", then\nsubmit it through your competent authority's reporting channel, if you decide to notify (DORA,\nRegulation (EU) 2022/2554, Article 19(2)).\n\n## 1. Reporting entity\n\n- Financial entity: [To be confirmed: name and LEI]\n- Notification reference: AEGIS-4CC86311\n- Contact person: [To be confirmed]\n\n## 2. The threat\n\n- Vulnerability: CVE-2026-90001\n- Severity published: CVSS 3.1 base score 9.8 (CRITICAL)\n- Published: 2026-01-01 00:00 UTC\n- Exploited at the entity: [To be confirmed]\n\nDevelopment stub: no AI assessment or action has been performed.\n\n## 3. Potentially affected services\n\n| Service | Criticality | Exposure | Impact score | Material |\n|---|---|---|---|---|\n| Journey payments settlement and reconciliation platform | CRITICAL | INTERNET_FACING | 98.0 (CRITICAL) | yes |\n\n## 4. Affected components\n\n- com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3 (maven)\n\n## 5. Potential impact\n\nDevelopment stub: no AI assessment or action has been performed.\n\n## 6. Measures taken or planned\n\nDevelopment stub: no AI assessment or action has been performed.\n\n## 7. Next steps\n\nDevelopment stub: no AI assessment or action has been performed.\n\n## Evidence\n\n- Change: VULNERABILITY CVE-2026-90001 (c5d514e1-4b54-4e63-85a7-9404cb22e6b4).\n- Source: nvd / CVE-2026-90001.\n- Source URL: not recorded\n- Source time: 2026-01-01T00:00:00Z\n- Source excerpt: Remote code execution in journey-lib before 1.2.4.\n- Journey payments settlement and reconciliation platform: CVE-2026-90001 affects com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3; dependency path com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name reaches service Journey payments settlement and reconciliation platform; owners: unassigned\n- Journey payments settlement and reconciliation platform: Impact score 98.0 (CRITICAL, material). CVE-2026-90001 scores 98.0 (CRITICAL) for Journey payments settlement and reconciliation platform: severity 0.98 (CVSS 3.1 base 9.8) x exposure 1.00 (INTERNET_FACING) x criticality 1.00 (CRITICAL); severity (CVSS 3.1 base 9.8) holds it down most, costing 2.0 points\n- Journey payments settlement and reconciliation platform: Affected service: Journey payments settlement and reconciliation platform (a42f9620-7cce-47a1-bc1e-21a6206df5b5), CRITICAL criticality, INTERNET_FACING.\n- Journey payments settlement and reconciliation platform: Service owners: none assigned.\n- Journey payments settlement and reconciliation platform: Match confidence: CONFIRMED.\n- Journey payments settlement and reconciliation platform: Code reachability: UNKNOWN. The service's code hasn't been read: link its repository and import the SBOM from it.\n- Journey payments settlement and reconciliation platform: Score calculation: severity 0.98 x exposure 1 x reachability 1 x criticality 1 x confidence 1 x 100 = 98.0 (rounded to one decimal).\n- Journey payments settlement and reconciliation platform: Score factor SEVERITY: CVSS 3.1 base 9.8; weight 0.98; limiting factor.\n- Journey payments settlement and reconciliation platform: Score factor EXPOSURE: INTERNET_FACING; weight 1; setting aegis.scoring.exposure.internet-facing.\n- Journey payments settlement and reconciliation platform: Score factor REACHABILITY: UNKNOWN; weight 1; setting aegis.scoring.reachability.imported.\n- Journey payments settlement and reconciliation platform: Score factor CRITICALITY: CRITICAL; weight 1; setting aegis.scoring.criticality.critical.\n- Journey payments settlement and reconciliation platform: Score factor CONFIDENCE: CONFIRMED; weight 1; setting aegis.scoring.confidence.confirmed.\n\n\n### Sources the AI draft quotes (unverified)\n\n> Cyber threat: vulnerability CVE-2026-90001, detected 2026-01-01T00:00:00Z: Remote code execution in journey-lib before 1.2.4.\n> Severity: CVSS 3.1 base score 9.8 (CRITICAL)\n> Affected services, as Aegis scored them:\n> - Journey payments settlement and reconciliation platform: CRITICAL criticality, INTERNET_FACING, impact score 98.0 (CRITICAL, material)\n> Affected components:\n> - com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3 (maven)\n> Evidence:\n> - Change: VULNERABILITY CVE-2026-90001 (c5d514e1-4b54-4e63-85a7-9404cb22e6b4).\n> - Source: nvd / CVE-2026-90001.\n> - Source URL: not recorded\n> - Source time: 2026-01-01T00:00:00Z\n> - Source excerpt: Remote code execution in journey-lib before 1.2.4.\n> - Journey payments settlement and reconciliation platform: CVE-2026-90001 affects com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name 1.2.3; dependency path com.aegisjourney.platform.shared.libraries:journey-lib-with-a-very-long-artifact-name reaches service Journey payments settlement and reconciliation platform; owners: unassigned\n> - Journey payments settlement and reconciliation platform: Impact score 98.0 (CRITICAL, material). CVE-2026-90001 scores 98.0 (CRITICAL) for Journey payments settlement and reconciliation platform: seve\n\n",
+   "status": "PROPOSED",
+   "createdBy": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+   "createdAt": "2026-11-05T05:32:41.547964Z",
+   "decidedBy": null,
+   "decidedAt": null,
+   "dismissReason": null,
+   "version": 0
+  },
+  "/api/users?page=0&size=500&sort=id%2Casc": {
+   "content": [
+    {
+     "id": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+     "email": "journey-analyst@example.com",
+     "displayName": "Journey Analyst",
+     "roles": [
+      "USER",
+      "ANALYST"
+     ],
+     "enabled": true,
+     "emailVerified": false,
+     "orgId": "ffe9745c-49cf-4340-b84c-f04437d23250",
+     "createdAt": "2026-11-05T05:28:49.997393Z"
+    },
+    {
+     "id": "7de703db-7dce-4813-a5e0-4f21d5ab9b81",
+     "email": "journey-admin@example.com",
+     "displayName": "Journey Admin",
+     "roles": [
+      "ORG_ADMIN",
+      "USER"
+     ],
+     "enabled": true,
+     "emailVerified": false,
+     "orgId": "ffe9745c-49cf-4340-b84c-f04437d23250",
+     "createdAt": "2026-11-05T05:28:51.609773Z"
+    }
+   ],
+   "empty": false,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 2,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 500,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 500,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 2,
+   "totalPages": 1
+  },
+  "/api/inventory/services?size=50&sort=name%2Casc": {
+   "content": [
+    {
+     "id": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+     "name": "Journey payments settlement and reconciliation platform",
+     "criticality": "CRITICAL",
+     "exposure": "INTERNET_FACING",
+     "repositoryUrl": null,
+     "repositoryBranch": null,
+     "sbomImportedAt": null,
+     "sbomImportSource": null,
+     "importScan": null,
+     "createdAt": "2026-11-05T05:29:37.306116Z",
+     "updatedAt": "2026-11-05T05:29:37.306116Z"
+    }
+   ],
+   "empty": false,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 1,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 50,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 50,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 1,
+   "totalPages": 1
+  },
+  "/api/audit/decisions/removed-services": [],
+  "/api/audit/decisions?page=0&size=25&sort=sequence%2Cdesc": {
+   "content": [
+    {
+     "id": "219f4a80-679e-40e9-ac10-004d63823ce7",
+     "sequence": 7,
+     "occurredAt": "2026-11-05T05:32:41.562277Z",
+     "subject": "REGULATOR_MEMO",
+     "subjectId": "4cc86311-eb81-4cc8-9053-f9839ccde3d8",
+     "responseId": "4cc86311-eb81-4cc8-9053-f9839ccde3d8",
+     "serviceId": null,
+     "serviceName": null,
+     "serviceIds": [
+      "a42f9620-7cce-47a1-bc1e-21a6206df5b5"
+     ],
+     "changeSignalId": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+     "changeTitle": "CVE-2026-90001",
+     "action": "DRAFTED",
+     "actorId": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+     "reason": null,
+     "score": 98,
+     "tier": "CRITICAL"
+    },
+    {
+     "id": "e2b12c80-7e8e-4f90-8adc-274b6ebad6fd",
+     "sequence": 6,
+     "occurredAt": "2026-11-05T05:30:05.906649Z",
+     "subject": "RISK_TICKET",
+     "subjectId": "be2dcfdf-d40e-4c7e-96d8-bd0a3e4b0dc6",
+     "responseId": "be2dcfdf-d40e-4c7e-96d8-bd0a3e4b0dc6",
+     "serviceId": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+     "serviceName": "Journey payments settlement and reconciliation platform",
+     "serviceIds": [
+      "a42f9620-7cce-47a1-bc1e-21a6206df5b5"
+     ],
+     "changeSignalId": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+     "changeTitle": "CVE-2026-90001",
+     "action": "FILED",
+     "actorId": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+     "reason": null,
+     "score": 98,
+     "tier": "CRITICAL"
+    },
+    {
+     "id": "d84f30af-92d2-41cf-94bf-65f7e413f818",
+     "sequence": 5,
+     "occurredAt": "2026-11-05T05:30:05.892225Z",
+     "subject": "RISK_TICKET",
+     "subjectId": "be2dcfdf-d40e-4c7e-96d8-bd0a3e4b0dc6",
+     "responseId": "be2dcfdf-d40e-4c7e-96d8-bd0a3e4b0dc6",
+     "serviceId": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+     "serviceName": "Journey payments settlement and reconciliation platform",
+     "serviceIds": [
+      "a42f9620-7cce-47a1-bc1e-21a6206df5b5"
+     ],
+     "changeSignalId": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+     "changeTitle": "CVE-2026-90001",
+     "action": "APPROVED",
+     "actorId": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+     "reason": null,
+     "score": 98,
+     "tier": "CRITICAL"
+    },
+    {
+     "id": "c903bb6a-0093-4f1a-97fe-848c34c20845",
+     "sequence": 4,
+     "occurredAt": "2026-11-05T05:29:53.892509Z",
+     "subject": "RISK_TICKET",
+     "subjectId": "be2dcfdf-d40e-4c7e-96d8-bd0a3e4b0dc6",
+     "responseId": "be2dcfdf-d40e-4c7e-96d8-bd0a3e4b0dc6",
+     "serviceId": "a42f9620-7cce-47a1-bc1e-21a6206df5b5",
+     "serviceName": "Journey payments settlement and reconciliation platform",
+     "serviceIds": [
+      "a42f9620-7cce-47a1-bc1e-21a6206df5b5"
+     ],
+     "changeSignalId": "c5d514e1-4b54-4e63-85a7-9404cb22e6b4",
+     "changeTitle": "CVE-2026-90001",
+     "action": "DRAFTED",
+     "actorId": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+     "reason": null,
+     "score": 98,
+     "tier": "CRITICAL"
+    }
+   ],
+   "empty": false,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 4,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 25,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 25,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 4,
+   "totalPages": 1
+  },
+  "/api/auth/config": {
+   "mode": "local",
+   "registrationEnabled": true,
+   "organizationSignupEnabled": true,
+   "methods": {
+    "emailOtp": true,
+    "totp": false,
+    "webauthn": false
+   }
+  },
+  "/api/auth/mfa/webauthn/credentials": [],
+  "/api/auth/mfa/status": {
+   "totpEnabled": false,
+   "recoveryCodesRemaining": 0
+  },
+  "admin:/api/auth/me": {
+   "id": "7de703db-7dce-4813-a5e0-4f21d5ab9b81",
+   "email": "journey-admin@example.com",
+   "displayName": "Journey Admin",
+   "roles": [
+    "ORG_ADMIN",
+    "USER"
+   ],
+   "enabled": true,
+   "emailVerified": false,
+   "orgId": "ffe9745c-49cf-4340-b84c-f04437d23250",
+   "createdAt": "2026-11-05T05:28:51.609773Z"
+  },
+  "admin:/api/orgs": [
+   {
+    "id": "ffe9745c-49cf-4340-b84c-f04437d23250",
+    "name": "Journey org",
+    "roles": [
+     "ORG_ADMIN"
+    ],
+    "status": "ACTIVE"
+   }
+  ],
+  "/api/admin/users?page=0&size=10&sort=createdAt%2Cdesc": {
+   "content": [
+    {
+     "id": "7de703db-7dce-4813-a5e0-4f21d5ab9b81",
+     "email": "journey-admin@example.com",
+     "displayName": "Journey Admin",
+     "roles": [
+      "ORG_ADMIN",
+      "USER"
+     ],
+     "enabled": true,
+     "emailVerified": false,
+     "orgId": "ffe9745c-49cf-4340-b84c-f04437d23250",
+     "createdAt": "2026-11-05T05:28:51.609773Z"
+    },
+    {
+     "id": "3b1a8418-4cd1-4fa3-9aa3-8e4e52eeab91",
+     "email": "journey-analyst@example.com",
+     "displayName": "Journey Analyst",
+     "roles": [
+      "USER",
+      "ANALYST"
+     ],
+     "enabled": true,
+     "emailVerified": false,
+     "orgId": "ffe9745c-49cf-4340-b84c-f04437d23250",
+     "createdAt": "2026-11-05T05:28:49.997393Z"
+    }
+   ],
+   "empty": false,
+   "first": true,
+   "last": true,
+   "number": 0,
+   "numberOfElements": 2,
+   "pageable": {
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 10,
+    "paged": true,
+    "sort": {
+     "empty": false,
+     "sorted": true,
+     "unsorted": false
+    },
+    "unpaged": false
+   },
+   "size": 10,
+   "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+   },
+   "totalElements": 2,
+   "totalPages": 1
+  },
+  "/api/integrations/github": {
+   "enabled": false,
+   "installUrl": null,
+   "connections": []
+  }
+ }
+}

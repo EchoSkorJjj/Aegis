@@ -11,8 +11,8 @@ import type { ReachabilityAssessmentItem, ReachabilitySearch, ReachabilityVerdic
 
 // Whether the code reaches the vulnerable part — by a call, the type of data it binds, a setting — not only a call.
 const VERDICT: Record<ReachabilityVerdict, { label: string; className: string }> = {
-  CALLED: { label: "Uses it", className: "bg-red-500/10 text-red-600 dark:text-red-400" },
-  NOT_CALLED: { label: "Doesn't use it", className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" },
+  CALLED: { label: "Uses it", className: "bg-red-500/10 text-red-800 dark:text-red-400" },
+  NOT_CALLED: { label: "Doesn't use it", className: "bg-emerald-500/10 text-emerald-800 dark:text-emerald-400" },
   CANT_TELL: { label: "Can't tell", className: "bg-muted text-muted-foreground" },
 };
 

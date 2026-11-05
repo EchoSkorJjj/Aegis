@@ -135,21 +135,21 @@ export function AdminUsersTable() {
       )}
       {/* Filters */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="w-full sm:max-w-xs">
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">
+        <label className="block w-full sm:max-w-xs">
+          <span className="mb-1 block text-xs font-medium text-muted-foreground">
             Search
-          </label>
+          </span>
           <Input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Email or name…"
           />
-        </div>
-        <div className="flex items-end gap-2">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+        </label>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-muted-foreground">
               Joined from
-            </label>
+            </span>
             <Input
               type="date"
               value={from}
@@ -158,11 +158,11 @@ export function AdminUsersTable() {
                 setPage(0);
               }}
             />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-muted-foreground">
               to
-            </label>
+            </span>
             <Input
               type="date"
               value={to}
@@ -171,7 +171,7 @@ export function AdminUsersTable() {
                 setPage(0);
               }}
             />
-          </div>
+          </label>
           {hasFilters && (
             <Button variant="ghost" onClick={clearFilters}>
               Clear
@@ -515,7 +515,7 @@ function StatusBadge({
       <span
         className={
           enabled
-            ? "inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400"
+            ? "inline-flex items-center gap-1.5 text-xs font-medium text-emerald-800 dark:text-emerald-400"
             : "inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
         }
       >
@@ -529,7 +529,7 @@ function StatusBadge({
         {enabled ? "Active" : "Disabled"}
       </span>
       {!emailVerified && (
-        <span className="text-xs text-amber-600 dark:text-amber-400">unverified</span>
+        <span className="text-xs text-amber-800 dark:text-amber-400">unverified</span>
       )}
     </div>
   );

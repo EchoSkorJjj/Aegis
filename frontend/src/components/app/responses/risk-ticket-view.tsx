@@ -906,7 +906,7 @@ function ServiceNowFields({ fields }: { fields: Record<string, string> }) {
           Copy fields
         </Button>
       </div>
-      <pre className="max-h-96 overflow-auto p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
+      <pre tabIndex={0} className="focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none max-h-96 overflow-auto p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
         {json}
       </pre>
     </section>

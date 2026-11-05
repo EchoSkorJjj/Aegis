@@ -8,6 +8,7 @@ import type { DateRange } from "react-day-picker";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 
 const ISO = "yyyy-MM-dd";
@@ -54,6 +55,8 @@ export function DateRangePicker({
     return start || end ? { from: start, to: end } : undefined;
   }, [from, to]);
 
+  const buttonId = React.useId();
+  const isMobile = useIsMobile();
   const hasValue = Boolean(from || to);
   const display = selected?.from
     ? selected.to
@@ -63,11 +66,12 @@ export function DateRangePicker({
 
   return (
     <div className={cn("w-full sm:w-auto", className)}>
-      <label className="mb-1 block text-xs font-medium text-muted-foreground">{label}</label>
+      <label htmlFor={buttonId} className="mb-1 block text-xs font-medium text-muted-foreground">{label}</label>
       <Popover>
         <PopoverTrigger
           render={
             <Button
+              id={buttonId}
               variant="outline"
               className={cn(
                 "h-9 w-full justify-start px-3 font-normal sm:w-64",
@@ -85,7 +89,7 @@ export function DateRangePicker({
             defaultMonth={selected?.from}
             selected={selected}
             onSelect={(range) => onChange({ from: toIso(range?.from), to: toIso(range?.to) })}
-            numberOfMonths={2}
+            numberOfMonths={isMobile ? 1 : 2}
             autoFocus
           />
           {hasValue && (

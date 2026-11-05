@@ -123,10 +123,14 @@ shows zero when zero was actually recorded. The selection survives period change
 | Build | `pnpm build` | Nothing else |
 | End to end | `pnpm test:e2e` | identity-service, the gateway and Mailhog |
 
-The end-to-end suite runs 74 Playwright tests in Chromium. Sign-up, sign-in, organizations and the admin pages run
+The end-to-end suite runs Playwright in Chromium. Sign-up, sign-in, organizations and the admin pages run
 against the real identity-service and gateway, reading the emailed sign-in codes from Mailhog. The other specs need
 no aegis-core: the estate and response pages are checked against a fake BFF in the browser, and aegis-core's own
 tests cover its rules.
+
+`accessibility.spec.ts` holds every page to the same bar, on data recorded from the real stack: at phone width
+nothing runs off the screen, every control can be reached by keyboard, and axe finds no WCAG A or AA failure, which
+includes a field without a label. A new page fails that spec until it is added to the spec's list.
 
 To run it locally, install the browser once:
 

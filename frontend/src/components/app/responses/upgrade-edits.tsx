@@ -10,7 +10,7 @@ export function UpgradeEditsTable({ edits: all }: { edits: UpgradeEdit[] }) {
   const following = all.filter((edit) => edit.override?.ifPresent);
   return (
     <div className="space-y-1.5">
-      <div className="overflow-x-auto rounded-md border">
+      <div tabIndex={0} className="focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none overflow-x-auto rounded-md border">
         <table className="w-full text-sm">
           <caption className="sr-only">What the pull request changes</caption>
           <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
