@@ -165,12 +165,17 @@ Where to go next:
 | ai-service | `pip install -e '.[dev]'`, then `pytest` | Nothing else |
 | frontend | `pnpm exec tsc --noEmit`, `pnpm lint`, `pnpm build` | Nothing else |
 | frontend end to end | `pnpm exec playwright install chromium`, then `pnpm test:e2e` | The stack running (`docker compose up`) |
+| full-stack journeys | From `frontend`: `e2e-full-stack/stack.sh up`, then `pnpm exec playwright test --config playwright.full-stack.config.ts` | Docker, JDK 21+, Maven, Python 3.12 |
 
 Run each from the service's folder. Every service has its own workflow in [`.github/workflows`](.github/workflows),
 run on the pushes and pull requests that touch it: `identity-service-ci`, `gateway-ci`, `aegis-core-ci`,
-`ai-service-ci` (ruff and pytest) and `frontend-e2e` (Playwright). `security-scanning` runs on every pull request
+`ai-service-ci` (ruff and pytest), `frontend-e2e` (Playwright) and `full-stack-e2e` (the core journeys through every
+real service). `security-scanning` runs on every pull request
 and every push to `develop` and `main` (below). The three Java services' `verify` includes their access tests,
 which read [`security/access-control.md`](security/access-control.md).
+
+[`testing/test-strategy.md`](testing/test-strategy.md) sets out what each kind of test is for, each service's coverage
+target and which test proves each story. CI reports coverage against the targets and fails below them.
 
 ### Security scanning
 

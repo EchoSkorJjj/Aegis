@@ -24,6 +24,7 @@ tracing = [
 ]
 dev = [
     "pytest>=8.2",
+    "pytest-cov>=5.0",
     "ruff>=0.6",
     "mypy>=1.11",
 ]
@@ -38,6 +39,10 @@ packages = ["src/ai_service"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
+
+[tool.coverage.run]
+source = ["ai_service"]
+branch = true
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
