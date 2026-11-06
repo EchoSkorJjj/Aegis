@@ -325,19 +325,19 @@ export function ResourceManager<T extends { id: string }>({
 
       {/* Filter bar */}
       <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
-        <div className="w-full sm:max-w-xs">
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Search</label>
+        <label className="block w-full sm:max-w-xs">
+          <span className="mb-1 block text-xs font-medium text-muted-foreground">Search</span>
           <Input
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
             placeholder={searchPlaceholder ?? "Search…"}
           />
-        </div>
+        </label>
         {selectFilters.map((filter) => {
           const options = filter.options ?? dynamicOptions[filter.name] ?? [];
           return (
-            <div key={filter.name} className="w-full sm:w-44">
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">{filter.label}</label>
+            <label key={filter.name} className="block w-full sm:w-44">
+              <span className="mb-1 block text-xs font-medium text-muted-foreground">{filter.label}</span>
               <select
                 className={cn(SELECT_CLASS)}
                 value={filterValues[filter.name] ?? ""}
@@ -350,7 +350,7 @@ export function ResourceManager<T extends { id: string }>({
                   </option>
                 ))}
               </select>
-            </div>
+            </label>
           );
         })}
         <DateRangePicker
@@ -418,7 +418,7 @@ export function ResourceManager<T extends { id: string }>({
           <TableHeader>
             <TableRow>
               {columns.map((column) => (
-                <TableHead key={column.header} className={column.className}>
+                <TableHead key={column.header} className={column.className} aria-sort={ariaSort(column.sortField, sort)}>
                   {column.sortField ? (
                     <SortButton label={column.header} field={column.sortField} sort={sort} onSort={toggleSort} />
                   ) : (
@@ -546,6 +546,12 @@ export function ResourceManager<T extends { id: string }>({
   );
 }
 
+function ariaSort(field: string | undefined, sort: string): "ascending" | "descending" | undefined {
+  const [current, dir] = sort.split(",");
+  if (!field || current !== field) return undefined;
+  return dir === "asc" ? "ascending" : "descending";
+}
+
 function SortButton({
   label,
   field,
@@ -566,7 +572,7 @@ function SortButton({
       className="inline-flex items-center gap-1 hover:text-foreground"
     >
       {label}
-      <span className={active ? "text-foreground" : "text-muted-foreground/40"}>
+      <span aria-hidden className={active ? "text-foreground" : "text-muted-foreground/40"}>
         {active ? (dir === "asc" ? "↑" : "↓") : "↕"}
       </span>
     </button>

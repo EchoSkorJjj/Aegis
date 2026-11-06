@@ -1,12 +1,33 @@
+"use client"
+
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
 function Table({ className, ...props }: React.ComponentProps<"table">) {
+  const container = React.useRef<HTMLDivElement>(null)
+
+  // A table wider than its container scrolls, and a keyboard can only scroll what it can focus. Only then: a table
+  // that fits shouldn't add a tab stop.
+  React.useEffect(() => {
+    const element = container.current
+    if (!element) return
+    const update = () => {
+      if (element.scrollWidth > element.clientWidth) element.setAttribute("tabindex", "0")
+      else element.removeAttribute("tabindex")
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(element)
+    if (element.firstElementChild) observer.observe(element.firstElementChild)
+    return () => observer.disconnect()
+  }, [])
+
   return (
     <div
+      ref={container}
       data-slot="table-container"
-      className="relative w-full overflow-x-auto"
+      className="relative w-full overflow-x-auto focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
     >
       <table
         data-slot="table"

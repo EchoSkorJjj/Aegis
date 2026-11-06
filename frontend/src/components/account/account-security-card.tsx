@@ -167,7 +167,7 @@ export function AccountSecurityCard() {
           <div className="text-sm">
             <div className="font-medium">Email verification</div>
             {user?.emailVerified ? (
-              <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-800 dark:text-emerald-400">
                 <CircleCheck className="size-3.5" />
                 Verified
               </span>

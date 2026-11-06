@@ -160,7 +160,7 @@ export function JiraIntegration() {
               {integration.issueType && <span className="text-muted-foreground"> as a {integration.issueType}</span>}
             </>
           ) : (
-            <span className="text-amber-600 dark:text-amber-400">
+            <span className="text-amber-800 dark:text-amber-400">
               No project chosen yet — risk tickets can&apos;t be filed until one is.
             </span>
           )}
@@ -272,7 +272,7 @@ function JiraProjectForm({
     <form onSubmit={save} aria-label="Where risk tickets go" className="space-y-3 rounded-md border p-4">
       <p className="text-sm font-medium">Where risk tickets go</p>
       {error && (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm text-red-800 dark:text-red-400">
           {error}
         </p>
       )}

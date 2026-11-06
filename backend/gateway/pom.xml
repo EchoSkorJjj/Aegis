@@ -22,6 +22,8 @@
         <!-- Spring Cloud "Oakwood" is the release train built on Spring Framework 7 / Spring Boot 4.
              2025.1.2 is compatible with Spring Boot 4.1. Bump in step with the Boot parent above. -->
         <spring-cloud.version>2025.1.2</spring-cloud.version>
+        <!-- Set by JaCoCo's agent; empty when it doesn't run, so Surefire's @{argLine} still resolves. -->
+        <argLine></argLine>
     </properties>
 
     <dependencyManagement>
@@ -84,6 +86,28 @@
 
     <build>
         <plugins>
+            <!-- Test coverage (CS203-108): `mvn verify` writes target/site/jacoco/jacoco.xml, which CI checks against
+                 testing/coverage-targets.json. See testing/test-strategy.md. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.16</version>
+                <executions>
+                    <execution>
+                        <id>jacoco-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>jacoco-report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

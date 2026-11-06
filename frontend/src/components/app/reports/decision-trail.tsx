@@ -544,7 +544,7 @@ function RecordDetail({
         {failed ? (
           <p className="text-sm text-muted-foreground">Could not load this record&apos;s snapshot. Please try again.</p>
         ) : record ? (
-          <pre className="max-h-80 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap break-words">
+          <pre tabIndex={0} className="focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none max-h-80 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap break-words">
             {JSON.stringify(record.state ?? null, null, 2)}
           </pre>
         ) : (

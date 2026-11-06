@@ -1,11 +1,17 @@
 package com.usermgmt.identity.user;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.Set;
 import java.util.UUID;
 
 import com.jayway.jsonpath.JsonPath;
+import com.usermgmt.identity.org.OrganizationMemberRepository;
 import com.usermgmt.identity.support.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.everyItem;
@@ -27,6 +33,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class OrgUserAdminIntegrationTest extends AbstractIntegrationTest {
 
     private record Owner(String email, String token, String orgId, String userId) {}
+
+    @Autowired
+    OrganizationMemberRepository members;
+
+    @Autowired
+    TransactionTemplate transactions;
 
     @Test
     void orgAdminManagesOnlyItsOwnTenant() throws Exception {
@@ -130,6 +142,101 @@ class OrgUserAdminIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[*].email", hasItem(ownerElsewhere)))
                 .andExpect(jsonPath("$.content[*].email", not(hasItem(serviceOwner))));
+    }
+
+    @Test
+    void orgAdminChangesAMembersRolesWithinItsOwnOrgOnly() throws Exception {
+        Owner a = signUpOrg("Org " + UUID.randomUUID());
+        Owner b = signUpOrg("Org " + UUID.randomUUID());
+        String email = "both-" + UUID.randomUUID() + "@example.com";
+        String id = inviteReturningId(a, email, "ANALYST");
+        inviteReturningId(b, email, "SERVICE_OWNER");
+
+        mvc.perform(put("/users/{id}/roles", id)
+                        .header("Authorization", "Bearer " + a.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"roles\":[\"COMPLIANCE_ADMIN\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.roles", hasItems("COMPLIANCE_ADMIN")))
+                .andExpect(jsonPath("$.roles", not(hasItem("ANALYST"))));
+
+        // The same person's membership of the other organization is untouched.
+        mvc.perform(get("/users/{id}", id).header("Authorization", "Bearer " + b.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.roles", hasItem("SERVICE_OWNER")))
+                .andExpect(jsonPath("$.roles", not(hasItem("COMPLIANCE_ADMIN"))));
+    }
+
+    @Test
+    void removingAMemberLeavesTheirAccountAndOtherOrganizations() throws Exception {
+        Owner a = signUpOrg("Org " + UUID.randomUUID());
+        Owner b = signUpOrg("Org " + UUID.randomUUID());
+        String email = "leaver-" + UUID.randomUUID() + "@example.com";
+        String id = inviteReturningId(a, email, "ANALYST");
+        inviteReturningId(b, email, "ANALYST");
+
+        mvc.perform(delete("/users/{id}", id).header("Authorization", "Bearer " + a.token()))
+                .andExpect(status().isNoContent());
+
+        mvc.perform(get("/users/{id}", id).header("Authorization", "Bearer " + a.token()))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/users/{id}", id).header("Authorization", "Bearer " + b.token()))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void orgAdminCannotModifyAnotherOrgAdmin() throws Exception {
+        Owner a = signUpOrg("Org " + UUID.randomUUID());
+        String second = inviteReturningId(a, "second-admin-" + UUID.randomUUID() + "@example.com", "ANALYST");
+        // Only a platform path makes a second org admin, so the test makes one directly.
+        transactions.executeWithoutResult(status -> members
+                .findByOrgIdAndUserId(UUID.fromString(a.orgId()), UUID.fromString(second)).orElseThrow()
+                .setRoles(Set.of(Role.ORG_ADMIN)));
+
+        mvc.perform(put("/users/{id}", second)
+                        .header("Authorization", "Bearer " + a.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonObject("displayName", "Renamed")))
+                .andExpect(status().isForbidden());
+        mvc.perform(put("/users/{id}/roles", second)
+                        .header("Authorization", "Bearer " + a.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"roles\":[\"ANALYST\"]}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(delete("/users/{id}", second).header("Authorization", "Bearer " + a.token()))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void orgAdminFiltersItsMembersByJoiningDate() throws Exception {
+        Owner a = signUpOrg("Org " + UUID.randomUUID());
+        String email = "dated-" + UUID.randomUUID() + "@example.com";
+        invite(a, email, "ANALYST");
+        Instant hourAgo = Instant.now().minus(1, ChronoUnit.HOURS);
+        Instant inAnHour = Instant.now().plus(1, ChronoUnit.HOURS);
+
+        mvc.perform(get("/users").param("from", hourAgo.toString()).param("to", inAnHour.toString())
+                        .param("size", "100").header("Authorization", "Bearer " + a.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[*].email", hasItem(email)));
+        mvc.perform(get("/users").param("to", hourAgo.toString())
+                        .param("size", "100").header("Authorization", "Bearer " + a.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[*].email", not(hasItem(email))));
+        mvc.perform(get("/users").param("from", inAnHour.toString())
+                        .param("size", "100").header("Authorization", "Bearer " + a.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[*].email", not(hasItem(email))));
+    }
+
+    private String inviteReturningId(Owner admin, String email, String role) throws Exception {
+        String created = mvc.perform(post("/users")
+                        .header("Authorization", "Bearer " + admin.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + email + "\",\"displayName\":\"Member\",\"roles\":[\"" + role + "\"]}"))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        return JsonPath.read(created, "$.id");
     }
 
     private void invite(Owner admin, String email, String role) throws Exception {

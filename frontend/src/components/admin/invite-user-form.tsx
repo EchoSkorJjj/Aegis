@@ -131,6 +131,7 @@ export function InviteUserForm({
                   key={value}
                   type="button"
                   size="sm"
+                  aria-pressed={selected}
                   variant={selected ? "default" : "outline"}
                   onClick={() =>
                     setRoles((prev) =>

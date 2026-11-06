@@ -1,0 +1,6 @@
+{
+  "aegis-core": { "line": 90, "branch": 75 },
+  "identity-service": { "line": 90, "branch": 72 },
+  "gateway": { "line": 90, "branch": 80 },
+  "ai-service": { "line": 95, "branch": 88 }
+}

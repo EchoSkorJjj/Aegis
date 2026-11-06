@@ -227,7 +227,7 @@ export function UpgradeProposalView({ proposalId }: { proposalId: string }) {
             {proposal.matchConfidence === "CONFIRMED" ? (
               "Confirmed — the installed version is inside the advisory's affected range"
             ) : (
-              <span className="text-amber-600 dark:text-amber-400">
+              <span className="text-amber-800 dark:text-amber-400">
                 Needs review — the match could not be fully confirmed
               </span>
             )}
@@ -256,7 +256,7 @@ export function UpgradeProposalView({ proposalId }: { proposalId: string }) {
         </div>
         <div className="space-y-3 p-4">
           <p className="font-medium break-words">{proposal.title}</p>
-          <pre className="max-h-[32rem] overflow-auto rounded-md bg-muted/40 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
+          <pre tabIndex={0} className="focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none max-h-[32rem] overflow-auto rounded-md bg-muted/40 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
             {proposal.body}
           </pre>
         </div>

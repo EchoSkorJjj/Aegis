@@ -55,7 +55,7 @@ import { canReadInventory } from "@/lib/roles";
 import { useAuth } from "@/providers/auth-provider";
 
 export function AppSidebar() {
-  const { isMobile, state, setOpen } = useSidebar();
+  const { isMobile, state, setOpen, setOpenMobile } = useSidebar();
   const pathname = usePathname();
   const { user, organizations, switchOrg, logout } = useAuth();
   // Anyone with a role beyond the USER baseline can open the member directory (read-only for the
@@ -154,7 +154,12 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarHeader>
 
-      <SidebarContent>
+      <SidebarContent
+        // On a phone the sidebar covers the page, so following a link closes it.
+        onClick={(event) => {
+          if (isMobile && (event.target as HTMLElement).closest("a")) setOpenMobile(false);
+        }}
+      >
         <SidebarGroup>
           <SidebarGroupLabel>Platform</SidebarGroupLabel>
           <SidebarGroupContent>

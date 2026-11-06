@@ -160,7 +160,7 @@ export function AccountMfaCard() {
             <>
               <div className="flex items-center justify-between gap-4">
                 <div className="text-sm">
-                  <div className="font-medium text-emerald-600 dark:text-emerald-400">Enabled</div>
+                  <div className="font-medium text-emerald-800 dark:text-emerald-400">Enabled</div>
                   <div className="text-muted-foreground">Your authenticator app is set up.</div>
                 </div>
                 <Button variant="outline" size="sm" onClick={() => setDisabling(true)}>

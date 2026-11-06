@@ -5,10 +5,12 @@ on:
     paths:
       - "backend/ai-service/**"
       - ".github/workflows/ai-service-ci.yml"
+      - "testing/**"
   pull_request:
     paths:
       - "backend/ai-service/**"
       - ".github/workflows/ai-service-ci.yml"
+      - "testing/**"
 
 permissions:
   contents: read
@@ -40,7 +42,11 @@ jobs:
 
       # Provider tests use httpx.MockTransport; no key or live LLM request is needed.
       - name: Run tests
-        run: pytest -q
+        run: pytest -q --cov --cov-report=term --cov-report=xml:coverage.xml
+
+      # Coverage against testing/coverage-targets.json, in the job summary; below target fails the job.
+      - name: Check coverage against targets
+        run: python3 ../../testing/check_coverage.py ai-service coverage.xml
 
       # Replay synthetic reference answers through the real guarded pipeline; no paid provider.
       - name: Evaluate golden draft cases

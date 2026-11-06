@@ -1,0 +1,26 @@
+# What the full-stack journey runs in Docker: its own database and mail inbox, in their own Compose project and on
+# their own ports, so it never touches the database of a developer's `docker compose up`.
+name: aegis-full-stack
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: identity
+      POSTGRES_USER: identity
+      POSTGRES_PASSWORD: identity
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U identity -d identity"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "127.0.0.1:51025:1025"
+      - "127.0.0.1:58025:8025"

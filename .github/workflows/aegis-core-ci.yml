@@ -6,11 +6,13 @@ on:
       - "backend/aegis-core/**"
       - ".github/workflows/aegis-core-ci.yml"
       - "security/access-control.md"   # the access tests read it
+      - "testing/**"                   # the coverage targets and their check
   pull_request:
     paths:
       - "backend/aegis-core/**"
       - ".github/workflows/aegis-core-ci.yml"
       - "security/access-control.md"   # the access tests read it
+      - "testing/**"                   # the coverage targets and their check
 
 jobs:
   build-and-test:
@@ -28,3 +30,16 @@ jobs:
       - name: Build and run integration tests
         working-directory: backend/aegis-core
         run: mvn -B verify
+
+      # Coverage against testing/coverage-targets.json, in the job summary; below target fails the job.
+      - name: Check coverage against targets
+        run: python3 testing/check_coverage.py aegis-core backend/aegis-core/target/site/jacoco/jacoco.xml
+
+      - name: Retain the coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aegis-core-coverage
+          path: backend/aegis-core/target/site/jacoco/
+          if-no-files-found: ignore
+          retention-days: 14
