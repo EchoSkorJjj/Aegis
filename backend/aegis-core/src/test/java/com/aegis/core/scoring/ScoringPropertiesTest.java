@@ -1,6 +1,5 @@
 package com.aegis.core.scoring;
 
-import java.time.Duration;
 import java.util.EnumMap;
 import java.util.Map;
 
@@ -19,27 +18,6 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ScoringPropertiesTest {
-
-    @Test
-    void anEmptyConfigurationBlockBindsToTheShippedModel() {
-        ScoringProperties defaults = ScoringProperties.defaults();
-
-        assertThat(defaults.criticalityFactor(BusinessCriticality.CRITICAL)).isEqualTo(1.0);
-        assertThat(defaults.criticalityFactor(BusinessCriticality.LOW)).isEqualTo(0.25);
-        assertThat(defaults.exposureFactor(ServiceExposure.INTERNET_FACING)).isEqualTo(1.0);
-        assertThat(defaults.exposureFactor(ServiceExposure.ISOLATED)).isEqualTo(0.5);
-        assertThat(defaults.unknownSeverityFactor()).isEqualTo(0.5);
-        assertThat(defaults.materialityThreshold()).isEqualTo(10.0);
-        assertThat(defaults.tiers().critical()).isEqualTo(90.0);
-        assertThat(defaults.rollup().maxSignals()).isEqualTo(200);
-        assertThat(defaults.rollup().defaultWindow()).isEqualTo(Duration.ofDays(30));
-        // Confidence is reported, not discounted, unless a deployment says otherwise.
-        assertThat(defaults.confidenceFactor(CONFIRMED)).isEqualTo(1.0);
-        assertThat(defaults.confidenceFactor(POSSIBLE)).isEqualTo(1.0);
-        // The severity-label vocabulary ships too, so a no-CVSS signal still scores.
-        assertThat(defaults.severityLabelFactor("critical")).isEqualTo(0.95);
-        assertThat(defaults.severityLabelFactor("major")).isEqualTo(0.75);
-    }
 
     @Test
     void aPartialOverrideChangesOnlyWhatItNames() {

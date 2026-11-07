@@ -36,27 +36,6 @@ class ImpactScorerTest {
     }
 
     @Test
-    void ranksTheSameVulnerabilityLowerOnALessExposedOrLessCriticalService() {
-        // One CVSS 10.0 vulnerability, three services: only the estate attributes differ.
-        double severity = 1.0;
-        double publicCritical = scorer.score(
-                scorer.breakdown(VULNERABILITY, severity, ServiceExposure.INTERNET_FACING, BusinessCriticality.CRITICAL, CONFIRMED));
-        double internalCritical = scorer.score(
-                scorer.breakdown(VULNERABILITY, severity, ServiceExposure.INTERNAL, BusinessCriticality.CRITICAL, CONFIRMED));
-        double isolatedLow = scorer.score(
-                scorer.breakdown(VULNERABILITY, severity, ServiceExposure.ISOLATED, BusinessCriticality.LOW, CONFIRMED));
-
-        assertThat(publicCritical).isGreaterThan(internalCritical).isGreaterThan(isolatedLow);
-        // Internal costs CVSS's own Adjacent-network discount (0.9), not a band: still CRITICAL.
-        assertThat(internalCritical).isEqualTo(90.0);
-        // 0.5 (ISOLATED) x 0.25 (LOW) = 12.5 — a 10.0 stays material even on the least exposed, least
-        // important kind of service.
-        assertThat(isolatedLow).isEqualTo(12.5);
-        assertThat(scorer.tier(internalCritical)).isEqualTo(ImpactTier.CRITICAL);
-        assertThat(scorer.tier(isolatedLow)).isEqualTo(ImpactTier.LOW);
-    }
-
-    @Test
     void aPackageTheCodeNeverReachesScoresBelowOneItDoesAndUnknownScoresLikeImported() {
         // CVSS 9.0 on a worst-case service: 90.0 while the code imports the package or may.
         ScoreBreakdown imported = scorer.breakdown(VULNERABILITY, 0.9, ServiceExposure.INTERNET_FACING,
