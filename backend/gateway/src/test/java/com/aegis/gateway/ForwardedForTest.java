@@ -17,11 +17,9 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -48,7 +46,7 @@ class ForwardedForTest {
 
     @BeforeEach
     void setUp() {
-        mvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
+        mvc = GatewayMockMvc.of(context);
         RECEIVED.set(null);
     }
 
@@ -100,9 +98,11 @@ class ForwardedForTest {
 
     private static void respond(HttpExchange exchange) throws IOException {
         RECEIVED.set(exchange.getRequestHeaders().getFirst("X-Forwarded-For"));
+        // These calls carry no body: a streamed one is refused (GatewayMockMvc).
+        boolean streamed = exchange.getRequestHeaders().containsKey("Transfer-Encoding");
         byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().add("Content-Type", "application/json");
-        exchange.sendResponseHeaders(200, body.length);
+        exchange.sendResponseHeaders(streamed ? 400 : 200, body.length);
         exchange.getResponseBody().write(body);
         exchange.close();
     }

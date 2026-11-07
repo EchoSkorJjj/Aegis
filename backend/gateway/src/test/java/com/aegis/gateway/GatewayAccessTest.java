@@ -28,7 +28,6 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.servlet.function.HandlerFunction;
 import org.springframework.web.servlet.function.RequestPredicate;
@@ -40,7 +39,6 @@ import org.springframework.web.util.pattern.PathPatternParser;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
-import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 
 /**
@@ -67,7 +65,7 @@ class GatewayAccessTest {
 
     @BeforeEach
     void setUp() {
-        mvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
+        mvc = GatewayMockMvc.of(context);
     }
 
     @AfterAll
@@ -181,7 +179,7 @@ class GatewayAccessTest {
         }
     }
 
-    /** A downstream service that answers every request with its own name. */
+    /** A downstream service that answers every request with its own name, and refuses a streamed body (none is sent). */
     private static HttpServer stub(String name) {
         try {
             HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -195,9 +193,10 @@ class GatewayAccessTest {
 
     private static void answer(HttpExchange exchange, String name) throws IOException {
         exchange.getRequestBody().readAllBytes();
-        byte[] body = name.getBytes(StandardCharsets.UTF_8);
+        boolean streamed = exchange.getRequestHeaders().containsKey("Transfer-Encoding");
+        byte[] body = (streamed ? "a bodiless call relayed with a streamed body" : name).getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().add("Content-Type", "text/plain");
-        exchange.sendResponseHeaders(200, body.length);
+        exchange.sendResponseHeaders(streamed ? 400 : 200, body.length);
         exchange.getResponseBody().write(body);
         exchange.close();
     }
