@@ -191,8 +191,9 @@ There is no retrieval-augmented generation yet, so LLM08 (vector and embedding w
 | B11.2 | I | A secret is committed | gitleaks scans the commits every pull request and push adds; the only exceptions are listed fixtures (`.gitleaks.toml`). | Platform | Mitigated |
 | B11.3 | T | Vulnerable code patterns are merged | CodeQL analyses the Java, TypeScript/JavaScript and Python code on every pull request and weekly (`.github/workflows/security-scanning.yml`); its check fails a pull request at the severity threshold set in the repository's code-scanning settings. | Platform | Mitigated |
 | B11.4 | T | The ai-service's Python dependencies aren't reviewed | **Accepted.** GitHub's dependency graph doesn't read a PEP 621 `pyproject.toml`. Revisit next: commit a lock file (or a `requirements.txt` export) the dependency graph reads. | AI | Accepted |
-| B11.5 | T | A compromised third-party action runs in CI | **Accepted.** Actions are pinned by major version tag, not commit SHA; the gitleaks binary is pinned and checksummed. Revisit when the repository holds deployment credentials in CI: pin every action by SHA. | Platform | Accepted |
+| B11.5 | T | A compromised third-party action runs in CI | **Accepted** for the workflows holding no AWS credentials: their actions are pinned by major version tag, not commit SHA; the gitleaks binary is pinned and checksummed. `build-images`, the one workflow that can push images to ECR, pins each action by commit SHA (CS203-233). Revisit when another workflow gets AWS or deployment credentials: pin its actions by SHA. | Platform | Accepted |
 | B11.6 | I, D | The AI evaluation's Groq key leaks from CI, or a pull request spends the account's quota | `ai-evaluation` (CS203-231) reads `GROQ_API_KEY` from a repository secret, which GitHub withholds from forks' pull requests and masks in logs; it runs only when the AI changes or on demand, one run at a time, inside the ai-service's token budgets; it sends only the synthetic golden corpus, never estate or user data. | AI | Mitigated |
+| B11.7 | T, E | An unreviewed image reaches ECR, or the image push credentials are misused | `build-images` (CS203-233) runs only on a push to `main`, which takes changes only through a pull request with an approving review (the repository's rulesets); it exchanges its OIDC token for `aegis-github-actions`, which trusts `main` alone and stores no key (`terraform/global/ci.tf`); the role can only push to the five `aegis/*` repositories, never deploy; every image is built before any is pushed; tags are immutable, so an image can't be replaced under its tag; ECR scans each image on push; an environment runs a new tag only when a person sets its `image_tag` and applies. | Platform | Mitigated |
 
 ## OWASP Top 10 for LLM Applications (2025)
 
@@ -244,7 +245,7 @@ its revisit condition is met.
 | B7.5 | A leaked internal service token can email members Aegis-worded items | Platform | Any sign of misuse (rotate) |
 | B10.6 | 7-day, single-region backups; no restore drill | Platform | Before prod holds customer data |
 | B11.4 | Python dependencies not reviewed | AI | Next sprint |
-| B11.5 | CI actions pinned by tag, not SHA | Platform | CI holds deployment credentials |
+| B11.5 | CI actions pinned by tag, not SHA, outside `build-images` | Platform | Another workflow gets AWS or deployment credentials |
 
 The data classification lists the retention gaps (no retention limit on several stores) as accepted decisions of
 the same kind.
