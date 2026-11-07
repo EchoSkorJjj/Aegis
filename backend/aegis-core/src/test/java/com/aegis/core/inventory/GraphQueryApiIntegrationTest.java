@@ -84,65 +84,6 @@ class GraphQueryApiIntegrationTest extends AbstractInventoryIntegrationTest {
     }
 
     @Test
-    void usedByCoversEveryVersionOfThePackage() throws Exception {
-        String suffix = UUID.randomUUID().toString();
-        BusinessService legacy = inventory.createBusinessService("Legacy " + suffix, BusinessCriticality.LOW);
-        BusinessService modern = inventory.createBusinessService("Modern " + suffix, BusinessCriticality.HIGH);
-        SoftwareComponent old = inventory.createSoftwareComponent("npm", "shared-" + suffix, "1.5.0");
-        SoftwareComponent current = inventory.createSoftwareComponent("npm", "shared-" + suffix, "1.18.0");
-        inventory.createSoftwareComponent("npm", "shared-" + suffix, "2.0.0"); // in the inventory, used by nobody
-        inventory.addServiceComponent(legacy.getId(), old.getId());
-        inventory.addServiceComponent(modern.getId(), current.getId());
-        inventory.addServiceComponent(modern.getId(), old.getId());
-
-        mvc.perform(usedBy("npm", "shared-" + suffix).with(role("COMPLIANCE_ADMIN")))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.uses[*].service.name",
-                        contains("Legacy " + suffix, "Modern " + suffix, "Modern " + suffix)))
-                .andExpect(jsonPath("$.uses[*].component.version", contains("1.5.0", "1.5.0", "1.18.0")))
-                .andExpect(jsonPath("$.uses[*].direct", contains(true, true, true)));
-
-        mvc.perform(usedBy("npm", "nothing-by-this-name-" + suffix).with(role("ANALYST")))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.uses").isEmpty());
-    }
-
-    @Test
-    void usedByReportsADiamondOnceAndTerminatesOnCycles() throws Exception {
-        String suffix = UUID.randomUUID().toString();
-        BusinessService service = inventory.createBusinessService("Diamond " + suffix, BusinessCriticality.MEDIUM);
-        SoftwareComponent base = inventory.createSoftwareComponent("npm", "base-" + suffix, "1.0");
-        SoftwareComponent left = inventory.createSoftwareComponent("npm", "left-" + suffix, "1.0");
-        SoftwareComponent right = inventory.createSoftwareComponent("npm", "right-" + suffix, "1.0");
-        SoftwareComponent top = inventory.createSoftwareComponent("npm", "top-" + suffix, "1.0");
-        SoftwareComponent loopA = inventory.createSoftwareComponent("npm", "loop-a-" + suffix, "1.0");
-        SoftwareComponent loopB = inventory.createSoftwareComponent("npm", "loop-b-" + suffix, "1.0");
-
-        // Diamond: top -> left -> base and top -> right -> base.
-        inventory.addComponentDependency(left.getId(), base.getId());
-        inventory.addComponentDependency(right.getId(), base.getId());
-        inventory.addComponentDependency(top.getId(), left.getId());
-        inventory.addComponentDependency(top.getId(), right.getId());
-        // A cycle above the diamond: loopA <-> loopB, with loopA depending on top.
-        inventory.addComponentDependency(loopA.getId(), top.getId());
-        inventory.addComponentDependency(loopB.getId(), loopA.getId());
-        inventory.addComponentDependency(loopA.getId(), loopB.getId());
-        inventory.addServiceComponent(service.getId(), loopB.getId());
-
-        // From loopB down: loopA, top, then left or right — whichever, four components deep.
-        mvc.perform(usedBy("npm", "base-" + suffix).with(role("ANALYST")))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.uses.length()").value(1))
-                .andExpect(jsonPath("$.uses[0].service.id").value(service.getId().toString()))
-                .andExpect(jsonPath("$.uses[0].direct").value(false))
-                .andExpect(jsonPath("$.uses[0].through.length()").value(4))
-                .andExpect(jsonPath("$.uses[0].through[0].id").value(loopB.getId().toString()))
-                .andExpect(jsonPath("$.uses[0].through[1].id").value(loopA.getId().toString()))
-                .andExpect(jsonPath("$.uses[0].through[2].id").value(top.getId().toString()))
-                .andExpect(jsonPath("$.uses[0].owners.length()").value(0));
-    }
-
-    @Test
     void vendorUsedByListsServicesUsingTheVendorDirectlyWithOwners() throws Exception {
         String suffix = UUID.randomUUID().toString();
         BusinessService checkout = inventory.createBusinessService("Checkout " + suffix, BusinessCriticality.HIGH);

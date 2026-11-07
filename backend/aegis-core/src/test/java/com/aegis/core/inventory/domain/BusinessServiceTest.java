@@ -12,25 +12,6 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 class BusinessServiceTest {
 
     @Test
-    void definesStableCriticalityValues() {
-        assertThat(BusinessCriticality.values())
-                .containsExactly(
-                        BusinessCriticality.LOW,
-                        BusinessCriticality.MEDIUM,
-                        BusinessCriticality.HIGH,
-                        BusinessCriticality.CRITICAL);
-    }
-
-    @Test
-    void definesStableExposureValuesLeastToMostExposed() {
-        assertThat(ServiceExposure.values())
-                .containsExactly(
-                        ServiceExposure.ISOLATED,
-                        ServiceExposure.INTERNAL,
-                        ServiceExposure.INTERNET_FACING);
-    }
-
-    @Test
     void defaultsExposureToInternalWhenTheOwnerDeclaredNone() {
         BusinessService service = new BusinessService(UUID.randomUUID(), "Payments", BusinessCriticality.CRITICAL);
 

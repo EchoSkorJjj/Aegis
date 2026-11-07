@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -18,6 +19,13 @@ from ai_service.evaluation.runner import (
 )
 from ai_service.llm.groq import GroqLlmClient
 from ai_service.llm.stub import StubLlmClient
+
+
+def positive(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("Must be at least 1")
+    return number
 
 
 def nonnegative(value: str) -> float:
@@ -44,7 +52,7 @@ async def run(args) -> int:
         config = offline_settings()
         client = GoldenClient() if args.provider == "golden" else StubLlmClient()
     try:
-        report = await evaluate(corpus, client, config, delay_seconds=args.delay_seconds)
+        report = await evaluate(corpus, client, config, delay_seconds=args.delay_seconds, runs=args.runs)
     finally:
         await client.aclose()
     if args.baseline:
@@ -52,11 +60,14 @@ async def run(args) -> int:
                                        args.max_score_drop)
     write_report(report, args.output)
     summary = report["summary"]
-    print(f"{report['mode']}: {summary['passed']}/{summary['cases']} cases passed; "
+    print(f"{report['mode']}: {summary['passed']}/{summary['cases']} cases passed over {args.runs} run(s) each; "
           f"quality proxy {summary['mean_auto_score']}/100. Human review pending.")
     print(f"Reports: {args.output / 'report.json'}, {args.output / 'report.md'}, "
           f"{args.output / 'human-review.json'}")
-    return int(summary["failed"] > 0 or not report.get("comparison", {}).get("passed", True))
+    # Against a baseline, only a regression fails the run; on its own, any case below its threshold does.
+    if "comparison" in report:
+        return int(not report["comparison"]["passed"])
+    return int(summary["failed"] > 0)
 
 
 def main(argv=None) -> int:
@@ -68,11 +79,17 @@ def main(argv=None) -> int:
     parser.add_argument("--output", type=Path, default=Path("evaluation-results/latest"))
     parser.add_argument("--baseline", type=Path, help="Prior report.json for the same corpus selection/rubric")
     parser.add_argument("--max-score-drop", type=nonnegative, default=0)
+    parser.add_argument("--runs", type=positive, default=1,
+                        help="Runs per case; a case passes on its pass rate (rubric.RUN_PASS_RATE)")
     parser.add_argument("--delay-seconds", type=nonnegative, default=0,
                         help="Pause between live cases; configured rate/token budgets remain enforced")
     args = parser.parse_args(argv)
     try:
-        return asyncio.run(run(args))
+        code = asyncio.run(run(args))
+        if os.environ.get("GITHUB_STEP_SUMMARY"):
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as job:
+                job.write((args.output / "summary.md").read_text(encoding="utf-8"))
+        return code
     except (OSError, ValueError, KeyError, TypeError):
         # Corpus/provider/baseline exceptions may contain supplied text; never echo them.
         print("Evaluation configuration failed: check corpus, case selection, provider and baseline.",

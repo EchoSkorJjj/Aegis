@@ -203,7 +203,13 @@ the two passwords again.
 
 Steps 3 and 4 don't depend on each other: do them in either order, as long as both come before step 5.
 
-ECR tags are immutable, so every push needs a new tag: the commit. Commit first. From the repository root:
+Merging a pull request into `main` does this step: the `build-images` workflow (`.github/workflows/build-images.yml`)
+builds all five images, then pushes them under the commit's first 12 characters, and its run's summary names the tag.
+It needs the `AWS_ROLE_ARN` secret ([global, step 5](../global/README.md#5-let-the-image-workflow-push)). A merge into
+`develop` pushes nothing.
+
+By hand, for a commit not on `main`: ECR tags are immutable, so every push needs a new tag, the commit. Commit first.
+From the repository root:
 
 ```bash
 REGISTRY=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.ap-southeast-1.amazonaws.com
@@ -237,7 +243,7 @@ Then open `https://dev.aegisops.pro`: sign up, confirm the email code (step 2's 
 
 | To                                | Do                                                                                                                                                                                                                                                                                                           |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Deploy a new version              | Step 4 with the new commit, then`image_tag` in `terraform.tfvars` and `terraform apply`                                                                                                                                                                                                                |
+| Deploy a new version              | Merge into `main`, then set `image_tag` in `terraform.tfvars` to the tag the `build-images` run names in its summary and `terraform apply`. ECS rolls back a deploy whose tasks fail their health checks |
 | Change a secret                   | `aws ssm put-parameter --overwrite …`, then redeploy the service that reads it: `aws ecs update-service --cluster aegis-dev --service aegis-dev-<service> --force-new-deployment`                                                                                                                       |
 | Rotate the database passwords     | Overwrite both, run step 3 again, then redeploy identity-service and aegis-core straight away (new connections fail in between)                                                                                                                                                                              |
 | Rotate the signing key            | Overwrite`identity/jwt-private-key`, redeploy identity-service; signed-in users get new tokens through the BFF                                                                                                                                                                                             |

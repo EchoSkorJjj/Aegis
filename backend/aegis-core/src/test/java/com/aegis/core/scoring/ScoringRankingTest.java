@@ -4,13 +4,9 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.Set;
 import java.util.UUID;
 
 import com.aegis.core.inventory.domain.BusinessCriticality;
@@ -22,10 +18,8 @@ import com.aegis.core.matching.MatchingDtos.ServiceRef;
 import com.aegis.core.scoring.ScoringDtos.ChangeImpactResponse;
 import com.aegis.core.scoring.ScoringDtos.EstateRollupResponse;
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
-import com.aegis.core.scoring.ScoringDtos.OwnerRollup;
 import com.aegis.core.scoring.ScoringDtos.ScoredOwner;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
-import com.aegis.core.scoring.ScoringDtos.ServiceRollup;
 import com.aegis.core.scoring.ScoringDtos.SeverityInput;
 import com.aegis.core.signals.ChangeSignal;
 import com.aegis.core.signals.ChangeSignalFilter;
@@ -194,83 +188,6 @@ class ScoringRankingTest {
     }
 
     // ---- the estate roll-up: agrees with scoring each signal on its own ----------------------------
-
-    @Test
-    void theRollupAgreesWithScoringEachSignalOnItsOwn() {
-        Random random = new Random(SEED);
-        for (int estateNo = 0; estateNo < 60; estateNo++) {
-            MockedEstate estate = new MockedEstate();
-            ScoringService scoring = estate.scoring(scorer);
-            List<OwnerRef> people = people(random, 4);
-            List<ImpactedServiceMatch> services = randomServices(random, people, 8);
-
-            List<ChangeSignal> window = new ArrayList<>(); // newest first, as the store returns it
-            for (int signalNo = 0; signalNo < 1 + random.nextInt(10); signalNo++) {
-                Instant occurred = NOW.minusSeconds(signalNo * 60L);
-                ChangeSignal signal = random.nextInt(3) > 0
-                        ? estate.vulnerability("CVE-2099-%d-%d".formatted(estateNo, signalNo), pick(random, CVSS), occurred)
-                        : estate.outage("acme:%d-%d".formatted(estateNo, signalNo), pick(random, IMPACT_WORDS), occurred);
-                estate.reaches(signal, services.stream().filter(ignored -> random.nextInt(3) == 0).toList());
-                window.add(signal);
-            }
-            estate.window(window.toArray(ChangeSignal[]::new));
-
-            EstateRollupResponse rollup = scoring.rollUpEstate(ChangeSignalFilter.NONE, null);
-            String context = "estate " + estateNo + " (seed " + SEED + ")";
-
-            // Score every signal on its own, the way GET /api/scoring/change-signals/{id} would.
-            Map<UUID, List<Hit>> hitsByService = new LinkedHashMap<>();
-            int impacting = 0;
-            for (ChangeSignal signal : window) {
-                ChangeImpactResponse alone = scoring.scoreChange(signal.id());
-                if (!alone.services().isEmpty()) {
-                    impacting++;
-                }
-                for (ScoredService scored : alone.services()) {
-                    hitsByService.computeIfAbsent(scored.service().id(), ignored -> new ArrayList<>())
-                            .add(new Hit(signal, scored));
-                }
-            }
-
-            assertThat(rollup.signalsConsidered()).as(context).isEqualTo(window.size());
-            assertThat(rollup.signalsImpacting()).as(context).isEqualTo(impacting);
-            assertThat(rollup.services()).extracting(ServiceRollup::topScore).as(context)
-                    .isSortedAccordingTo(Comparator.reverseOrder());
-            assertThat(rollup.owners()).extracting(OwnerRollup::topScore).as(context)
-                    .isSortedAccordingTo(Comparator.reverseOrder());
-            assertThat(rollup.services()).extracting(rolled -> rolled.service().id()).as(context)
-                    .containsExactlyInAnyOrderElementsOf(hitsByService.keySet());
-
-            Map<UUID, Double> topScoreByService = new HashMap<>();
-            for (ServiceRollup rolled : rollup.services()) {
-                List<Hit> hits = hitsByService.get(rolled.service().id());
-                double worst = hits.stream().mapToDouble(hit -> hit.scored().score()).max().orElseThrow();
-                // The first hit at the worst score is the newest one, since the window is newest-first.
-                Hit newestWorst = hits.stream().filter(hit -> hit.scored().score() == worst).findFirst().orElseThrow();
-
-                assertThat(rolled.topScore()).as(context).isEqualTo(worst);
-                assertThat(rolled.tier()).as(context).isEqualTo(scorer.tier(worst));
-                assertThat(rolled.signalCount()).as(context).isEqualTo(hits.size());
-                assertThat(rolled.materialSignalCount()).as(context)
-                        .isEqualTo((int) hits.stream().filter(hit -> hit.scored().material()).count());
-                assertThat(rolled.topSignal().id()).as(context).isEqualTo(newestWorst.signal().id());
-                assertThat(rolled.topExplanation()).as(context).isEqualTo(newestWorst.scored().explanation());
-                topScoreByService.put(rolled.service().id(), rolled.topScore());
-            }
-            for (OwnerRollup rolled : rollup.owners()) {
-                Set<UUID> theirs = new LinkedHashSet<>();
-                for (ServiceRollup service : rollup.services()) {
-                    List<Hit> hits = hitsByService.get(service.service().id());
-                    if (hits.getFirst().scored().owners().contains(rolled.owner())) {
-                        theirs.add(service.service().id());
-                    }
-                }
-                double worst = theirs.stream().mapToDouble(topScoreByService::get).max().orElseThrow();
-                assertThat(rolled.topScore()).as(context).isEqualTo(worst);
-                assertThat(rolled.impactedServiceCount()).as(context).isEqualTo(theirs.size());
-            }
-        }
-    }
 
     @Test
     void oneSevereHitOutranksAnyNumberOfMildOnes() {

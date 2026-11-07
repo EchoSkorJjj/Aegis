@@ -148,8 +148,9 @@ and is stopped between demos. Prod is written but not applied yet.
   master password is RDS's own, kept in Secrets Manager. Everything is encrypted with AWS-managed keys.
 - **Dev runs on Fargate Spot, prod on regular Fargate.** Setting `desired_count = 0` stops the services between
   demos.
-- **Images are built for `linux/amd64` and pushed to ECR by hand** for now. A push role for GitHub Actions is ready
-  for when a workflow does it.
+- **Images are built for `linux/amd64` and pushed to ECR when a pull request merges into `main`** (`build-images`),
+  tagged with the commit, through a GitHub Actions role that can only push. Deploying is setting an environment's
+  `image_tag` to that tag and applying; ECS rolls back a deploy whose tasks fail their health checks.
 
 Where to go next:
 - [terraform/README.md](terraform/README.md): the layout and how to run it.
@@ -222,7 +223,7 @@ backend/
   ai-service/         drafting, in Python
 frontend/             Next.js UI and backend-for-frontend
 security/             threat model, data classification, and the access-control table the access tests read
-.github/workflows/    CI per service, and security scanning (secrets, dependencies, code)
+.github/workflows/    CI per service, security scanning (secrets, dependencies, code), images to ECR on a merge into main
 .gitleaks.toml        the test fixtures gitleaks allows, each with why
 terraform/            AWS: bootstrap, global, environments/dev and prod, modules
 ops/                  Prometheus metrics/alerts, Grafana dashboard/provisioning and runbooks

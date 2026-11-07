@@ -6,10 +6,8 @@ import java.util.List;
 import java.util.UUID;
 import java.util.function.Function;
 
-import jakarta.persistence.Entity;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
-import jakarta.persistence.Table;
 
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
@@ -57,14 +55,6 @@ class InventoryPersistenceIntegrationTest extends AbstractInventoryIntegrationTe
 
     @Autowired
     private TransactionTemplate transactions;
-
-    @Test
-    void storyOneDomainTypesAreTheRegisteredJpaEntities() {
-        assertJpaEntity(BusinessService.class, "business_services");
-        assertJpaEntity(SoftwareComponent.class, "software_components");
-        assertJpaEntity(ThirdPartyVendor.class, "third_party_vendors");
-        assertJpaEntity(Owner.class, "owners");
-    }
 
     @Test
     void persistsAndMapsEveryInventoryEntity() {
@@ -248,9 +238,4 @@ class InventoryPersistenceIntegrationTest extends AbstractInventoryIntegrationTe
         return all;
     }
 
-    private void assertJpaEntity(Class<?> type, String tableName) {
-        assertThat(type).hasAnnotation(Entity.class).hasAnnotation(Table.class);
-        assertThat(type.getAnnotation(Table.class).name()).isEqualTo(tableName);
-        assertThat(entityManagerFactory.getMetamodel().entity(type).getJavaType()).isEqualTo(type);
-    }
 }

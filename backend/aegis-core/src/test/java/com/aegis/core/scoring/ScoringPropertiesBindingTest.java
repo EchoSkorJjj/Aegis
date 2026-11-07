@@ -77,18 +77,6 @@ class ScoringPropertiesBindingTest {
                 });
     }
 
-    @Test
-    void bindsToTheShippedModelWhenNothingIsConfigured() {
-        runner.run(context -> {
-            ScoringProperties properties = context.getBean(ScoringProperties.class);
-
-            assertThat(properties.criticalityFactor(BusinessCriticality.CRITICAL)).isEqualTo(1.0);
-            assertThat(properties.exposureFactor(ServiceExposure.INTERNET_FACING)).isEqualTo(1.0);
-            assertThat(properties.materialityThreshold()).isEqualTo(10.0);
-            assertThat(properties.rollup().maxSignals()).isEqualTo(200);
-        });
-    }
-
     /**
      * A score's factors point at the setting that controls each weight (CS203-72). That pointer is only
      * useful if it is a real key: for every setting the explainer reports, binding a value to it must

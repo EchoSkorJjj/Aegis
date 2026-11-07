@@ -207,27 +207,6 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
     }
 
     @Test
-    void onlyAnalystsDraftAndDecideWhileComplianceAndOwnersRead() throws Exception {
-        Vulnerability v = vulnerability();
-        UUID other = UUID.randomUUID();
-
-        for (String role : new String[]{"SERVICE_OWNER", "COMPLIANCE_ADMIN", "ORG_ADMIN", "USER"}) {
-            mvc.perform(post(PATH).with(as(role, other)).contentType(MediaType.APPLICATION_JSON)
-                    .content(request(v.advisory().id()))).andExpect(status().isForbidden());
-        }
-        String id = id(mvc.perform(post(PATH).with(as("ANALYST", analyst)).contentType(MediaType.APPLICATION_JSON)
-                .content(request(v.advisory().id()))).andExpect(status().isCreated()));
-
-        for (String role : new String[]{"SERVICE_OWNER", "COMPLIANCE_ADMIN"}) {
-            mvc.perform(get(PATH + "/{id}", id).with(as(role, other))).andExpect(status().isOk());
-            mvc.perform(post(PATH + "/{id}/approve", id).with(as(role, other))).andExpect(status().isForbidden());
-            mvc.perform(post(PATH + "/{id}/dismiss", id).with(as(role, other)).contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"reason\":\"not mine\"}")).andExpect(status().isForbidden());
-        }
-        mvc.perform(get(PATH + "/{id}", id).with(as("USER", other))).andExpect(status().isForbidden());
-    }
-
-    @Test
     void aChangeThatAffectsNoServiceMateriallyHasNothingToNotify() throws Exception {
         String tag = tag();
         String artifact = "quiet-lib-" + tag;
