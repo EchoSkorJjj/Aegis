@@ -293,6 +293,9 @@ python -m ai_service.evaluation --output evaluation-results/next --baseline eval
 
 # Explicit paid-provider evaluation only; use your process environment's GROQ_API_KEY
 python -m ai_service.evaluation --provider groq --case upgrade-maven --output evaluation-results/groq-maven
+
+# What CI runs on an AI change (CS203-231): every case three times, against the committed baseline
+python -m ai_service.evaluation --provider groq --runs 3 --baseline evaluation-baseline.json --max-score-drop 10 --output evaluation-results/groq
 ```
 
 On Windows use `.\.venv\Scripts\python.exe` in place of `python`. `--case` can be repeated;
@@ -311,8 +314,21 @@ have a separate pass rate and are excluded from quality averages. `mean_auto_sco
 quality generations as zero; `mean_generated_auto_score` covers produced drafts only, alongside
 `generation_success_rate`, so availability is visible separately from narrative quality.
 
-Exit codes: **0** proxy checks passed; **1** failed cases or regressions; **2** invalid corpus,
-selection, provider configuration or incompatible baseline. Passing automated checks leaves
+**Against the real model in CI (CS203-231).** The workflow `ai-evaluation` runs every case three times
+against Groq whenever a prompt, a capability, the LLM layer, the evaluation or `schemas.py` changes, and
+on demand, and compares the result with the committed `evaluation-baseline.json`. A case passes when its
+quality checks pass on two runs in three and its constraints hold on every run (`rubric.RUN_PASS_RATE`,
+`rubric.CONSTRAINTS`; see the rubric's "Runs and pass rate"). A case that met its threshold in the baseline
+and no longer does, or whose mean score drops by more than 10 points, fails the run; a case already below
+its threshold in the baseline is reported, not failed. The job summary shows each draft type's and
+capability's pass rate and mean score; the full reports are a build artifact. It needs the
+`GROQ_API_KEY` repository secret, and one run costs about 90,000 tokens (about 1,000 a call, 84 calls,
+paced by the 7,000-tokens-a-minute budget: some 15 minutes), so runs never overlap. To re-baseline on
+purpose (a new corpus or rubric version, or an accepted change in quality), run the CI command without
+`--baseline`, copy its `report.json` over `evaluation-baseline.json`, and say why in the pull request.
+
+Exit codes: **0** proxy checks passed; **1** failed cases (no baseline) or regressions (against a baseline);
+**2** invalid corpus, selection, provider configuration or incompatible baseline. Passing automated checks leaves
 human review pending and never approves a response. Complete the separate review file using the
 rubric and retain it with the reports for E14. This story provides that handoff, not the full E14
 benchmark/reporting application. CI runs offline replay, uploads its reports, and checks packaged

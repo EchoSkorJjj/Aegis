@@ -11,7 +11,7 @@ is done when its acceptance criteria appear in the table at the end, each pointi
 | Integration | Spring Boot + Testcontainers Postgres | A real PostgreSQL, as a plain role so row-level security applies as on RDS | Business flows through the REST API: RBAC, tenancy, state machines, migrations, the decision trail |
 | Architecture | ArchUnit | The compiled classes | aegis-core's module boundaries (`PackageStructureArchTest`) |
 | Access | The access tests | Each service's security rules | Every endpoint against [`security/access-control.md`](../security/access-control.md); a new endpoint fails the build until it is listed |
-| AI evaluation | `python -m ai_service.evaluation` | Golden cases through the guarded pipeline, offline | Draft quality against a rubric; no paid provider in CI |
+| AI evaluation | `python -m ai_service.evaluation` | Golden cases through the guarded pipeline: offline on every change, and against the real model (Groq), three runs each, when the AI changes | Draft quality against a rubric: the replay gates the pipeline; the real-model run gates prompt and model changes against a committed baseline |
 | Browser contract | Playwright against a fake BFF (`frontend/e2e`) | The real UI, faked responses | What each page shows and sends for each role and state, and accessibility |
 | Account journeys | Playwright (`frontend/e2e`) | The real identity-service and gateway | Sign-up, sign-in with its emailed code, organizations, admin |
 | Full-stack journeys | Playwright (`frontend/e2e-full-stack`) | Every real service, with only NVD and Atlassian faked at the network | The product working as one: from an advisory arriving to a decision on record |
@@ -20,8 +20,9 @@ Put a test at the lowest layer that can prove the behaviour. Rules and edge case
 a journey proves the parts connect, not every case. The rules for keeping shared-database tests independent are in
 `AGENTS.md` section 8.
 
-**Nothing in CI reaches a real outside system.** The AI runs on its offline stub, and `AbstractIntegrationTest` pins
-the integrations off. The full-stack journeys point the real NVD connector and Jira adapter at
+**Only the AI evaluation reaches an outside system from CI.** `ai-evaluation` sends the synthetic golden cases to Groq
+when a prompt, a capability, the LLM layer or the evaluation changes, or on demand. Everywhere else the AI runs on its
+offline stub, and `AbstractIntegrationTest` pins the integrations off. The full-stack journeys point the real NVD connector and Jira adapter at
 `frontend/e2e-full-stack/fake-upstreams.mjs`.
 
 ## Coverage targets
@@ -72,14 +73,10 @@ Open stories come first. When a story opens, add its acceptance criteria here wi
 
 | Story | Acceptance criterion | Test |
 |---|---|---|
-| CS203-131 usable everywhere | Every page works at phone width | `accessibility.spec.ts`: each page at 360px, nothing past the screen edge |
-| | Every control is reachable by keyboard | `accessibility.spec.ts`: tabbing reaches every visible control on each page; keyboard journeys for the skip link, the phone sidebar, the link picker and approving a response |
-| | Form fields have labels | `accessibility.spec.ts`: axe's `label` and `select-name` rules (WCAG A/AA) on each page |
-| | A page added later is held to the same | `accessibility.spec.ts`: "every page in the app is in the list above" |
-| CS203-230 test strategy | A written strategy sets coverage targets per service | This file, `coverage-targets.json` |
-| | CI reports coverage against them | `check_coverage.py` in each service's workflow |
-| | Every open story's criteria are covered by a test | This table |
-| | Playwright covers sign-in to an approved response against the full stack | `e2e-full-stack/journey.spec.ts` |
+| CS203-231 AI evaluation against the real model | CI runs the golden cases against the real model when the AI changes, and on demand, and compares the result with a committed baseline | `.github/workflows/ai-evaluation.yml`, `backend/ai-service/evaluation-baseline.json` |
+| | A case is judged over several runs: quality on two in three, its constraints on every run | `test_evaluation.py`: `test_a_case_passes_when_it_meets_the_pass_rate_on_two_of_three_runs`, `test_one_run_breaking_a_constraint_fails_the_case_however_the_others_score` |
+| | A case that met its threshold in the baseline and no longer does, or whose mean score drops beyond the limit, fails the run | `test_a_case_that_met_its_threshold_in_the_baseline_and_no_longer_does_regresses`, `test_a_mean_score_drop_regresses_only_beyond_the_limit` |
+| | Each run's scores per draft type appear in the job summary | `test_each_draft_type_reports_its_pass_rate_and_mean_score_in_the_job_summary` |
 
 ### Built
 
@@ -98,8 +95,11 @@ Open stories come first. When a story opens, add its acceptance criteria here wi
 | E10-2 search | By service, person, decision and date | `DecisionTrailSearchIntegrationTest`, `decision-trail.spec.ts` |
 | E10-3 export | PDF and CSV for a period | `EvidenceExportIntegrationTest`, `EvidenceExportCorrectnessIntegrationTest`, `evidence-export.spec.ts`, `core-journeys.spec.ts` |
 | E11-1 dashboard | Open items by service and owner, with a trend | `RiskPostureIntegrationTest`, `dashboard.spec.ts` |
+| E11-2 usable everywhere | Every page at phone width, by keyboard, with labelled fields; a new page is held to the same | `accessibility.spec.ts` |
 | E11-3 code usage | Where the code imports each dependency | `ImportScannerTest`, `CodeUsageTest`, `reachability.spec.ts` |
 | E11-4 usage in the score | Not imported ranks lower | `ReachabilityTest`, `ScoringCalibrationTest` |
 | E11-5 AI suggestion | A suggestion beside the score, never in it | `ReachabilityAssessmentIntegrationTest`, `ai-suggestion.spec.ts` |
 | E12-3 access review | Every endpoint's required role | `GatewayAccessTest`, `IdentityAccessIntegrationTest`, `AccessControlIntegrationTest` |
+| E13 observability | Pipeline metrics, the decision queue gauge, the alerts and one trace across services | `DecisionQueueMetricsTest`, `PipelineMetricsIntegrationTest`, `ops/alerts.test.yml`, `PipelineTracingTest`, `GatewayTracingTest`, `test_observability.py` |
+| E14-1 test strategy | Coverage targets per service, checked in CI; the core journeys through the real services | `check_coverage.py`, `journey.spec.ts`, `core-journeys.spec.ts` |
 | Tenancy (ADR section 6) | One organization never sees another's data | `MatchingTenantIsolationIntegrationTest`, `DecisionTrailIsolationIntegrationTest`, `core-journeys.spec.ts` |

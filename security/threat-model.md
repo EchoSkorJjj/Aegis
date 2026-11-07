@@ -192,6 +192,7 @@ There is no retrieval-augmented generation yet, so LLM08 (vector and embedding w
 | B11.3 | T | Vulnerable code patterns are merged | CodeQL analyses the Java, TypeScript/JavaScript and Python code on every pull request and weekly (`.github/workflows/security-scanning.yml`); its check fails a pull request at the severity threshold set in the repository's code-scanning settings. | Platform | Mitigated |
 | B11.4 | T | The ai-service's Python dependencies aren't reviewed | **Accepted.** GitHub's dependency graph doesn't read a PEP 621 `pyproject.toml`. Revisit next: commit a lock file (or a `requirements.txt` export) the dependency graph reads. | AI | Accepted |
 | B11.5 | T | A compromised third-party action runs in CI | **Accepted.** Actions are pinned by major version tag, not commit SHA; the gitleaks binary is pinned and checksummed. Revisit when the repository holds deployment credentials in CI: pin every action by SHA. | Platform | Accepted |
+| B11.6 | I, D | The AI evaluation's Groq key leaks from CI, or a pull request spends the account's quota | `ai-evaluation` (CS203-231) reads `GROQ_API_KEY` from a repository secret, which GitHub withholds from forks' pull requests and masks in logs; it runs only when the AI changes or on demand, one run at a time, inside the ai-service's token budgets; it sends only the synthetic golden corpus, never estate or user data. | AI | Mitigated |
 
 ## OWASP Top 10 for LLM Applications (2025)
 

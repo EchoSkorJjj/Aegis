@@ -8,7 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from ai_service.capabilities.draft import _ticket_text
-from ai_service.core.errors import BadRequest, ServiceUnavailable
+from ai_service.core.errors import BadRequest, RateLimited, ServiceUnavailable
 from ai_service.evaluation.__main__ import main
 from ai_service.evaluation.cases import Corpus, load_corpus
 from ai_service.evaluation.rubric import WEIGHTS, _contains, grade, grade_assessment, grade_look_for
@@ -75,9 +75,8 @@ def test_all_golden_references_pass_actual_drafting_pipeline(golden_report):
     assert golden_report["summary"]["mean_auto_score"] == 100
     assert golden_report["summary"]["guardrail_cases"] == 5
     assert golden_report["summary"]["provider_calls"] == 28
-    assert golden_report["summary"]["by_capability"] == {
-        "draft": {"cases": 20, "passed": 20}, "assess": {"cases": 8, "passed": 8},
-        "look_for": {"cases": 5, "passed": 5}}
+    assert {kind: (group["cases"], group["passed"]) for kind, group in golden_report["summary"]["by_capability"].items()} \
+        == {"draft": (20, 20), "assess": (8, 8), "look_for": (5, 5)}
     assert golden_report["mode"] == "reference_replay"
     assert golden_report["summary"]["human_review"] == "pending"
     for case in golden_report["cases"]:
@@ -175,13 +174,92 @@ def test_invalid_provider_output_is_failed_not_counted_as_a_success(corpus):
     assert report["summary"]["mean_auto_score"] == 0
 
 
-def test_baseline_detects_score_and_pass_regressions(golden_report):
+@pytest.mark.parametrize("score,regressed", [(90.0, False), (89.9, True)])
+def test_a_mean_score_drop_regresses_only_beyond_the_limit(golden_report, score, regressed):
     changed = copy.deepcopy(golden_report)
-    changed["cases"][0]["grading"]["auto_score"] = 99
-    assert compare(changed, golden_report)["regressions"] == ["ticket-vulnerability"]
-    assert compare(changed, golden_report, max_score_drop=1)["passed"]
+    changed["cases"][0]["score"] = score
+    assert (compare(changed, golden_report, max_score_drop=10)["regressions"] == ["ticket-vulnerability"]) is regressed
+
+
+def test_a_case_that_met_its_threshold_in_the_baseline_and_no_longer_does_regresses(golden_report):
+    changed = copy.deepcopy(golden_report)
     changed["cases"][0]["passed"] = False
     assert not compare(changed, golden_report, max_score_drop=100)["passed"]
+    assert compare(golden_report, changed, max_score_drop=100)["passed"]  # failing then, passing now: no regression
+
+
+class Answers(GoldenClient):
+    """The case's reference answer, except on the calls listed in ``wrong``, which get that answer instead."""
+
+    def __init__(self, wrong: dict[int, dict]):
+        self.wrong, self.call = wrong, 0
+
+    async def generate_json(self, **kwargs):
+        self.call += 1
+        if self.call in self.wrong:
+            reference, self.reference = self.reference, self.wrong[self.call]
+            try:
+                return await super().generate_json(**kwargs)
+            finally:
+                self.reference = reference
+        return await super().generate_json(**kwargs)
+
+
+def one(corpus, case_id):
+    return corpus.model_copy(update={"cases": [next(case for case in corpus.cases if case.id == case_id)]})
+
+
+@pytest.mark.parametrize("wrong_calls,passed", [({3}, True), ({2, 3}, False)])
+def test_a_case_passes_when_it_meets_the_pass_rate_on_two_of_three_runs(corpus, wrong_calls, passed):
+    case = next(case for case in corpus.cases if case.id == "upgrade-maven")
+    vague = {"content": "Review the dependency.", "cited_passage_ids": case.reference["cited_passage_ids"]}
+    report = asyncio.run(evaluate(one(corpus, "upgrade-maven"), Answers(dict.fromkeys(wrong_calls, vague)),
+                                  offline_settings(), runs=3))
+    result = report["cases"][0]
+    assert result["run_pass_rate"] == round((3 - len(wrong_calls)) / 3, 4)
+    assert result["passed"] is passed
+    assert result["constraint_failures"] == []
+
+
+def test_one_run_breaking_a_constraint_fails_the_case_however_the_others_score(corpus):
+    # Call 2 cites a passage it was never sent (and so does its validation retry, call 3): an invalid output.
+    invented = {"content": "Draft.", "cited_passage_ids": ["unknown"]}
+    report = asyncio.run(evaluate(one(corpus, "upgrade-maven"), Answers({2: invented, 3: invented}),
+                                  offline_settings(), runs=3))
+    result = report["cases"][0]
+    assert result["run_pass_rate"] == round(2 / 3, 4)
+    assert result["constraint_failures"] == ["invalid_output"]
+    assert result["passed"] is False
+
+
+def test_a_full_minute_is_waited_out_rather_than_counted_as_a_failed_run(corpus):
+    class LimitedOnce(GoldenClient):
+        limited = False
+
+        async def generate_json(self, **kwargs):
+            if not self.limited:
+                self.limited = True
+                raise RateLimited("LLM token rate limit reached; try again later", retry_after=7)
+            return await super().generate_json(**kwargs)
+
+    waits = []
+
+    async def wait(seconds):
+        waits.append(seconds)
+
+    report = asyncio.run(evaluate(one(corpus, "upgrade-maven"), LimitedOnce(), offline_settings(), wait=wait))
+    assert waits == [7]
+    assert report["cases"][0]["passed"] is True
+
+
+def test_each_draft_type_reports_its_pass_rate_and_mean_score_in_the_job_summary(golden_report, tmp_path,
+                                                                                    monkeypatch):
+    assert golden_report["summary"]["by_draft_type"]["memo"] == {
+        "cases": 6, "passed": 6, "run_pass_rate": 1.0, "mean_score": 100.0}
+    job_summary = tmp_path / "step-summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(job_summary))
+    assert main(["--case", "memo-cyber-threat", "--output", str(tmp_path / "run")]) == 0
+    assert "| memo | 1 | 1 | 100% | 100.0 |" in job_summary.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("failure,outcome", [
@@ -335,6 +413,9 @@ def test_cli_exit_codes_baseline_and_selection(tmp_path):
     assert main(["--output", str(baseline)]) == 0
     assert main(["--output", str(tmp_path / "comparison"), "--baseline", str(baseline / "report.json")]) == 0
     assert main(["--provider", "stub", "--output", str(tmp_path / "stub")]) == 1
+    # Against a baseline only a regression fails: cases that already failed there and still do don't.
+    assert main(["--provider", "stub", "--output", str(tmp_path / "stub-again"),
+                 "--baseline", str(tmp_path / "stub" / "report.json")]) == 0
     assert main(["--case", "upgrade-maven", "--output", str(tmp_path / "one")]) == 0
     assert main(["--case", "unknown-case", "--output", str(tmp_path / "unknown")]) == 2
     assert main(["--model", "unused", "--output", str(tmp_path / "invalid")]) == 2

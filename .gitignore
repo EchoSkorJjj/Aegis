@@ -40,3 +40,6 @@ dist/
 
 # Local draft-evaluation outputs (E8 story 9); CI retains its reports as artifacts
 /backend/ai-service/evaluation-results/
+# Local coverage outputs (pytest --cov; CI checks its own against testing/coverage-targets.json)
+/backend/ai-service/.coverage
+/backend/ai-service/coverage.xml
