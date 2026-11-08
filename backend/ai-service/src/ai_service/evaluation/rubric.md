@@ -1,4 +1,4 @@
-# Draft and assessment quality rubric — quality.v3
+# Draft and assessment quality rubric — quality.v4
 
 This rubric evaluates the AI **narrative** supplied to aegis-core: risk-ticket sections, upgrade
 rationale, and regulator-memo sections. Core's final templates, exact edits, matching/scoring,
@@ -106,3 +106,25 @@ pattern redaction cannot identify every unlabelled name, encoded secret or unkno
 
 The harness exports local artifacts for E14; it does not create an E14 backend, load production
 findings, send a message, decide a response, or run a paid provider implicitly.
+
+## Runs and pass rate (quality.v4, CS203-231)
+
+A real model answers the same input differently from run to run, so one green run proves nothing.
+`--runs N` runs each case N times, and the thresholds are fixed in `rubric.py` before any run:
+
+- **Quality** must pass on at least two runs in three (`RUN_PASS_RATE`). Wording may differ between
+  runs; a run fails only when a required property is missing.
+- **Constraints** must hold on every run (`CONSTRAINTS`): output the pipeline accepts, no citation of
+  anything not sent, nothing sensitive, no instruction or claim to have acted, and no search term
+  that names no source or a secret. One violating run fails the case whatever the others score.
+- An expected **blocked** case must be blocked, without a provider call, on every run.
+
+Each case reports its run pass rate, mean score and range, and the failure types across its runs.
+Against a baseline (`--baseline`, same corpus, rubric and run count), only a **regression** fails a
+run, judged on what a few runs can measure (thresholds fixed in `runner.py`): a draft type's or
+capability's mean score falling more than 5 points, a case's more than 15, more runs breaking a
+constraint than the baseline had plus 2, or an expected blocked case not blocked on every run. A case
+that changed verdict is listed for review, not failed on: near its pass rate, it changes between runs
+of the same code. A model or prompt change is
+measured against the baseline it replaces: re-baseline only on purpose, with the reason in the
+pull request. A full minute of the token budget is waited out, never counted as a failed run.

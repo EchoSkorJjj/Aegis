@@ -53,3 +53,15 @@ Verified once it reads `true`, `SUCCESS`, `SUCCESS`. Production access and the S
 [`../modules/ses-domain/README.md`](../modules/ses-domain/README.md).
 
 The environments need step 3 too: their HTTPS certificates are validated through the same zone.
+
+## 5. Let the image workflow push
+
+`build-images` (`.github/workflows/build-images.yml`) pushes the images when a pull request merges into `main`, as
+the role `aegis-github-actions` (`ci.tf`: trusted for `main` alone, push only). It reads the role's ARN from the
+repository secret `AWS_ROLE_ARN`; a secret, so the public run logs don't show the account id. From this folder:
+
+```bash
+terraform output -raw github_actions_role_arn | gh secret set AWS_ROLE_ARN --repo EchoSkorJjj/Aegis
+```
+
+Then `gh secret list --repo EchoSkorJjj/Aegis` lists it. Set it once; a new role (after a destroy) needs it set again.

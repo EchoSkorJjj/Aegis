@@ -69,7 +69,7 @@ Companion to [threat-model.md](threat-model.md); story CS203-146 (E12-2). As of 
 | GitHub installation tokens | Secret | Memory only, minted per job, one repository, one hour | aegis-core only | An hour | GitHub |
 | A GitHub sign-in token (when connecting), a token pasted for an import | Secret | Never stored; the sign-in token is revoked after the check | aegis-core only | The request | GitHub, the repository host |
 | Pending connections (OAuth state) | Secret | `github_connect_states`, `jira_connect_states` | aegis-core only | 10 minutes, single-use | — |
-| Deployment secrets: JWT signing key, TOTP and integration encryption keys, service tokens, database passwords, SMTP login, GitHub App key and secret, Jira client secret, Groq and NVD API keys | Secret | SSM SecureString parameters (AWS); `.env` (git-ignored) or documented placeholders locally | The services that use them, at start | Until rotated | Each only to its own provider (the Groq key to Groq, and so on) |
+| Deployment secrets: JWT signing key, TOTP and integration encryption keys, service tokens, database passwords, SMTP login, GitHub App key and secret, Jira client secret, Groq and NVD API keys | Secret | SSM SecureString parameters (AWS); `.env` (git-ignored) or documented placeholders locally; the Groq key also as a GitHub Actions secret for the AI evaluation | The services that use them, at start | Until rotated | Each only to its own provider (the Groq key to Groq, and so on) |
 
 ### Operations
 
@@ -95,6 +95,7 @@ Monitoring services need operator access controls before remote hosting (threat 
 | Destination | What | When | Safeguards |
 |---|---|---|---|
 | LLM provider (Groq, only with `LLM_PROVIDER=groq`; the default stub sends nothing) | Published change descriptions; Aegis's facts (services, packages, versions, vendors, scores, the number of owners); for assessments, a fix summary, search counts and up to 6 code excerpts with paths | Drafting a response or memo; asking for, or drafting a ticket that triggers, an assessment | Redacted on both sides, no personal data or repository address, budgets (threat model B6) |
+| LLM provider (Groq), from CI | The synthetic golden corpus (`golden_cases.json`): made-up advisories, contexts and code excerpts, no estate or user data | The `ai-evaluation` workflow (CS203-231): an AI change or on demand | Synthetic data only; the key is a repository secret (threat model B11.6) |
 | Amazon SES (from identity-service) | Account emails (verification, sign-in codes, password reset, invitations); owner notifications: the item's title, service name and a link into the app | Account flows; the notification job | Sent only to the account's own verified address; notification links are the app's own (B7.2) |
 | Jira (the organization's site) | A risk ticket's title, description, labels, priority, due date | When a person approves it | Approval gate; text-only descriptions (B6.4) |
 | GitHub | Clones and file reads of linked repositories; on approval, a commit to an `aegis/` branch and a draft pull request | Imports, assessments, approvals | Installation tokens per job (B8.2); drafts only, never merged (B8.3) |
