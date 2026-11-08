@@ -46,7 +46,7 @@ are written the way the team already knows. The reactive flavour is `spring-clou
 
 ## Version
 
-- Spring Boot **4.1.1** (parent).
+- Spring Boot **4.1.2** (parent).
 - Spring Cloud **2025.1.2** ("Oakwood"), the release train built on Spring Framework 7 / Spring Boot 4. Bump
   `spring-cloud.version` in `pom.xml` in step with the Boot parent.
 
