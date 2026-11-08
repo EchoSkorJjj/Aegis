@@ -225,6 +225,55 @@ def test_a_case_the_guardrails_must_block_regresses_unless_blocked_on_every_run(
         {"kind": "not_blocked", "id": "memo-injection-blocked", "baseline": True, "now": False}]
 
 
+def _unanswered(report, case_id, capability):
+    """The case's every run refused by the provider, scored as the runner scores one: zero."""
+    case = _case(report, case_id)
+    for run in case["runs"]:
+        run.update(outcome="unavailable", passed=False, auto_score=0)
+    case.update(outcome="unavailable", passed=False, run_pass_rate=0.0, score=0.0)
+    report["summary"]["by_capability"][capability]["mean_score"] = 4.8
+
+
+def test_runs_the_provider_never_answered_make_the_comparison_inconclusive_not_a_regression(golden_report):
+    # As in CI when Groq's quota ran out: a refused run scores zero, which says nothing about quality.
+    changed = copy.deepcopy(golden_report)
+    _unanswered(changed, "assess-called", "assess")
+    assert compare(changed, golden_report) == {
+        "baseline_run_id": golden_report["run_id"], "unanswered_runs": 1, "all_runs": 33,
+        "regressions": [], "changed": [], "passed": False}
+
+
+def test_a_guardrail_left_unblocked_regresses_even_when_the_provider_refused_runs(golden_report):
+    # Blocking happens before any provider call, and a constraint breaks only in an answered run, so a refusal can't
+    # cause either: they are still regressions.
+    changed = copy.deepcopy(golden_report)
+    _unanswered(changed, "assess-called", "assess")
+    _case(changed, "memo-injection-blocked")["passed"] = False
+    comparison = compare(changed, golden_report)
+    assert comparison["unanswered_runs"] == 1
+    assert comparison["regressions"] == [
+        {"kind": "not_blocked", "id": "memo-injection-blocked", "baseline": True, "now": False}]
+
+
+def test_the_job_summary_calls_a_comparison_with_unanswered_runs_inconclusive(golden_report):
+    changed = copy.deepcopy(golden_report)
+    _unanswered(changed, "assess-called", "assess")
+    changed["comparison"] = compare(changed, golden_report)
+    text = job_summary(changed)
+    assert "Inconclusive: the provider didn't answer 1 of 33 runs" in text
+    assert "no scores were compared with the baseline" in text
+    assert "Guardrail and constraint regressions: none." in text
+    assert "Regressions against the baseline" not in text
+
+
+def test_a_baseline_the_provider_did_not_fully_answer_is_rejected(golden_report):
+    # Its refused runs would score zero and hide any later fall in quality.
+    baseline = copy.deepcopy(golden_report)
+    _unanswered(baseline, "assess-called", "assess")
+    with pytest.raises(ValueError, match="answered every run"):
+        compare(golden_report, baseline)
+
+
 def test_the_job_summary_counts_runs_the_provider_never_answered(corpus):
     # So a provider outage reads as one, not as a fall in quality.
     class Unavailable(GoldenClient):
