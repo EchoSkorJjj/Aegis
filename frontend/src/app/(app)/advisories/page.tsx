@@ -30,9 +30,9 @@ const SELECT_CLASS =
   "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none";
 
 const SIGNAL_TYPE: Record<SignalType, { label: string; className: string }> = {
-  VULNERABILITY: { label: "Vulnerability", className: "bg-red-500/10 text-red-600 dark:text-red-400" },
-  VENDOR_OUTAGE: { label: "Vendor outage", className: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
-  SECURITY_NEWS: { label: "Security news", className: "bg-sky-500/10 text-sky-600 dark:text-sky-400" },
+  VULNERABILITY: { label: "Vulnerability", className: "bg-red-500/10 text-red-800 dark:text-red-400" },
+  VENDOR_OUTAGE: { label: "Vendor outage", className: "bg-amber-500/10 text-amber-800 dark:text-amber-400" },
+  SECURITY_NEWS: { label: "Security news", className: "bg-sky-500/10 text-sky-800 dark:text-sky-400" },
 };
 
 const TYPE_OPTIONS: { value: SignalType; label: string }[] = [
@@ -152,14 +152,14 @@ export default function AdvisoriesPage() {
 
       {/* Filter bar */}
       <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
-        <div className="w-full sm:max-w-xs">
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Search</label>
+        <label className="block w-full sm:max-w-xs">
+          <span className="mb-1 block text-xs font-medium text-muted-foreground">Search</span>
           <Input
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
             placeholder="Title or identifier…"
           />
-        </div>
+        </label>
         <FilterSelect label="Type" value={type} onChange={setType} allLabel="All types">
           {TYPE_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
@@ -276,13 +276,13 @@ function FilterSelect({
   children: React.ReactNode;
 }) {
   return (
-    <div className="w-full sm:w-44">
-      <label className="mb-1 block text-xs font-medium text-muted-foreground">{label}</label>
+    <label className="block w-full sm:w-44">
+      <span className="mb-1 block text-xs font-medium text-muted-foreground">{label}</span>
       <select className={cn(SELECT_CLASS)} value={value} onChange={(event) => onChange(event.target.value)}>
         <option value="">{allLabel}</option>
         {children}
       </select>
-    </div>
+    </label>
   );
 }
 
@@ -334,11 +334,11 @@ function SeverityBadge({ severity }: { severity: string | null }) {
   if (!severity) return <span className="text-muted-foreground">—</span>;
   const key = severity.toUpperCase();
   const className = key.includes("CRIT")
-    ? "bg-red-500/10 text-red-600 dark:text-red-400"
+    ? "bg-red-500/10 text-red-800 dark:text-red-400"
     : key.includes("HIGH") || key.includes("IMPORT")
-      ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+      ? "bg-amber-500/10 text-amber-800 dark:text-amber-400"
       : key.includes("MED") || key.includes("MODER")
-        ? "bg-sky-500/10 text-sky-600 dark:text-sky-400"
+        ? "bg-sky-500/10 text-sky-800 dark:text-sky-400"
         : "bg-muted text-muted-foreground";
   return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${className}`}>{severity}</span>;
 }

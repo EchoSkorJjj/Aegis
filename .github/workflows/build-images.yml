@@ -1,0 +1,87 @@
+name: build-images
+
+# Builds the five services' images and pushes them to ECR, each tagged with the first 12 characters of the commit,
+# when a change reaches main: a merged pull request (main takes no direct pushes). Only main (CS203-233): one set of
+# images for the one environment that runs, since every push is ECR storage and another tag to deploy; develop's own
+# CI already builds and tests each service. Every image is built before any is pushed, so a failed build pushes
+# nothing. Deploying stays Terraform's: set image_tag in the environment's terraform.tfvars to the tag in this run's
+# summary, then terraform apply (terraform/environments/README.md). A failed run is re-run from the Actions page: an
+# image already pushed under its tag is skipped, as ECR's tags are immutable.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  # The OIDC token exchanged for the push role (terraform/global/ci.tf), which trusts main alone.
+  id-token: write
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      AWS_REGION: ap-southeast-1
+      SERVICES: identity-service gateway aegis-core ai-service frontend
+    steps:
+      # This job can push images, so each action is pinned by commit, not tag (threat model B11.5).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the push role is set
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+        run: |
+          if [ -z "$AWS_ROLE_ARN" ]; then
+            echo "::error::Add the AWS_ROLE_ARN repository secret (terraform/global/README.md, step 5)."
+            exit 1
+          fi
+          echo "TAG=${GITHUB_SHA::12}" >> "$GITHUB_ENV"
+
+      # linux/amd64 because Fargate runs these as X86_64; no attestations, so each tag is one image manifest. Only the
+      # images are kept between builds: the next build gets the disk the last one's build stages took.
+      - name: Build every image
+        run: |
+          for service in $SERVICES; do
+            context="backend/$service"
+            if [ "$service" = frontend ]; then context=frontend; fi
+            echo "::group::aegis/$service:$TAG"
+            docker buildx build --platform linux/amd64 --provenance=false --load -t "aegis/$service:$TAG" "$context"
+            docker builder prune --all --force > /dev/null
+            echo "::endgroup::"
+          done
+
+      # The repository is public, and so are its logs: the account id is masked, and the role's ARN is a secret.
+      - name: Sign in to AWS as the push role
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: Push every image
+        run: |
+          registry="$(aws sts get-caller-identity --query Account --output text).dkr.ecr.$AWS_REGION.amazonaws.com"
+          aws ecr get-login-password | docker login --username AWS --password-stdin "$registry"
+          {
+            echo "## Images \`$TAG\`"
+            echo
+            echo "| Image | |"
+            echo "| --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for service in $SERVICES; do
+            if aws ecr describe-images --repository-name "aegis/$service" --image-ids imageTag="$TAG" > /dev/null 2>&1; then
+              result="already in ECR"
+            else
+              docker tag "aegis/$service:$TAG" "$registry/aegis/$service:$TAG"
+              docker push --quiet "$registry/aegis/$service:$TAG"
+              result=pushed
+            fi
+            echo "| \`aegis/$service:$TAG\` | $result |" >> "$GITHUB_STEP_SUMMARY"
+          done
+          {
+            echo
+            echo "To deploy: set \`image_tag = \"$TAG\"\` in \`terraform/environments/<env>/terraform.tfvars\`, then"
+            echo "\`terraform apply\` there. A deploy whose tasks fail their health checks rolls back by itself."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,36 @@
+name: observability-ci
+
+on:
+  push:
+    paths:
+      - "ops/**"
+      - "docker-compose.yml"
+      - ".github/workflows/observability-ci.yml"
+  pull_request:
+    paths:
+      - "ops/**"
+      - "docker-compose.yml"
+      - ".github/workflows/observability-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  monitoring-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose
+        run: docker compose -f docker-compose.yml config --quiet
+      - name: Validate dashboard JSON
+        run: python -m json.tool ops/grafana/dashboards/aegis-operations.json > /dev/null
+      - name: Validate Prometheus configuration
+        run: >-
+          docker run --rm --entrypoint promtool
+          -v "$PWD/ops:/etc/prometheus:ro"
+          prom/prometheus:latest check config /etc/prometheus/prometheus.yml
+      - name: Test alert thresholds and recovery
+        run: >-
+          docker run --rm --entrypoint promtool
+          -v "$PWD/ops:/etc/prometheus:ro" -w /etc/prometheus
+          prom/prometheus:latest test rules alerts.test.yml

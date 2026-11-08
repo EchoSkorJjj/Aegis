@@ -26,9 +26,9 @@ variable "github_repository" {
 }
 
 variable "github_branches" {
-  description = "Branches whose workflows may push images."
+  description = "Branches whose workflows may push images: main alone, where build-images runs."
   type        = list(string)
-  default     = ["main", "develop"]
+  default     = ["main"]
 }
 
 variable "mail_from_subdomain" {

@@ -28,6 +28,12 @@ test("the privacy notice is public and says what Aegis keeps from Jira and GitHu
   await expect(reachability).toContainText("the fix commit's changes from its public host");
   await expect(reachability).toContainText("never the code");
   await expect(reachability).toContainText("It never changes an impact score or decides anything.");
+  // CS203-130: the dashboard's daily records keep owners' display names as they were, after they leave.
+  const history = page.getByRole("region", { name: "Dashboard history" });
+  await expect(history).toContainText("the owner's display name as they were that day");
+  await expect(history).toContainText("It records no email addresses.");
+  await expect(history).toContainText("keep an owner's name after they are unassigned or leave the organization");
+  await expect(history).toContainText("does not delete them on its own");
   await expect(page.getByRole("region", { name: "Contact" })).toContainText("Contact whoever runs this Aegis deployment.");
 });
 

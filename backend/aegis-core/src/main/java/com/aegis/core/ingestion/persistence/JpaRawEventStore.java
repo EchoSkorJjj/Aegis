@@ -12,6 +12,8 @@ import java.util.UUID;
 import com.aegis.core.ingestion.RawEvent;
 import com.aegis.core.ingestion.RawEventStore;
 import com.aegis.core.ingestion.StoredRawEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
@@ -25,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Repository
 class JpaRawEventStore implements RawEventStore {
+    private static final Logger log = LoggerFactory.getLogger(JpaRawEventStore.class);
 
     /** External ids longer than this are keyed by hash instead, keeping {@code dedup_key} within its column. */
     private static final int MAX_EXTERNAL_ID = 512;
@@ -42,14 +45,16 @@ class JpaRawEventStore implements RawEventStore {
             return false;
         }
         try {
+            UUID id = UUID.randomUUID();
             events.save(new RawEventEntity(
-                    UUID.randomUUID(),
+                    id,
                     sourceId,
                     event.externalId(),
                     dedupKey,
                     event.contentType(),
                     event.payload(),
                     event.occurredAt()));
+            log.info("pipeline stage=ingest.capture rawEventId={}", id);
             return true;
         } catch (DataIntegrityViolationException concurrentDuplicate) {
             return false;

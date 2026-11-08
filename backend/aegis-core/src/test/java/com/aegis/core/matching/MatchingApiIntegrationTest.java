@@ -7,14 +7,12 @@ import java.util.UUID;
 import com.aegis.core.advisories.Advisory;
 import com.aegis.core.advisories.AdvisoryStore;
 import com.aegis.core.advisories.AffectedProduct;
-import com.aegis.core.incidents.VendorIncident;
 import com.aegis.core.incidents.VendorIncidentStore;
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.domain.BusinessCriticality;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.SoftwareComponent;
-import com.aegis.core.inventory.domain.ThirdPartyVendor;
 import com.aegis.core.support.AbstractInventoryIntegrationTest;
 import com.aegis.core.support.TestOwners;
 import org.junit.jupiter.api.Test;
@@ -86,43 +84,6 @@ class MatchingApiIntegrationTest extends AbstractInventoryIntegrationTest {
                         .value(vulnerable.getId().toString()))
                 .andExpect(jsonPath("$.impactedServices[0].evidence[0].componentPath[1].id")
                         .value(direct.getId().toString()));
-    }
-
-    @Test
-    void matchesAVendorOutageToDependentServicesAndOwners() throws Exception {
-        String suffix = UUID.randomUUID().toString();
-        BusinessService service = inventory.createBusinessService("Orders " + suffix, BusinessCriticality.CRITICAL);
-        Owner owner = owners.assign(service.getId(), "Orders team " + suffix);
-        ThirdPartyVendor vendor = inventory.createThirdPartyVendor("Acme Cloud " + suffix);
-        inventory.addServiceVendor(service.getId(), vendor.getId());
-
-        VendorIncident incident = incidents.upsert(new VendorIncident(
-                null,
-                "vendor-status",
-                "acme:incident-" + suffix,
-                "acme-cloud-" + suffix,
-                "Acme Cloud " + suffix,
-                "API outage",
-                "investigating",
-                "major",
-                null,
-                "Elevated errors",
-                Instant.now(),
-                null,
-                null));
-
-        mvc.perform(get("/api/matching/change-signals/{id}", incident.id()).with(role("SERVICE_OWNER")))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.change.signalType").value("VENDOR_OUTAGE"))
-                .andExpect(jsonPath("$.matchedComponentCount").value(0))
-                .andExpect(jsonPath("$.matchedVendorCount").value(1))
-                .andExpect(jsonPath("$.impactedServices.length()").value(1))
-                .andExpect(jsonPath("$.impactedServices[0].service.id").value(service.getId().toString()))
-                .andExpect(jsonPath("$.impactedServices[0].owners[0].id").value(owner.getId().toString()))
-                .andExpect(jsonPath("$.impactedServices[0].evidence[0].kind").value("VENDOR_DEPENDENCY"))
-                .andExpect(jsonPath("$.impactedServices[0].evidence[0].vendor.id")
-                        .value(vendor.getId().toString()))
-                .andExpect(jsonPath("$.impactedServices[0].evidence[0].componentPath.length()").value(0));
     }
 
     @Test

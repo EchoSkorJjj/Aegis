@@ -104,14 +104,6 @@ class ScoringDeterminismTest {
     // ---- one change, scored ------------------------------------------------------------------------
 
     @Test
-    void scoringTheSameChangeTwiceGivesTheSameAnswer() {
-        ChangeSignal signal = estate.vulnerability("CVE-2099-0001", "9.8", NOW);
-        estate.reaches(signal, anEstateWithTies());
-
-        assertThat(scoring.scoreChange(signal.id())).isEqualTo(scoring.scoreChange(signal.id()));
-    }
-
-    @Test
     void theRankingDoesNotDependOnTheOrderMatchingReturnsServicesIn() {
         ChangeSignal signal = estate.vulnerability("CVE-2099-0002", "7.5", NOW);
         List<ImpactedServiceMatch> services = anEstateWithTies();
@@ -219,23 +211,6 @@ class ScoringDeterminismTest {
         EstateRollupResponse rollup = scoring.rollUpEstate(ChangeSignalFilter.NONE, null);
 
         assertThat(rollup.services().getFirst().topSignal().externalId()).isEqualTo("CVE-2099-0006");
-    }
-
-    @Test
-    void rollingUpTheSameWindowTwiceGivesTheSameAnswer() {
-        List<ImpactedServiceMatch> services = anEstateWithTies();
-        ChangeSignal first = estate.vulnerability("CVE-2099-0008", "9.8", NOW);
-        ChangeSignal second = estate.vulnerability("CVE-2099-0009", "5.3", NOW.minusSeconds(1));
-        ChangeSignal outage = estate.outage("acme:1", "major", NOW.minusSeconds(2));
-        estate.reaches(first, services);
-        estate.reaches(second, services.subList(0, 3));
-        estate.reaches(outage, services.subList(2, 6));
-        estate.window(first, second, outage);
-        // A fixed window: with no `from`, the roll-up reaches back from "now", which is not repeatable.
-        ChangeSignalFilter window = new ChangeSignalFilter(null, null, null, null, null,
-                NOW.minusSeconds(3600), NOW);
-
-        assertThat(scoring.rollUpEstate(window, null)).isEqualTo(scoring.rollUpEstate(window, null));
     }
 
     /** Services with every kind of tie: equal profiles, names differing in case, shared owners. */

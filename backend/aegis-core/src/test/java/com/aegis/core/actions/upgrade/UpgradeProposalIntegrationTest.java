@@ -90,6 +90,7 @@ class UpgradeProposalIntegrationTest extends AbstractInventoryIntegrationTest {
     @Test
     void responseAndPullRequestEvidenceIsProtectedEvenWhenAiDraftingFails() throws Exception {
         Fixture f = fixture();
+        long standaloneBefore = store.countPendingStandalone();
         Owner owner = owners.assign(f.service().getId(), "Personal Owner " + f.tag());
         Advisory old = f.advisory();
         advisories.upsert(new Advisory(old.id(), old.sourceId(), old.externalId(), old.canonicalId(),
@@ -105,6 +106,7 @@ class UpgradeProposalIntegrationTest extends AbstractInventoryIntegrationTest {
         assertThat(host.opened(f.repository())).isEmpty();
         String proposalId = JsonPath.read(created, "$.pullRequests[0].id");
         String ticketId = JsonPath.read(created, "$.id");
+        assertThat(store.countPendingStandalone()).isEqualTo(standaloneBefore);
         String stored = mvc.perform(get(PROPOSALS + "/{id}", proposalId).with(as("COMPLIANCE_ADMIN", approver)))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(stored).contains("[REDACTED]").doesNotContain("alice@example.test", "opaque-credential", owner.getName());
@@ -663,6 +665,7 @@ class UpgradeProposalIntegrationTest extends AbstractInventoryIntegrationTest {
     @Test
     void aProposalDraftedBeforeResponsesIsStillDecidedOnItsOwn() throws Exception {
         Fixture f = fixture();
+        long before = store.countPendingStandalone();
         UpgradeProposal standalone = drafted(new UpgradeProposal(UUID.randomUUID(), f.service().getId(),
                 f.advisory().id(), f.cve(), null,
                 List.of(new Edit(f.component().getId(), "maven", f.component().getName(), "1.0.0", "1.3.0", "pom.xml")),
@@ -670,6 +673,8 @@ class UpgradeProposalIntegrationTest extends AbstractInventoryIntegrationTest {
                 MatchConfidence.CONFIRMED, null, null, "Upgrade it", "body", UpgradeProposalStatus.PROPOSED, analyst,
                 null, null, null, null, null, null, null, 0));
 
+        assertThat(store.countPendingStandalone()).isEqualTo(before + 1);
+        currentOrg.runAs(UUID.randomUUID(), () -> assertThat(store.countPendingStandalone()).isZero());
         mvc.perform(get(PROPOSALS).param("serviceId", f.service().getId().toString()).param("standalone", "true")
                         .with(as("ANALYST", approver)))
                 .andExpect(jsonPath("$.content.length()").value(1))
@@ -680,6 +685,7 @@ class UpgradeProposalIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("OPENED"))
                 .andExpect(jsonPath("$.title").value("Upgrade it"));
+        assertThat(store.countPendingStandalone()).isEqualTo(before);
     }
 
     /** A proposal drafted on its own, as before responses: saved, like every proposal, as a step of the trail. */

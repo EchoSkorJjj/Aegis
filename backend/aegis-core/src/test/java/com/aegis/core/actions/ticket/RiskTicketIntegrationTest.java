@@ -67,6 +67,7 @@ class RiskTicketIntegrationTest extends AbstractInventoryIntegrationTest {
     @Autowired private FakeAiDrafter drafter;
     @Autowired private CurrentOrg currentOrg;
     @Autowired private RiskTicketService tickets;
+    @Autowired private RiskTicketStore ticketStore;
 
     private final UUID analyst = UUID.randomUUID();
     private final UUID approver = UUID.randomUUID();
@@ -106,6 +107,7 @@ class RiskTicketIntegrationTest extends AbstractInventoryIntegrationTest {
     @Test
     void aTicketIsDraftedFromTheImpactAndFiledOnlyWhenApproved() throws Exception {
         Fixture f = fixture();
+        long before = ticketStore.countPending();
 
         String created = mvc.perform(post(PATH).with(as("ANALYST", analyst)).contentType(MediaType.APPLICATION_JSON)
                         .content(request(f.advisory().id(), f.service().getId())))
@@ -140,6 +142,8 @@ class RiskTicketIntegrationTest extends AbstractInventoryIntegrationTest {
         });
         assertThat(tracker.filed()).as("nothing is filed before it is approved")
                 .noneMatch(issue -> issue.title().contains(f.cve()));
+        assertThat(ticketStore.countPending()).isEqualTo(before + 1);
+        currentOrg.runAs(UUID.randomUUID(), () -> assertThat(ticketStore.countPending()).isZero());
 
         // With no pull request it only records the risk, so its drafter files it.
         mvc.perform(post(PATH + "/{id}/approve", id).with(as("ANALYST", analyst)))
@@ -151,6 +155,7 @@ class RiskTicketIntegrationTest extends AbstractInventoryIntegrationTest {
 
         IssueDraft issue = tracker.filed().stream().filter(filed -> filed.title().contains(f.cve())).findFirst()
                 .orElseThrow();
+        assertThat(ticketStore.countPending()).isEqualTo(before);
         assertThat(issue.priority()).isEqualTo(RiskTicketText.priority(tier));
         assertThat(issue.labels()).contains("aegis", f.cve());
         assertThat(issue.description()).extracting(Block::text).contains("Recommended actions", "Evidence");

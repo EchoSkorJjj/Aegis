@@ -6,7 +6,7 @@ import { siteConfig } from "@/lib/site";
 export const metadata: Metadata = { title: "Privacy" };
 
 /** When this notice last changed in substance. */
-const UPDATED = "16 October 2026";
+const UPDATED = "23 October 2026";
 
 /**
  * What Aegis does with data from the Jira and GitHub accounts an organization connects — the page
@@ -151,6 +151,20 @@ export default async function PrivacyPage() {
           {name} keeps the answer — called, not called or can&apos;t tell — the AI&apos;s reason, what it suggests a
           reviewer check, the names the code was searched for, and the file paths and line numbers it cites, never
           the code. The answer is a suggestion for a person. It never changes an impact score or decides anything.
+        </p>
+      </Section>
+
+      <Section id="dashboard-history" title="Dashboard history">
+        <p>
+          Once a day, and whenever someone opens the dashboard, {name} records how many open material items the
+          organization has and, for each service and each assigned owner, their open, critical and high counts and
+          highest impact score, under the service&apos;s name and the owner&apos;s display name as they were that day.
+          It records no email addresses.
+        </p>
+        <p>
+          These daily records keep an owner&apos;s name after they are unassigned or leave the organization, and a
+          service&apos;s name after it is renamed or deleted, so the trend shows who was responsible at the time.{" "}
+          {name} does not delete them on its own; whoever runs this deployment can.
         </p>
       </Section>
 

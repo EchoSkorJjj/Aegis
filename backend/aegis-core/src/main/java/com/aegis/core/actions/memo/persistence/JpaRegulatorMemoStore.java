@@ -61,6 +61,14 @@ class JpaRegulatorMemoStore implements RegulatorMemoStore {
 
     @Override
     @Transactional(readOnly = true)
+    public long countPending() {
+        UUID org = scope();
+        return memos.count((root, query, cb) -> cb.and(cb.equal(root.get("orgId"), org),
+                cb.equal(root.get("status"), RegulatorMemoStatus.PROPOSED)));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Optional<RegulatorMemo> find(UUID id) {
         return memos.findByIdAndOrgId(id, scope()).map(this::domain);
     }

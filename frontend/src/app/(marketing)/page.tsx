@@ -25,9 +25,9 @@ export const metadata: Metadata = {
 
 // The same colours the app's queue uses for each impact tier.
 const TIER_CLASS = {
-  Critical: "bg-red-500/10 text-red-600 dark:text-red-400",
-  High: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  Medium: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+  Critical: "bg-red-500/10 text-red-800 dark:text-red-400",
+  High: "bg-amber-500/10 text-amber-800 dark:text-amber-400",
+  Medium: "bg-sky-500/10 text-sky-800 dark:text-sky-400",
 } as const;
 
 // An illustration of the Recommended upgrades queue, scored on its 0–100 scale (Critical from 90, High from 70,

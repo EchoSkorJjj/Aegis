@@ -49,12 +49,14 @@ import com.aegis.core.matching.UpgradeTargets;
 import com.aegis.core.matching.UpgradeTargets.UpgradeTarget;
 import com.aegis.core.platform.common.ApiExceptions;
 import com.aegis.core.platform.common.SensitiveText;
+import com.aegis.core.platform.config.PipelineSpan;
 import com.aegis.core.scoring.ScoringDtos.ChangeImpactResponse;
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
 import com.aegis.core.scoring.ScoringService;
 import com.aegis.core.signals.ChangeSignal;
 import com.aegis.core.signals.ChangeSignalStore;
+import io.micrometer.core.annotation.Timed;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -374,10 +376,15 @@ public class UpgradeProposalService {
      * exact title and body, with an AI-drafted rationale when the ai-service can supply one. Writes nothing
      * outside Aegis. Empty when the plan has nothing Aegis can automate.
      */
+    @Timed(value = "aegis.draft.duration", histogram = true,
+            extraTags = {"kind", "upgrade"})
+    @PipelineSpan("aegis.draft.upgrade")
     public Optional<UpgradeProposal> draft(UpgradePlan plan, UUID riskTicketId, UUID drafter) {
         if (!plan.automatable()) {
             return Optional.empty();
         }
+        log.info("pipeline stage=draft.upgrade changeSignalId={} serviceId={} riskTicketId={}",
+                plan.changeSignalId(), plan.serviceId(), riskTicketId);
         UpgradePlan.Facts planned = plan.facts();
         UUID id = UUID.randomUUID();
         Facts facts = new Facts(id, plan.vulnerabilityId(), planned.checked(), planned.notCleared(),

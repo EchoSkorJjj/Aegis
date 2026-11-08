@@ -83,7 +83,11 @@ class VendorStatusNormalizer {
             } catch (RuntimeException terminal) {
                 throw new UnparseableEventException(VendorStatusSource.SOURCE_ID, event.externalId(), terminal);
             }
-            parsed.forEach(incidents::upsert);
+            parsed.forEach(incident -> {
+                VendorIncident saved = incidents.upsert(incident);
+                log.info("pipeline stage=ingest.record sourceId=vendor-status rawEventId={} changeSignalId={}",
+                        event.id(), saved.id());
+            });
             written[0] += parsed.size();
         });
         if (written[0] > 0) {

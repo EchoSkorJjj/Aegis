@@ -26,7 +26,7 @@ const EXPOSURE_LABEL: Record<ServiceExposure, string> = {
   INTERNET_FACING: "Internet-facing",
 };
 
-const WARNING = "text-amber-600 dark:text-amber-400";
+const WARNING = "text-amber-800 dark:text-amber-400";
 
 /**
  * My services (E9 story 2): a service owner's own page. Each service they are an assigned owner of, with what it

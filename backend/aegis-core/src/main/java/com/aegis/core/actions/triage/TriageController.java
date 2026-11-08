@@ -42,13 +42,15 @@ public class TriageController {
             @RequestParam(required = false) UUID serviceId,
             @RequestParam(required = false) UUID ownerId,
             @RequestParam(defaultValue = "false") boolean mine,
+            @RequestParam(defaultValue = "false", name = "open") boolean openOnly,
+            @RequestParam(defaultValue = "false") boolean unassigned,
             @RequestParam(required = false) String ecosystem,
             @RequestParam(required = false) ImpactTier tier,
             @PageableDefault(size = 20) Pageable pageable,
             Authentication authentication) {
         String ecosystemFilter = ecosystem == null || ecosystem.isBlank() ? null : ecosystem.strip();
         return queue.list(new Filters(serviceId, ownerId, mine, ecosystemFilter, tier), caller(authentication),
-                pageable);
+                pageable, openOnly, unassigned);
     }
 
     @GetMapping("/my-services")

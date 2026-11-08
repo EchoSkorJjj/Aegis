@@ -1,5 +1,6 @@
 package com.aegis.core.ingestion;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -11,6 +12,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -22,7 +24,7 @@ import org.springframework.stereotype.Component;
  * exist (reading unhealthy/no-data) from boot, not only after its first poll.
  */
 @Component
-class IngestionFeedMetrics {
+public class IngestionFeedMetrics {
 
     private static final String POLL = "aegis.ingestion.poll";
     private static final String POLL_RECORDS = "aegis.ingestion.poll.records";
@@ -32,18 +34,34 @@ class IngestionFeedMetrics {
 
     private final MeterRegistry registry;
     private final Duration staleAfter;
+    private final Clock clock;
     private final Map<String, FeedState> feeds = new ConcurrentHashMap<>();
 
-    IngestionFeedMetrics(MeterRegistry registry, List<IngestionSource> sources, IngestionProperties properties) {
+    @Autowired
+    public IngestionFeedMetrics(MeterRegistry registry, List<IngestionSource> sources, IngestionProperties properties) {
+        this(registry, sources, properties, Clock.systemUTC());
+    }
+
+    IngestionFeedMetrics(MeterRegistry registry, List<IngestionSource> sources, IngestionProperties properties,
+            Clock clock) {
         this.registry = registry;
         this.staleAfter = properties.health().staleAfter();
+        this.clock = clock;
         sources.forEach(source -> stateFor(source.sourceId()));
     }
 
+    /** Register a self-scheduled feed, allowing its poll interval plus the normal staleness grace. */
+    public void registerSource(String sourceId, Duration pollInterval) {
+        if (pollInterval.isNegative() || pollInterval.isZero()) {
+            throw new IllegalArgumentException("Feed poll interval must be positive");
+        }
+        stateFor(sourceId).staleAfter = pollInterval.plus(staleAfter);
+    }
+
     /** A poll of {@code sourceId} completed without throwing; {@code stored}/{@code duplicate} raw events. */
-    void recordPollSuccess(String sourceId, int stored, int duplicates) {
+    public void recordPollSuccess(String sourceId, int stored, int duplicates) {
         FeedState state = stateFor(sourceId);
-        state.lastSuccessAt.set(Instant.now());
+        state.lastSuccessAt.set(Instant.now(clock));
         state.lastAttemptFailed.set(false);
         pollOutcomeCounter(sourceId, "success").increment();
         pollRecordsCounter(sourceId, "stored").increment(stored);
@@ -51,7 +69,7 @@ class IngestionFeedMetrics {
     }
 
     /** A poll of {@code sourceId} failed (exhausted retries); see {@link IngestionRetry}. */
-    void recordPollFailure(String sourceId) {
+    public void recordPollFailure(String sourceId) {
         stateFor(sourceId).lastAttemptFailed.set(true);
         pollOutcomeCounter(sourceId, "failure").increment();
     }
@@ -69,7 +87,14 @@ class IngestionFeedMetrics {
     }
 
     private FeedState registerFeed(String sourceId) {
-        FeedState state = new FeedState();
+        FeedState state = new FeedState(staleAfter);
+        pollOutcomeCounter(sourceId, "success");
+        pollOutcomeCounter(sourceId, "failure");
+        pollRecordsCounter(sourceId, "stored");
+        pollRecordsCounter(sourceId, "duplicate");
+        normalizeRecordsCounter(sourceId, "normalized");
+        normalizeRecordsCounter(sourceId, "dropped");
+        normalizeRecordsCounter(sourceId, "deferred");
         Gauge.builder(LAST_SUCCESS, state.lastSuccessAt, ref -> {
                     Instant lastSuccess = ref.get();
                     return lastSuccess == null ? Double.NaN : lastSuccess.toEpochMilli() / 1000.0;
@@ -77,7 +102,7 @@ class IngestionFeedMetrics {
                 .tag("source_id", sourceId)
                 .description("Unix timestamp (seconds) this feed last completed a poll successfully")
                 .register(registry);
-        Gauge.builder(HEALTH, state, s -> s.isHealthy(staleAfter) ? 1 : 0)
+        Gauge.builder(HEALTH, state, s -> s.isHealthy(Instant.now(clock)) ? 1 : 0)
                 .tag("source_id", sourceId)
                 .description("1 if the feed is healthy (has succeeded recently), 0 otherwise")
                 .register(registry);
@@ -112,13 +137,18 @@ class IngestionFeedMetrics {
     private static final class FeedState {
         private final AtomicReference<Instant> lastSuccessAt = new AtomicReference<>();
         private final AtomicBoolean lastAttemptFailed = new AtomicBoolean(false);
+        private volatile Duration staleAfter;
 
-        boolean isHealthy(Duration staleAfter) {
+        private FeedState(Duration staleAfter) {
+            this.staleAfter = staleAfter;
+        }
+
+        boolean isHealthy(Instant now) {
             Instant lastSuccess = lastSuccessAt.get();
             if (lastSuccess == null || lastAttemptFailed.get()) {
                 return false;
             }
-            return !Duration.between(lastSuccess, Instant.now()).minus(staleAfter).isPositive();
+            return !Duration.between(lastSuccess, now).minus(staleAfter).isPositive();
         }
     }
 }

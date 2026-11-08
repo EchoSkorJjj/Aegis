@@ -1,5 +1,6 @@
-# GitHub Actions pushes the services' images without a stored key: a workflow on one of these branches exchanges
-# its OIDC token for this role. It can only push images; deploying is Terraform's job (image_tag).
+# GitHub Actions pushes the services' images without a stored key: build-images, on a merge into main
+# (.github/workflows/build-images.yml), exchanges its OIDC token for this role. Only the branches in github_branches
+# (main) may assume it. It can only push images; deploying is Terraform's job (image_tag).
 resource "aws_iam_openid_connect_provider" "github" {
   url            = "https://token.actions.githubusercontent.com"
   client_id_list = ["sts.amazonaws.com"]

@@ -1073,3 +1073,45 @@ export interface RemovedService {
   id: string;
   name: string | null;
 }
+
+export interface PostureBreakdown {
+  id: string | null;
+  name: string;
+  openItems: number;
+  criticalItems: number;
+  highItems: number;
+  topScore: number | null;
+}
+
+export interface PostureSnapshot {
+  day: string;
+  capturedAt: string;
+  openItems: number;
+  criticalItems: number;
+  highItems: number;
+}
+
+export interface RiskPostureDashboard {
+  asOf: string;
+  totals: {
+    openItems: number;
+    criticalItems: number;
+    highItems: number;
+    newItems: number;
+    inReviewItems: number;
+    approvedItems: number;
+    unassignedItems: number;
+    affectedServices: number;
+    totalServices: number;
+  };
+  services: PostureBreakdown[];
+  owners: PostureBreakdown[];
+  from: string;
+  to: string;
+  trend: PostureSnapshot[];
+  history: {
+    total: PostureSnapshot;
+    services: PostureBreakdown[];
+    owners: PostureBreakdown[];
+  }[];
+}

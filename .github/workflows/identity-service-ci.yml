@@ -5,10 +5,14 @@ on:
     paths:
       - "backend/identity-service/**"
       - ".github/workflows/identity-service-ci.yml"
+      - "security/access-control.md"   # the access tests read it
+      - "testing/**"                   # the coverage targets and their check
   pull_request:
     paths:
       - "backend/identity-service/**"
       - ".github/workflows/identity-service-ci.yml"
+      - "security/access-control.md"   # the access tests read it
+      - "testing/**"                   # the coverage targets and their check
 
 jobs:
   build-and-test:
@@ -26,3 +30,16 @@ jobs:
       - name: Build and run integration tests
         working-directory: backend/identity-service
         run: mvn -B verify
+
+      # Coverage against testing/coverage-targets.json, in the job summary; below target fails the job.
+      - name: Check coverage against targets
+        run: python3 testing/check_coverage.py identity-service backend/identity-service/target/site/jacoco/jacoco.xml
+
+      - name: Retain the coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: identity-service-coverage
+          path: backend/identity-service/target/site/jacoco/
+          if-no-files-found: ignore
+          retention-days: 14

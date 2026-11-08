@@ -42,10 +42,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     // (without a provider, Base UI falls back to its ~600ms default).
     <TooltipProvider delay={0}>
       <SidebarProvider>
+        <a
+          href="#main-content"
+          className="sr-only z-50 rounded-md bg-background px-3 py-2 text-sm font-medium focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:ring-2 focus:ring-ring"
+        >
+          Skip to main content
+        </a>
         <AppSidebar />
         <SidebarInset>
           <AppHeader />
-          <div className="flex-1 p-4 sm:p-6">{children}</div>
+          <div id="main-content" tabIndex={-1} className="min-w-0 flex-1 p-4 outline-none sm:p-6">{children}</div>
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>

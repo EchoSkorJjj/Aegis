@@ -34,10 +34,12 @@ decides or acts.
 | Estate | Services, components, vendors and owners; SBOMs generated from a linked repository or uploaded as CycloneDX; each service's own dependency graph; **Used by** for any package or vendor |
 | Change feeds | NVD; OSV for npm, PyPI, Maven, Go, crates.io and RubyGems; vendor status pages; security news |
 | Matching and scoring | Recomputed on every request; impact per service and per owner, with the factor holding each score down |
+| Dashboard | Open material items by service and owner, critical/high counts, unassigned items and response stages; links to filtered triage. A 7-, 30- or 90-day trend of daily observed totals, with gaps where no observation exists |
 | Findings | The **triage queue**: each service's material vulnerable dependencies, with the version that fixes them, and the vendor outages still in progress, highest impact first; filters by service, owner, ecosystem and impact; each item's response, or **Draft response**; **My services**, a service owner's own page: each service they own with what needs a response, the responses awaiting a decision and whether its SBOM and repository are in place, then its items; item detail with the affected services and owners, score factors, evidence and drafted responses. **Notifications**: each owner is told once, under the bell and by email, about every item in their services that needs a decision |
 | Responses | Drafted responses awaiting a decision, and their history; risk tickets filed in Jira; draft upgrade pull requests on GitHub for Maven `pom.xml`, npm `package.json` and PyPI `requirements.txt`; DORA regulator memos; four-eyes approval. Before deciding, a reviewer may edit the drafted text or override the priority and due date with a reason (and withdraw the override), both kept on record; each response and triage item shows its stage (New → In review → Approved or Overridden → Actioned or Closed). Every step a response takes is recorded in an append-only decision trail, with who took it, why, and the response as it stood then; analysts and compliance admins search it under **Reports → Audit log** by service, person, decision and date, and export a service's evidence for a period as PDF or CSV from **Reports → Evidence**. Each service's page lists its own vulnerable dependencies too, including those another package pulls in |
-| AI | Drafting through Groq, or an offline stub by default, with citations the server resolves and rate and token budgets |
-| Not yet | Stored findings with a lifecycle status (the triage queue is recomputed on every request); reachability in the score (the assessment endpoint exists, but nothing calls it yet) |
+| AI | Drafting through Groq, or an offline stub by default, with citations the server resolves and rate and token budgets; on request, a suggestion of whether a service's code reaches a vulnerability's vulnerable part, citing the lines it read (it never changes the score) |
+| Security | Every pull request, and every push to `develop` and `main`, is scanned for committed secrets, vulnerable dependencies and vulnerable code; a STRIDE threat model with the LLM risks, a data classification, and every endpoint's roles in one table that each service's access tests check ([`security/`](security/), [below](#security-scanning)) |
+| Not yet | Stored findings with a lifecycle status (the triage queue is recomputed on every request); single sign-on; retention limits on the decision trail, the dashboard history and the sign-in log (accepted until prod: [`security/data-classification.md`](security/data-classification.md)) |
 
 ## Architecture
 
@@ -85,6 +87,7 @@ docker compose up --build
 | PostgreSQL | localhost:5432 | User and password `identity` |
 | Mailhog | http://localhost:8025 | Catches every email, whatever the address |
 | Prometheus, Zipkin | http://localhost:9090, http://localhost:9411 | Metrics and traces |
+| Grafana | http://localhost:3001/d/aegis-operations | Provisioned feed, pipeline, decision queue and error dashboard |
 
 ai-service has no address on your machine: only aegis-core can reach it.
 
@@ -125,7 +128,7 @@ likely to change:
 | `TRUSTED_PROXY_HOPS`, `GATEWAY_TRUSTED_PROXIES` | frontend, gateway | 1, any private address | Which `X-Forwarded-For` address the sign-in rate limit trusts: the proxies in front of the frontend, and the addresses the gateway accepts the header from |
 
 Scoring weights and tiers: [SCORING-CALIBRATION.md](backend/aegis-core/SCORING-CALIBRATION.md). Metrics and ready-made
-PromQL: [ops/README.md](ops/README.md).
+PromQL, Grafana and alert runbooks: [ops/README.md](ops/README.md).
 
 ## Deploy to AWS
 
@@ -145,8 +148,9 @@ and is stopped between demos. Prod is written but not applied yet.
   master password is RDS's own, kept in Secrets Manager. Everything is encrypted with AWS-managed keys.
 - **Dev runs on Fargate Spot, prod on regular Fargate.** Setting `desired_count = 0` stops the services between
   demos.
-- **Images are built for `linux/amd64` and pushed to ECR by hand** for now. A push role for GitHub Actions is ready
-  for when a workflow does it.
+- **Images are built for `linux/amd64` and pushed to ECR when a pull request merges into `main`** (`build-images`),
+  tagged with the commit, through a GitHub Actions role that can only push. Deploying is setting an environment's
+  `image_tag` to that tag and applying; ECS rolls back a deploy whose tasks fail their health checks.
 
 Where to go next:
 - [terraform/README.md](terraform/README.md): the layout and how to run it.
@@ -162,10 +166,52 @@ Where to go next:
 | ai-service | `pip install -e '.[dev]'`, then `pytest` | Nothing else |
 | frontend | `pnpm exec tsc --noEmit`, `pnpm lint`, `pnpm build` | Nothing else |
 | frontend end to end | `pnpm exec playwright install chromium`, then `pnpm test:e2e` | The stack running (`docker compose up`) |
+| full-stack journeys | From `frontend`: `e2e-full-stack/stack.sh up`, then `pnpm exec playwright test --config playwright.full-stack.config.ts` | Docker, JDK 21+, Maven, Python 3.12 |
 
 Run each from the service's folder. Every service has its own workflow in [`.github/workflows`](.github/workflows),
 run on the pushes and pull requests that touch it: `identity-service-ci`, `gateway-ci`, `aegis-core-ci`,
-`ai-service-ci` (ruff and pytest) and `frontend-e2e` (Playwright).
+`ai-service-ci` (ruff and pytest), `frontend-e2e` (Playwright) and `full-stack-e2e` (the core journeys through every
+real service). `security-scanning` runs on every pull request
+and every push to `develop` and `main` (below). The three Java services' `verify` includes their access tests,
+which read [`security/access-control.md`](security/access-control.md).
+
+[`testing/test-strategy.md`](testing/test-strategy.md) sets out what each kind of test is for, each service's coverage
+target and which test proves each story. CI reports coverage against the targets and fails below them.
+
+### Security scanning
+
+`security-scanning` runs on every pull request and every push to `develop` and `main`. A committed secret or a
+known-vulnerable dependency fails it:
+
+- **Secrets** — gitleaks (the CLI, pinned and checksummed) scans the commits the change adds. The only exceptions are
+  the test fixtures and documentation that merely look like secrets, listed in [`.gitleaks.toml`](.gitleaks.toml)
+  with why; each allows that exact text, never a whole file. Never allow-list a real secret: revoke and rotate it.
+  To run it locally: `gitleaks git --config .gitleaks.toml .`
+- **Dependencies** — GitHub's dependency review fails a pull request that adds a dependency with any known
+  vulnerability (runtime, development or unknown scope). Maven resolves each Java service's whole graph first and
+  submits it, so versions the Spring Boot parent manages are reviewed too; the frontend is reviewed from
+  `pnpm-lock.yaml`. GitHub doesn't read the ai-service's `pyproject.toml` (PEP 621), so its dependencies aren't
+  reviewed yet.
+- **Code** — CodeQL analyses the Java, TypeScript/JavaScript and Python code (no build needed), and weekly on the
+  default branch. Its alerts are under the repository's **Security → Code scanning**, and its check fails a pull
+  request that adds an alert at or above the threshold set in the repository's settings.
+
+There's no Dependabot: Aegis watches its own dependencies, so a second bot opening upgrade pull requests would
+compete with it.
+
+### Threat model and data classification
+
+[`security/threat-model.md`](security/threat-model.md) goes through each trust boundary with STRIDE and the OWASP
+risks for LLM applications: every threat has an owner and either the code that mitigates it or a recorded decision
+to accept it. [`security/data-classification.md`](security/data-classification.md) lists every kind of data Aegis
+holds — its class, where it's kept, who reads it, how long it's kept and what leaves Aegis — checked against the
+privacy notice. Update both when a trust boundary, a role, an integration or a data store changes.
+
+[`security/access-control.md`](security/access-control.md) lists every endpoint of the gateway, identity-service and
+aegis-core with the roles that may call it. `GatewayAccessTest`, `IdentityAccessIntegrationTest` and
+`AccessControlIntegrationTest` call each one anonymously and as each role, check the answer against the table, and
+fail on an endpoint the table doesn't list — so a new endpoint, or a change to who may call one, updates the table in
+the same pull request.
 
 ## Repository layout
 
@@ -176,8 +222,11 @@ backend/
   aegis-core/         the domain: estate, feeds, matching, scoring, responses
   ai-service/         drafting, in Python
 frontend/             Next.js UI and backend-for-frontend
+security/             threat model, data classification, and the access-control table the access tests read
+.github/workflows/    CI per service, security scanning (secrets, dependencies, code), images to ECR on a merge into main
+.gitleaks.toml        the test fixtures gitleaks allows, each with why
 terraform/            AWS: bootstrap, global, environments/dev and prod, modules
-ops/                  Prometheus configuration and PromQL
+ops/                  Prometheus metrics/alerts, Grafana dashboard/provisioning and runbooks
 assets/diagrams/      the README's diagrams: SVG sources and their PNGs
 docker-compose.yml    the whole stack, locally
 ```

@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-import { signIn } from "./helpers";
+import { createOrg, signIn } from "./helpers";
 
 test("a visitor can sign up, sign in (with email OTP), and sign out", async ({ page }) => {
   const email = `e2e-${Date.now()}@example.com`;
@@ -22,9 +22,7 @@ test("a visitor can sign up, sign in (with email OTP), and sign out", async ({ p
 
   // A brand-new account belongs to no organization yet: create one to enter the app (ADR 0001).
   await expect(page.getByText(/create or join an organization/i)).toBeVisible();
-  await page.getByLabel("Organization name").fill("E2E Org");
-  await page.getByRole("button", { name: "Create organization" }).click();
-  await expect(page.getByText(/your workspace content goes here/i)).toBeVisible();
+  await createOrg(page, "E2E Org");
 
   // Sign out from the sidebar account menu.
   await page.getByRole("button", { name: /E2E User/ }).click();

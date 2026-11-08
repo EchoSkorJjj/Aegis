@@ -2,6 +2,7 @@ package com.aegis.core.ingestion;
 
 import java.util.List;
 
+import com.aegis.core.platform.config.PipelineSpan;
 import com.aegis.core.platform.scheduling.SchedulerLease;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,6 +44,7 @@ class IngestionScheduler {
     @Scheduled(
             fixedDelayString = "${aegis.ingestion.poll-interval:PT15M}",
             initialDelayString = "${aegis.ingestion.poll-interval:PT15M}")
+    @PipelineSpan("aegis.ingest.poll")
     void pollAll() {
         if (lease.held()) {
             runOnce();

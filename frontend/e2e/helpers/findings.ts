@@ -147,6 +147,8 @@ export async function fakeBff(page: Page, { role = "ANALYST", owned = 1, tickets
         (!query.get("serviceId") || item.service.id === query.get("serviceId")) &&
         (!query.get("ownerId") || item.owners.some((owner) => owner.id === query.get("ownerId"))));
       const filtered = selected.filter((item) =>
+        (!query.get("open") || (item.stage !== "ACTIONED" && item.stage !== "CLOSED")) &&
+        (!query.get("unassigned") || item.owners.length === 0) &&
         (!query.get("ecosystem") || item.upgrade?.component.ecosystem === query.get("ecosystem")) &&
         (!query.get("tier") || item.tier === query.get("tier")))
         .map((item) => ({ ...item, canDraft: mayDraft(role, item) }));

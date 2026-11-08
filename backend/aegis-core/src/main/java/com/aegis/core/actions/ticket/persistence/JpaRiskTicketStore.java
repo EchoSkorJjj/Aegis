@@ -91,6 +91,15 @@ class JpaRiskTicketStore implements RiskTicketStore {
 
     @Override
     @Transactional(readOnly = true)
+    public long countPending() {
+        UUID org = scope();
+        return tickets.count((root, query, cb) -> cb.and(cb.equal(root.get("orgId"), org),
+                cb.or(root.get("status").in(UNDECIDED),
+                        cb.greaterThan(root.<Integer>get("pendingPullRequests"), 0))));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Page<RiskTicket> findPage(UUID serviceId, UUID changeSignalId, Collection<RiskTicketStatus> statuses,
             Boolean pending, Pageable pageable) {
         UUID org = scope();

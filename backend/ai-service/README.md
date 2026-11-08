@@ -293,12 +293,14 @@ python -m ai_service.evaluation --output evaluation-results/next --baseline eval
 
 # Explicit paid-provider evaluation only; use your process environment's GROQ_API_KEY
 python -m ai_service.evaluation --provider groq --case upgrade-maven --output evaluation-results/groq-maven
+
+# What CI runs on an AI change (CS203-231): every case three times, against the committed baseline
+python -m ai_service.evaluation --provider groq --runs 3 --baseline evaluation-baseline.json --output evaluation-results/groq
 ```
 
 On Windows use `.\.venv\Scripts\python.exe` in place of `python`. `--case` can be repeated;
 `--model` overrides the Groq model; `--corpus` loads a validated alternative corpus;
-`--max-score-drop` allows a chosen numeric decline from the baseline (a pass-to-fail regression
-still fails); `--delay-seconds` paces multi-case live runs. Default mode is always offline golden
+`--delay-seconds` paces multi-case live runs. Default mode is always offline golden
 replay, even if `LLM_PROVIDER=groq` is configured. Live runs retain configured token/rate/daily
 budgets; rate limits and provider failures are recorded separately and fail the affected case.
 No live model run or API-key availability is implied by offline checks.
@@ -311,8 +313,34 @@ have a separate pass rate and are excluded from quality averages. `mean_auto_sco
 quality generations as zero; `mean_generated_auto_score` covers produced drafts only, alongside
 `generation_success_rate`, so availability is visible separately from narrative quality.
 
-Exit codes: **0** proxy checks passed; **1** failed cases or regressions; **2** invalid corpus,
-selection, provider configuration or incompatible baseline. Passing automated checks leaves
+**Against the real model in CI (CS203-231).** The workflow `ai-evaluation` runs every case three times
+against Groq on a pull request into `develop` that changes a prompt, a capability, the LLM layer, the
+evaluation or `schemas.py` (each push to it runs it again), and on demand, and compares the result with the
+committed `evaluation-baseline.json`. It doesn't run on a push or on a pull request into `main`: that code was
+evaluated on its way into `develop`, and evaluating it again spends the Groq allowance (on 2026-11-08 the merge
+into `develop` and the pull request into `main` evaluated one commit twice more, and Groq stopped answering). A case passes when its
+quality checks pass on two runs in three and its constraints hold on every run (`rubric.RUN_PASS_RATE`,
+`rubric.CONSTRAINTS`; see the rubric's "Runs and pass rate"). Against the baseline, the run fails on what
+three runs can measure (`runner.MAX_TYPE_SCORE_DROP`, `MAX_CASE_SCORE_DROP`, `EXTRA_CONSTRAINT_RUNS`): a draft
+type's or capability's mean score falling more than 5 points, a case's more than 15, more runs breaking a
+constraint than the baseline had plus 2, or a case the guardrails must block that isn't blocked on every run.
+A case whose verdict changed is listed, not failed on: with three runs, a case near its pass rate passes in one
+evaluation and misses in the next with nothing changed (two CI runs of the same code on 2026-11-07 each flipped
+a different case, both ways, while no type's mean score moved more than 2.5 points). A run Groq didn't answer (a
+rate or quota limit, an outage, a timeout) scores zero, which says nothing about quality, so with any the run fails
+as **inconclusive**: the summary says how many runs went unanswered, compares no scores or verdicts, and still
+reports the guardrail and constraint checks, which a refusal can't affect. Re-run it once Groq answers again; a
+baseline must have no unanswered run. The job summary shows each
+draft type's and capability's pass rate and mean score, the regressions and the changed verdicts; the full
+reports are a build artifact. It needs the
+`GROQ_API_KEY` repository secret, and one run costs about 90,000 tokens (about 1,000 a call, 84 calls,
+paced by the 7,000-tokens-a-minute budget: some 15 minutes), so runs never overlap. To re-baseline on
+purpose (a new corpus or rubric version, or an accepted change in quality), run the CI command without
+`--baseline`, copy its `report.json` over `evaluation-baseline.json`, and say why in the pull request.
+
+Exit codes: **0** proxy checks passed; **1** failed cases (no baseline), or regressions or unanswered runs
+(against a baseline); **2** invalid corpus, selection, provider configuration, or an incompatible baseline or one
+with unanswered runs. Passing automated checks leaves
 human review pending and never approves a response. Complete the separate review file using the
 rubric and retain it with the reports for E14. This story provides that handoff, not the full E14
 benchmark/reporting application. CI runs offline replay, uploads its reports, and checks packaged
@@ -334,3 +362,19 @@ src/ai_service/
 
 Dependencies flow `api → capabilities → llm`, with shared plumbing in `core` and wire models in
 `schemas`. There is no database or vector store in this service.
+
+## Trace correlation (CS203-153)
+
+The Docker image includes the `tracing` extra, and local Compose enables tracing to Zipkin.
+FastAPI extracts W3C `traceparent` from aegis-core and exports a child server span. Application
+logs include `traceId` and `spanId` from request-local context, including error responses.
+The image uses `--no-access-log`: the correlated route-template/status/duration log replaces
+Uvicorn's raw access log. Request bodies, service tokens and raw unmatched paths are not logged
+by this middleware. The per-app tracer provider flushes and shuts down with the app.
+
+For a local Python run, install `.[dev,tracing]` and set `TRACING_ENABLED=true` and
+`ZIPKIN_ENDPOINT` to the collector. Without tracing enabled or its SDK installed, the logs
+still reuse valid incoming trace IDs (or generate one) without exporting spans. Normal
+configuration defaults stay opt-in; AWS tracing settings are unchanged.
+
+See [the tracing demo and regression commands](../../ops/README.md#pipeline-tracing-cs203-153).

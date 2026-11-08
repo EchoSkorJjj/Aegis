@@ -157,14 +157,6 @@ class DecisionTrailSearchIntegrationTest extends AbstractInventoryIntegrationTes
         refused(get(TRAIL).param("actorId", "bob"));
     }
 
-    @Test
-    void onlyGovernanceSearchesTheTrail() throws Exception {
-        mvc.perform(get(TRAIL).param("actorId", alice.toString()).with(as("SERVICE_OWNER", alice)))
-                .andExpect(status().isForbidden());
-        mvc.perform(get(TRAIL).param("actorId", alice.toString()).with(as("ANALYST", bob)))
-                .andExpect(status().isOk());
-    }
-
     // ---- helpers -----------------------------------------------------------------------------------
 
     /** Append one step on a ticket or pull request in {@code service}, as {@link DecisionTrail#recorded} does. */

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState, type KeyboardEvent } from "react";
 import { X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -61,6 +61,11 @@ export function RelationshipSection({
   const [focused, setFocused] = useState(false);
   const [results, setResults] = useState<{ id: string }[]>([]);
   const [searching, setSearching] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const pickerId = useId();
+  const listId = `${pickerId}-list`;
+  const optionId = (index: number) => `${pickerId}-option-${index}`;
+  const active = activeIndex >= 0 && activeIndex < results.length ? activeIndex : -1;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -108,6 +113,21 @@ export function RelationshipSection({
 
   const total = data?.totalElements ?? 0;
 
+  function onPickerKey(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      setFocused(false);
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      setFocused(true);
+      if (results.length === 0) return;
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      setActiveIndex((active + step + results.length + (active < 0 && step < 0 ? 1 : 0)) % results.length);
+    } else if (event.key === "Enter" && focused && active >= 0) {
+      event.preventDefault();
+      attach(results[active].id);
+    }
+  }
+
   async function attach(id: string) {
     if (!id) return;
     setBusy(true);
@@ -116,6 +136,7 @@ export function RelationshipSection({
       toast.success(`${cap(config.entityLabel)} linked`);
       setTerm("");
       setResults([]);
+      setActiveIndex(-1);
       setLocalRefresh((n) => n + 1);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Could not link — please try again.");
@@ -154,39 +175,59 @@ export function RelationshipSection({
       <div className="space-y-3 p-4">
         {canWrite && (
           <div className="relative">
+            <label htmlFor={pickerId} className="sr-only">
+              {config.addPlaceholder}
+            </label>
             <Input
+              id={pickerId}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={focused}
+              aria-controls={listId}
+              aria-activedescendant={focused && active >= 0 ? optionId(active) : undefined}
+              autoComplete="off"
               value={term}
               disabled={busy}
               placeholder={config.addPlaceholder}
               onFocus={() => setFocused(true)}
               // Delay so a click on a result registers before the list unmounts.
               onBlur={() => setTimeout(() => setFocused(false), 150)}
-              onChange={(event) => setTerm(event.target.value)}
+              onChange={(event) => {
+                setTerm(event.target.value);
+                setActiveIndex(-1);
+                setFocused(true);
+              }}
+              onKeyDown={onPickerKey}
             />
             {focused && (
               <div className="absolute z-10 mt-1 max-h-64 w-full overflow-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
-                {searching ? (
-                  <p className="px-2 py-2 text-sm text-muted-foreground">Searching…</p>
-                ) : results.length === 0 ? (
-                  <p className="px-2 py-2 text-sm text-muted-foreground">
-                    {term.trim() ? "No matches." : (config.noOptionsLabel ?? "Type to search.")}
+                {searching || results.length === 0 ? (
+                  <p role="status" className="px-2 py-2 text-sm text-muted-foreground">
+                    {searching
+                      ? "Searching…"
+                      : term.trim()
+                        ? "No matches."
+                        : (config.noOptionsLabel ?? "Type to search.")}
                   </p>
-                ) : (
-                  results.map((row) => (
-                    <button
+                ) : null}
+                <div id={listId} role="listbox" aria-label={config.title} hidden={searching || results.length === 0}>
+                  {results.map((row, index) => (
+                    <div
                       key={row.id}
-                      type="button"
-                      // onMouseDown fires before the input's onBlur, so the click isn't lost.
-                      onMouseDown={(event) => {
-                        event.preventDefault();
-                        attach(row.id);
-                      }}
-                      className="block w-full truncate rounded px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                      id={optionId(index)}
+                      role="option"
+                      aria-selected={index === active}
+                      // Keeps focus in the field, so the list stays open until the choice is made.
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => attach(row.id)}
+                      className={`block w-full cursor-pointer truncate rounded px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground ${
+                        index === active ? "bg-accent text-accent-foreground" : ""
+                      }`}
                     >
                       {config.optionLabel(row)}
-                    </button>
-                  ))
-                )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>

@@ -90,6 +90,62 @@ is the item detail: the change-impact view with the original change, every
 impacted service and owner, score factors and match evidence, and each service's drafted response and upgrade
 edits. Persisted findings with a lifecycle status are a later story; owners are notified of new items (below).
 
+## Dashboard: risk posture (CS203-130)
+
+`GET /api/findings/posture?days=30` is the current organization's open material items, grouped by service and owner,
+with daily aggregate history. `days` accepts 7, 30 (default) or 90. It has the same read gate as inventory and triage:
+`ANALYST`, `COMPLIANCE_ADMIN` and `SERVICE_OWNER`. It reuses `TriageQueue.overview()`, including services with no
+owner, and never computes matching or scores separately. **Open** means `NEW`, `IN_REVIEW`, `APPROVED` or
+`OVERRIDDEN`; `ACTIONED` and `CLOSED` are excluded. Filing a response is actioned in Aegis, not proof of remediation.
+
+The API returns current `totals`, `services` and `owners`, inclusive UTC dates `from` / `to`, the organization's
+`trend` (daily totals) and `history` (daily `total`, `services` and `owners` as recorded). Omitting `days` selects
+**30 days including today**. Totals and group history are read in one REPEATABLE READ transaction, so a concurrent
+capture cannot mix different versions of a day's observation in the response. Legacy totals-only days remain in
+`trend` but not `history`; a group absent from a recorded day is unknown for that day, not an invented zero.
+The frontend's **Show** selector uses this history to plot the organization, one service, one owner, or Unassigned.
+Removed groups stay selectable as historical; their counts and names come from their recorded days.
+Each material dependency or outage in a service counts once overall. A shared item counts under every assigned
+owner, so owner totals overlap; the unassigned group has a null id. Zero-item services remain visible.
+
+The dashboard links to `/findings?open=true&serviceId=…`, `ownerId=…`, or `unassigned=true`. The triage endpoint applies
+the open/unassigned filters before pagination. The triage page keeps all its filters in those query parameters,
+so Clear, a reload and a shared link show what is on screen.
+
+V44 (`risk_posture_snapshots`; V41–V43 are reserved by CS203-129) stores **only aggregate counts**, scoped by
+`org_id` with RLS through `current_org()`. There is one latest observation per organization and UTC date; an older
+concurrent computation cannot replace a newer one. Each dashboard read refreshes today's observation. No prior
+days are reconstructed from current feeds or the decision log, and missing dates are unknown, not zero.
+
+V45 adds `risk_posture_breakdowns`: one row per UTC day and service, assigned owner, or the **Unassigned** owner
+bucket. Each keeps its id and name as observed, open / critical / high counts and top score; zero-item groups are
+recorded too. Shared items count for every assigned owner, while the organization's total counts each item once.
+The new table has `org_id`, a composite foreign key to its organization's day, and forced RLS through
+`current_org()`. It has no foreign keys to live services or owners, so reassignment, renaming or deletion cannot
+rewrite past observations. Owner display names are retained with the history; no emails are stored.
+
+The snapshot store commits a day's totals and both breakdowns in **one transaction**, replacing the complete set
+only when its observation wins the parent row's timestamp check. This prevents duplicate groups, stale rows after
+a same-day reassignment, and older captures overwriting newer detail. Failed child writes roll back the totals too.
+`PostureSnapshotStore.recordedBetween` reads the day and its groups in one REPEATABLE READ transaction. Old V44
+observations keep `breakdowns_recorded=false`: their totals remain in the chart, but no historical service or owner
+counts are invented. A first new capture of that same day records its actual current groups.
+
+For observations without page views, enable `AEGIS_DASHBOARD_SNAPSHOTS_ENABLED=true` and configure the existing
+identity internal service token (`IDENTITY_SERVICE_TOKEN`, matching identity-service's
+`IDENTITY_INTERNAL_SERVICE_TOKEN`). The job runs only while holding `SchedulerLease`, captures each organization
+independently and continues if one fails. The job runs **daily at 23:55 UTC**, configurable with
+`AEGIS_DASHBOARD_SNAPSHOTS_CRON` (Spring's six-field cron; the zone stays UTC). This replaces the earlier interval
+and initial-delay settings. Docker Compose enables it with its existing dev token, and both AWS environments with
+`dashboard_snapshots_enabled` (Terraform; it needs the `identity-internal-token` parameter). The chart uses the last
+observation each day, with today marked partial, and makes the raw daily counts available in a table. Findings
+themselves are still recomputed, not persisted.
+
+Tests: `RiskPostureTest`, `PostureSnapshotJobTest`, `RiskPostureIntegrationTest` (real PostgreSQL, RLS, daily upsert,
+history gaps, the default 30-day API boundary, RBAC and triage drill-down), and frontend `e2e/dashboard.spec.ts`
+(current posture, service/owner trends, historical groups, unknown versus zero days, period changes, loading,
+permissions, retries, workspace switching and mobile layout).
+
 ## Owner notifications (E9 Story 5)
 
 When an item in the triage queue needs a decision — **New** (no response yet) or **In review** (drafted,
@@ -583,8 +639,8 @@ domain. See `ARCHITECTURE.md` for the topology.
 - **Auth** — OAuth2 resource server; validates identity-service's RS256 JWTs via its JWKS
   (`IDENTITY_JWKS_URI`), maps the `roles` claim, and authorizes per route.
 - **Observability** — `/actuator/health|info|prometheus`, traces to Zipkin (propagated to the
-  ai-service), and per-ingestion-feed health/counts/last-success metrics (see "Ingestion feed
-  health" below and `ops/README.md`).
+  ai-service), per-feed health/counts/last success, match/score/draft histograms, and an optional
+  aggregate decision queue gauge. Grafana, alert thresholds and runbooks: [`ops/README.md`](../../ops/README.md).
 
 ### Key environment variables
 
@@ -614,14 +670,17 @@ domain. See `ARCHITECTURE.md` for the topology.
 | `AEGIS_VENDOR_STATUS_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → vendor-incident drain |
 | `AEGIS_INGESTION_NEWS_ENABLED` | `false` | Poll security news feeds (Docker Compose sets `true`) |
 | `AEGIS_NEWS_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → news-item drain |
-| `AEGIS_INGESTION_HEALTH_STALE_AFTER` | `PT45M` | How long since a feed's last success before `aegis_ingestion_health` reports unhealthy |
+| `AEGIS_INGESTION_HEALTH_STALE_AFTER` | `PT45M` | How long since a feed's last success before health reports unhealthy; self-scheduled OSV adds its poll interval to this grace |
 | `AEGIS_INGESTION_OSV_ENABLED` | `false` | Sync OSV's per-ecosystem exports ([OSV connector](#osv-connector-ecosystem-advisories)) |
 | `AEGIS_OSV_ECOSYSTEMS` | `npm,PyPI,crates.io,RubyGems,Go,Maven` | Exact OSV bucket names to sync, comma-separated |
 | `AEGIS_OSV_INCLUDE_MALICIOUS` | `false` | Also import OSV's malicious-package reports (`MAL-*`) |
 | `AEGIS_OSV_POLL_INTERVAL` / `AEGIS_OSV_INITIAL_DELAY` | `P1D` / `PT30S` | How often the bulk sync runs, and how long after startup it first does |
+| `AEGIS_OSV_RETRY_DELAY` | `PT15M` | How long after a failed sync to try again; doubled for each further failure in a row, never longer than the poll interval |
 | `AEGIS_OSV_NORMALIZE_INTERVAL` | `PT1M` | Cadence of the raw-event → advisory drain for OSV |
 | `AEGIS_OSV_BASE_URL` | OSV's export bucket | Override the export host (a mirror, tests) |
 | `AEGIS_SCHEDULING_POOL_SIZE` | `6` | Scheduler threads, so OSV's long sync never starves the other feeds' drains |
+| `AEGIS_METRICS_DECISION_QUEUE_ENABLED` | `false` (Compose: `true`) | Collect Review & approve depth across organizations under the scheduler lease; needs the identity internal service token |
+| `AEGIS_METRICS_DECISION_QUEUE_INTERVAL` | `PT1M` | Background refresh cadence; keep at most one minute with the supplied alert freshness threshold |
 | `AEGIS_SCHEDULER_LEASE_DURATION` / `AEGIS_SCHEDULER_LEASE_RENEWAL` | `PT2M` / `PT30S` | How long the instance running the scheduled jobs holds the lease, and how often it renews it (V30) |
 | `AEGIS_SBOM_GENERATION_ENABLED` | `true` | Import SBOMs from a service's linked repository (git + syft in the image) |
 | `AEGIS_SBOM_ALLOWED_HOSTS` | `github.com,gitlab.com,bitbucket.org` | Hosts a repository may be linked on and cloned from — the SSRF boundary |
@@ -990,7 +1049,8 @@ change signal (ADR §6a).
   so the connector runs on its own schedule (`AEGIS_OSV_POLL_INTERVAL`, daily) instead of the 15-minute poll
   loop, and streams each record straight into the raw-event store (constant memory). The raw-event id is
   `{osvId}@{sha256 prefix of the record}`, so a revised record re-normalises and an unchanged one
-  de-duplicates.
+  de-duplicates. A failed sync is retried after `AEGIS_OSV_RETRY_DELAY` (15 minutes), doubled for each
+  further failure in a row up to the poll interval, rather than waiting for the next day.
 - **Off by default** like every feed: `AEGIS_INGESTION_OSV_ENABLED=true`, and `AEGIS_OSV_ECOSYSTEMS` with
   OSV's exact bucket names. Malicious-package reports (`MAL-*`, most of npm's records) are skipped unless
   `AEGIS_OSV_INCLUDE_MALICIOUS=true`: they are malware reports, not vulnerabilities.
@@ -1098,11 +1158,14 @@ per-source APIs above.
 Per-feed health, record counts, and last-success time — exposed as Micrometer metrics on the
 existing `/actuator/prometheus` endpoint (no new REST surface; nothing here needs a JWT, since
 `/actuator/prometheus` is already public — see `SecurityConfig`). `IngestionFeedMetrics` registers
-one series per `IngestionSource` bean (`nvd`, `vendor-status`, `security-news` today) at startup:
+one series per `IngestionSource` bean (`nvd`, `vendor-status`, `security-news`) at startup;
+self-scheduled OSV registers its series and cadence when its connector is enabled:
 
 - `aegis_ingestion_health{source_id}` — 1 (healthy) or 0. Unhealthy if the feed has never
   succeeded, its most recent poll attempt failed, or it's been longer than
-  `aegis.ingestion.health.stale-after` (default 45m) since its last success.
+  `aegis.ingestion.health.stale-after` (default 45m) since its last success. OSV records its own
+  bulk-sync outcomes and adds its poll interval to that grace (24h 45m by default), so it stays
+  healthy between successful daily syncs; an explicit sync failure still makes it unhealthy immediately.
 - `aegis_ingestion_last_success_timestamp_seconds{source_id}` — epoch seconds of the last
   successful poll.
 - `aegis_ingestion_poll_total{source_id,outcome}` and `aegis_ingestion_poll_records_total

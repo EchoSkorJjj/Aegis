@@ -18,9 +18,9 @@ const CRITICALITY: { value: BusinessCriticality; label: string }[] = [
 
 const CRITICALITY_CLASS: Record<BusinessCriticality, string> = {
   LOW: "bg-muted text-muted-foreground",
-  MEDIUM: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
-  HIGH: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  CRITICAL: "bg-red-500/10 text-red-600 dark:text-red-400",
+  MEDIUM: "bg-sky-500/10 text-sky-800 dark:text-sky-400",
+  HIGH: "bg-amber-500/10 text-amber-800 dark:text-amber-400",
+  CRITICAL: "bg-red-500/10 text-red-800 dark:text-red-400",
 };
 
 // Ordered least → most exposed. INTERNAL is the shipped default (see the field below): it is the
@@ -34,8 +34,8 @@ const EXPOSURE: { value: ServiceExposure; label: string }[] = [
 
 const EXPOSURE_CLASS: Record<ServiceExposure, string> = {
   ISOLATED: "bg-muted text-muted-foreground",
-  INTERNAL: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
-  INTERNET_FACING: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  INTERNAL: "bg-sky-500/10 text-sky-800 dark:text-sky-400",
+  INTERNET_FACING: "bg-amber-500/10 text-amber-800 dark:text-amber-400",
 };
 
 const EXPOSURE_LABEL: Record<ServiceExposure, string> = {

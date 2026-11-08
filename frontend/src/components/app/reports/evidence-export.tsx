@@ -164,7 +164,7 @@ function ExportForm() {
             {serviceId === "" ? "Choose a service" : "Choose a period"} to see what the export holds.
           </p>
         ) : previewError ? (
-          <p className="text-sm text-red-600 dark:text-red-400">{previewError}</p>
+          <p className="text-sm text-red-800 dark:text-red-400">{previewError}</p>
         ) : preview === null ? (
           <Skeleton className="h-16 w-full" />
         ) : (
@@ -211,7 +211,7 @@ function ExportForm() {
       </div>
 
       {error && (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm text-red-800 dark:text-red-400">
           {error}
         </p>
       )}

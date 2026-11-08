@@ -35,21 +35,21 @@ import { useAuth } from "@/providers/auth-provider";
 type Status = "loading" | "ok" | "forbidden" | "notfound" | "unmatchable" | "error";
 
 const SIGNAL_TYPE: Record<SignalType, { label: string; className: string }> = {
-  VULNERABILITY: { label: "Vulnerability", className: "bg-red-500/10 text-red-600 dark:text-red-400" },
-  VENDOR_OUTAGE: { label: "Vendor outage", className: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
-  SECURITY_NEWS: { label: "Security news", className: "bg-sky-500/10 text-sky-600 dark:text-sky-400" },
+  VULNERABILITY: { label: "Vulnerability", className: "bg-red-500/10 text-red-800 dark:text-red-400" },
+  VENDOR_OUTAGE: { label: "Vendor outage", className: "bg-amber-500/10 text-amber-800 dark:text-amber-400" },
+  SECURITY_NEWS: { label: "Security news", className: "bg-sky-500/10 text-sky-800 dark:text-sky-400" },
 };
 
 const CRITICALITY_CLASS: Record<BusinessCriticality, string> = {
   LOW: "bg-muted text-muted-foreground",
-  MEDIUM: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
-  HIGH: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  CRITICAL: "bg-red-500/10 text-red-600 dark:text-red-400",
+  MEDIUM: "bg-sky-500/10 text-sky-800 dark:text-sky-400",
+  HIGH: "bg-amber-500/10 text-amber-800 dark:text-amber-400",
+  CRITICAL: "bg-red-500/10 text-red-800 dark:text-red-400",
 };
 
 const CONFIDENCE: Record<MatchConfidence, { label: string; className: string }> = {
-  CONFIRMED: { label: "Confirmed", className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" },
-  POSSIBLE: { label: "Needs review", className: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
+  CONFIRMED: { label: "Confirmed", className: "bg-emerald-500/10 text-emerald-800 dark:text-emerald-400" },
+  POSSIBLE: { label: "Needs review", className: "bg-amber-500/10 text-amber-800 dark:text-amber-400" },
 };
 
 const IDENTITY_LABEL: Record<IdentityMatch, string> = {
@@ -65,11 +65,11 @@ const VERSION_LABEL: Record<VersionMatchState, string> = {
 };
 
 const TIER_CLASS: Record<ImpactTier, string> = {
-  CRITICAL: "bg-red-500/10 text-red-600 dark:text-red-400",
-  HIGH: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  MEDIUM: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+  CRITICAL: "bg-red-500/10 text-red-800 dark:text-red-400",
+  HIGH: "bg-amber-500/10 text-amber-800 dark:text-amber-400",
+  MEDIUM: "bg-sky-500/10 text-sky-800 dark:text-sky-400",
   LOW: "bg-muted text-muted-foreground",
-  NEGLIGIBLE: "bg-muted text-muted-foreground/70",
+  NEGLIGIBLE: "bg-muted text-muted-foreground",
 };
 
 const FACTOR_LABEL: Record<ScoreFactorKind, string> = {
@@ -215,7 +215,7 @@ function ImpactView({ signalId, finding }: { signalId: string; finding: boolean 
         {needsReview > 0 && (
           <>
             <span className="text-muted-foreground/40">·</span>
-            <span className="font-medium text-amber-600 dark:text-amber-400">{needsReview} need review</span>
+            <span className="font-medium text-amber-800 dark:text-amber-400">{needsReview} need review</span>
           </>
         )}
         <span className="text-muted-foreground/40">·</span>
@@ -455,18 +455,18 @@ function FactorRow({ factor, notApplied }: { factor: ScoreFactor; notApplied: bo
       </div>
       <div className="w-20 shrink-0 text-right text-xs tabular-nums">
         {notApplied ? (
-          <span className="text-muted-foreground/70">n/a</span>
+          <span className="text-muted-foreground">n/a</span>
         ) : factor.headroom > 0 ? (
           <span
             className={
-              factor.limiting ? "font-medium text-amber-600 dark:text-amber-400" : "text-muted-foreground"
+              factor.limiting ? "font-medium text-amber-800 dark:text-amber-400" : "text-muted-foreground"
             }
             title={`${factor.headroom.toFixed(1)} points higher if this factor were at its maximum`}
           >
             −{factor.headroom.toFixed(1)} pts
           </span>
         ) : (
-          <span className="text-muted-foreground/70">at max</span>
+          <span className="text-muted-foreground">at max</span>
         )}
       </div>
     </li>
@@ -544,7 +544,7 @@ function Evidence({ evidence }: { evidence: EvidenceChain }) {
             {evidence.componentPath.map((component, index) => (
               <Fragment key={component.id}>
                 {index > 0 && <ArrowRight className="size-3 shrink-0 text-muted-foreground" />}
-                <span className="rounded border bg-background px-1.5 py-0.5 text-xs">
+                <span className="min-w-0 rounded border bg-background px-1.5 py-0.5 text-xs [overflow-wrap:anywhere]">
                   <span className="font-medium">{component.name}</span>{" "}
                   <span className="text-muted-foreground">{component.version}</span>
                 </span>
@@ -586,7 +586,7 @@ function AffectedProduct({ affected }: { affected: AffectedProductEvidence }) {
 function MetaBadge({ children, tone }: { children: React.ReactNode; tone?: "warn" }) {
   const className =
     tone === "warn"
-      ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+      ? "bg-amber-500/10 text-amber-800 dark:text-amber-400"
       : "bg-muted text-muted-foreground";
   return <span className={`rounded px-1.5 py-0.5 font-medium ${className}`}>{children}</span>;
 }

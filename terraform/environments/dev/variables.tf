@@ -127,6 +127,12 @@ variable "owner_notifications_enabled" {
   default     = false
 }
 
+variable "dashboard_snapshots_enabled" {
+  description = "Records each organization's risk posture once a day (23:55 UTC) for the dashboard's trend, even when nobody opens it; off, a day is recorded only when someone views the dashboard. Needs the identity-internal-token parameter in SSM."
+  type        = bool
+  default     = false
+}
+
 variable "jira_enabled" {
   description = "Turns Jira on (filing risk tickets). Needs its client ID here and its client secret and the secrets key in SSM."
   type        = bool

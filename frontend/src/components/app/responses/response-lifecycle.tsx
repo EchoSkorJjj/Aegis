@@ -44,13 +44,13 @@ function StepMarker({ state, index }: { state: StepState; index: number }) {
   const base = "flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-medium";
   if (state === "done") {
     return (
-      <span className={`${base} bg-emerald-500/15 text-emerald-600 dark:text-emerald-400`}>
+      <span className={`${base} bg-emerald-500/15 text-emerald-800 dark:text-emerald-400`}>
         <Check className="size-3" />
       </span>
     );
   }
   if (state === "current") {
-    return <span className={`${base} bg-amber-500/15 text-amber-600 ring-1 ring-amber-500/40 dark:text-amber-400`}>{index + 1}</span>;
+    return <span className={`${base} bg-amber-500/15 text-amber-800 ring-1 ring-amber-500/40 dark:text-amber-400`}>{index + 1}</span>;
   }
   return <span className={`${base} bg-muted text-muted-foreground`}>{index + 1}</span>;
 }

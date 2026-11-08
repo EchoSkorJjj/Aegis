@@ -24,3 +24,7 @@ registration_enabled = true
 # bootstrap_admin_email = "<a platform admin, optional>"
 # privacy_operator     = "<who runs this deployment>"
 # privacy_contact      = "<email or https link>"
+
+# The dashboard's daily risk-posture record (23:55 UTC). Like owner notifications, it needs the
+# identity-internal-token parameter: create it first (README, step 2).
+dashboard_snapshots_enabled = true

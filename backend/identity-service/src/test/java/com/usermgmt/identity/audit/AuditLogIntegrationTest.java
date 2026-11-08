@@ -1,5 +1,7 @@
 package com.usermgmt.identity.audit;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 import com.usermgmt.identity.support.AbstractIntegrationTest;
@@ -14,6 +16,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.everyItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -64,6 +68,39 @@ class AuditLogIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.content[0].eventType").value("LOGIN_FAILED"))
                 .andExpect(jsonPath("$.content[0].outcome").value("FAILURE"))
                 .andExpect(jsonPath("$.content[0].actorEmail").value("mallory@example.com"));
+    }
+
+    @Test
+    void trail_filters_by_outcome_and_period() throws Exception {
+        String auditorEmail = "auditor-" + UUID.randomUUID() + "@example.com";
+        User auditor = new User(UUID.randomUUID(), auditorEmail, passwordEncoder.encode("password123"), "Auditor");
+        auditor.getRoles().add(Role.USER);
+        auditor.getRoles().add(Role.PLATFORM_ADMIN);
+        users.save(auditor);
+        String tried = "tried-" + UUID.randomUUID() + "@example.com";
+        registerUser(tried, "password123", "Tried");
+        mvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonObject("email", tried, "password", "wrong-password")))
+                .andExpect(status().isUnauthorized());
+        String token = login(auditorEmail, "password123");
+        Instant hourAgo = Instant.now().minus(1, ChronoUnit.HOURS);
+        Instant inAnHour = Instant.now().plus(1, ChronoUnit.HOURS);
+
+        mvc.perform(get("/audit").param("actorEmail", tried.toUpperCase()).param("outcome", "FAILURE")
+                        .param("from", hourAgo.toString()).param("to", inAnHour.toString())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].actorEmail").value(tried))
+                .andExpect(jsonPath("$.content[*].outcome", everyItem(equalTo("FAILURE"))));
+        mvc.perform(get("/audit").param("actorEmail", tried).param("to", hourAgo.toString())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty());
+        mvc.perform(get("/audit").param("actorEmail", tried).param("from", inAnHour.toString())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty());
     }
 
     @Test

@@ -22,9 +22,9 @@ import type {
 
 const CRITICALITY_CLASS: Record<BusinessCriticality, string> = {
   LOW: "bg-muted text-muted-foreground",
-  MEDIUM: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
-  HIGH: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  CRITICAL: "bg-red-500/10 text-red-600 dark:text-red-400",
+  MEDIUM: "bg-sky-500/10 text-sky-800 dark:text-sky-400",
+  HIGH: "bg-amber-500/10 text-amber-800 dark:text-amber-400",
+  CRITICAL: "bg-red-500/10 text-red-800 dark:text-red-400",
 };
 
 /** Every service using any version of this component's package: directly, or through which component. */
@@ -180,7 +180,7 @@ function ServiceName({ service }: { service: BusinessService }) {
 
 function Direct() {
   return (
-    <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 font-medium text-emerald-600 dark:text-emerald-400">
+    <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 font-medium text-emerald-800 dark:text-emerald-400">
       Direct
     </span>
   );

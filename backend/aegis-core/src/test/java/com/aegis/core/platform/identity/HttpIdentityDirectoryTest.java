@@ -126,4 +126,65 @@ class HttpIdentityDirectoryTest {
         assertThatThrownBy(() -> directory().findMember(UUID.randomUUID()))
                 .isInstanceOf(IllegalStateException.class);
     }
+
+    private void signInACaller() {
+        Jwt jwt = Jwt.withTokenValue("caller-token").header("alg", "none").claim("sub", "caller").build();
+        SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt));
+    }
+
+    private static String memberPage(int size) {
+        StringBuilder content = new StringBuilder();
+        for (int index = 0; index < size; index++) {
+            content.append(index == 0 ? "" : ",").append("{\"id\":\"").append(UUID.randomUUID()).append("\",\"enabled\":true}");
+        }
+        return "{\"content\":[" + content + "],\"totalElements\":501}";
+    }
+
+    @Test
+    void readsEveryPageOfMembersWithTheCallersToken() {
+        signInACaller();
+        AtomicReference<String> lastQuery = new AtomicReference<>();
+        server.createContext("/users", exchange -> {
+            String query = exchange.getRequestURI().getQuery();
+            lastQuery.set(query);
+            seenAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            byte[] bytes = memberPage(query.contains("page=0") ? HttpIdentityDirectory.MEMBER_PAGE : 1)
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+
+        assertThat(directory().members()).hasSize(HttpIdentityDirectory.MEMBER_PAGE + 1);
+        assertThat(seenAuthorization.get()).isEqualTo("Bearer caller-token");
+        assertThat(lastQuery.get()).contains("page=1").contains("sort=id,asc");
+    }
+
+    @Test
+    void anUnreadableOrFailedMemberListIsAnUpstreamErrorNotAnEmptyDirectory() {
+        signInACaller();
+        status = 200;
+        body = "not json";
+        assertThatThrownBy(() -> directory().members()).isInstanceOf(ApiExceptions.UpstreamUnavailable.class);
+
+        body = "{\"totalElements\":0}";
+        assertThatThrownBy(() -> directory().members()).isInstanceOf(ApiExceptions.UpstreamUnavailable.class);
+
+        status = 500;
+        assertThatThrownBy(() -> directory().members()).isInstanceOf(ApiExceptions.UpstreamUnavailable.class);
+    }
+
+    @Test
+    void anUnreadableMemberRecordIsAnUpstreamError() {
+        signInACaller();
+        status = 200;
+        body = "";
+        assertThatThrownBy(() -> directory().findMember(UUID.randomUUID()))
+                .isInstanceOf(ApiExceptions.UpstreamUnavailable.class);
+
+        body = "not json";
+        assertThatThrownBy(() -> directory().findMember(UUID.randomUUID()))
+                .isInstanceOf(ApiExceptions.UpstreamUnavailable.class);
+    }
 }

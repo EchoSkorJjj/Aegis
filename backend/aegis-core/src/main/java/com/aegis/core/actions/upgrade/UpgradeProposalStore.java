@@ -15,6 +15,9 @@ import org.springframework.data.domain.Pageable;
  */
 public interface UpgradeProposalStore {
 
+    /** Pending standalone proposals; proposals attached to tickets are counted with their ticket. */
+    long countPendingStandalone();
+
     /** Insert a new proposal in the caller's organization. */
     UpgradeProposal create(UpgradeProposal proposal);
 

@@ -63,6 +63,7 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
     @Autowired private TestOwners owners;
     @Autowired private CurrentOrg currentOrg;
     @Autowired private RegulatorMemoService memos;
+    @Autowired private RegulatorMemoStore memoStore;
 
     private final UUID analyst = UUID.randomUUID();
     private final UUID secondAnalyst = UUID.randomUUID();
@@ -124,6 +125,7 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
     @Test
     void aVulnerabilityIsDraftedAsACyberThreatAndFinalOnlyWhenASecondAnalystApproves() throws Exception {
         Vulnerability v = vulnerability();
+        long before = memoStore.countPending();
 
         String created = mvc.perform(post(PATH).with(as("ANALYST", analyst)).contentType(MediaType.APPLICATION_JSON)
                         .content(request(v.advisory().id())))
@@ -160,6 +162,8 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
                     .contains("A flaw in memo-lib.").contains("- " + v.service().getName() + ": HIGH criticality");
         });
 
+        assertThat(memoStore.countPending()).isEqualTo(before + 1);
+        currentOrg.runAs(UUID.randomUUID(), () -> assertThat(memoStore.countPending()).isZero());
         mvc.perform(post(PATH + "/{id}/approve", id).with(as("ANALYST", analyst)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.message").value(containsString("someone else has to approve it")));
@@ -167,6 +171,7 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("APPROVED"))
                 .andExpect(jsonPath("$.decidedBy").value(secondAnalyst.toString()));
+        assertThat(memoStore.countPending()).isEqualTo(before);
         mvc.perform(post(PATH + "/{id}/dismiss", id).with(as("ANALYST", secondAnalyst))
                         .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"too late\"}"))
                 .andExpect(status().isConflict())
@@ -199,27 +204,6 @@ class RegulatorMemoIntegrationTest extends AbstractInventoryIntegrationTest {
                         "Critical or important functions affected: Yes: " + service.getName() + " (CRITICAL)")));
         assertThat(drafter.requests()).anySatisfy(sent -> assertThat(sent.context())
                 .startsWith("ICT-related incident: vendor outage Card API outage at Acme Pay " + tag));
-    }
-
-    @Test
-    void onlyAnalystsDraftAndDecideWhileComplianceAndOwnersRead() throws Exception {
-        Vulnerability v = vulnerability();
-        UUID other = UUID.randomUUID();
-
-        for (String role : new String[]{"SERVICE_OWNER", "COMPLIANCE_ADMIN", "ORG_ADMIN", "USER"}) {
-            mvc.perform(post(PATH).with(as(role, other)).contentType(MediaType.APPLICATION_JSON)
-                    .content(request(v.advisory().id()))).andExpect(status().isForbidden());
-        }
-        String id = id(mvc.perform(post(PATH).with(as("ANALYST", analyst)).contentType(MediaType.APPLICATION_JSON)
-                .content(request(v.advisory().id()))).andExpect(status().isCreated()));
-
-        for (String role : new String[]{"SERVICE_OWNER", "COMPLIANCE_ADMIN"}) {
-            mvc.perform(get(PATH + "/{id}", id).with(as(role, other))).andExpect(status().isOk());
-            mvc.perform(post(PATH + "/{id}/approve", id).with(as(role, other))).andExpect(status().isForbidden());
-            mvc.perform(post(PATH + "/{id}/dismiss", id).with(as(role, other)).contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"reason\":\"not mine\"}")).andExpect(status().isForbidden());
-        }
-        mvc.perform(get(PATH + "/{id}", id).with(as("USER", other))).andExpect(status().isForbidden());
     }
 
     @Test

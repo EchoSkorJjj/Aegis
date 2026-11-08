@@ -96,6 +96,24 @@ The dev server serves http://localhost:3000 and calls the gateway that Compose p
 | `TRUSTED_PROXY_HOPS` | `1` | How many proxies in front of this server append to `X-Forwarded-For`: 1 for a load balancer |
 | `PRIVACY_OPERATOR`, `PRIVACY_CONTACT` | empty | Who runs this deployment, and an email address or link to reach them, shown on `/privacy` |
 
+## Risk posture dashboard (CS203-130)
+
+`/dashboard` shows the active organization's open material items by service and owner, stages, critical/high
+impact, unassigned items and a 7/30/90-day trend. Domain readers use the existing findings BFF; organization admins
+without a domain role see a member-management link instead. Selecting a service, owner or the unassigned group
+opens the triage queue with matching filters. The backend defines open as New, In review, Approved or Overridden;
+actioned and dismissed responses are excluded, not treated as proof the risk was fixed. Owner totals may overlap.
+
+Trend points are daily UTC observations, not reconstructed history. Missing dates remain unknown, today is partial,
+and **Daily counts** exposes the chart's values without relying on color or pointer interaction. The page handles
+loading, failed requests, an empty estate, zero open items and workspace changes. `e2e/dashboard.spec.ts` exercises
+the browser contract using the fake BFF; the core integration tests cover counting, snapshots and tenant isolation.
+
+The default trend covers **30 days including today**. **Show** selects the organization, a service, an owner, or
+Unassigned. Service/owner points come from the API's daily `history`, preserving ownership as it was on each day;
+removed groups remain selectable as historical. A group with no observation on a day is **Not recorded**; it only
+shows zero when zero was actually recorded. The selection survives period changes and resets on workspace changes.
+
 ## Checks and tests
 
 | Check | Command | Needs |
@@ -105,10 +123,14 @@ The dev server serves http://localhost:3000 and calls the gateway that Compose p
 | Build | `pnpm build` | Nothing else |
 | End to end | `pnpm test:e2e` | identity-service, the gateway and Mailhog |
 
-The end-to-end suite runs 74 Playwright tests in Chromium. Sign-up, sign-in, organizations and the admin pages run
+The end-to-end suite runs Playwright in Chromium. Sign-up, sign-in, organizations and the admin pages run
 against the real identity-service and gateway, reading the emailed sign-in codes from Mailhog. The other specs need
 no aegis-core: the estate and response pages are checked against a fake BFF in the browser, and aegis-core's own
 tests cover its rules.
+
+`accessibility.spec.ts` holds every page to the same bar, on data recorded from the real stack: at phone width
+nothing runs off the screen, every control can be reached by keyboard, and axe finds no WCAG A or AA failure, which
+includes a field without a label. A new page fails that spec until it is added to the spec's list.
 
 To run it locally, install the browser once:
 

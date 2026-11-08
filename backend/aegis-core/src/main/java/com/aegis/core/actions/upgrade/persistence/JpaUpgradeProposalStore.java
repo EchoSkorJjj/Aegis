@@ -64,6 +64,15 @@ class JpaUpgradeProposalStore implements UpgradeProposalStore {
 
     @Override
     @Transactional(readOnly = true)
+    public long countPendingStandalone() {
+        UUID org = scope();
+        return proposals.count((root, query, cb) -> cb.and(cb.equal(root.get("orgId"), org),
+                cb.isNull(root.get("riskTicketId")), root.get("status").in(
+                        UpgradeProposalStatus.PROPOSED, UpgradeProposalStatus.OPENING, UpgradeProposalStatus.FAILED)));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Optional<UpgradeProposal> find(UUID id) {
         return proposals.findByIdAndOrgId(id, scope()).map(this::domain);
     }

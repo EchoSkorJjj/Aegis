@@ -103,6 +103,7 @@ locals {
         AEGIS_GITHUB_CALLBACK_URL             = "${local.app_url}/admin/integrations/github/callback"
         AEGIS_JIRA_ENABLED                    = tostring(var.jira_enabled)
         AEGIS_NOTIFICATIONS_ENABLED           = tostring(var.owner_notifications_enabled)
+        AEGIS_DASHBOARD_SNAPSHOTS_ENABLED     = tostring(var.dashboard_snapshots_enabled)
         AEGIS_JIRA_CLIENT_ID                  = var.jira_client_id
         AEGIS_JIRA_CALLBACK_URL               = "${local.app_url}/admin/integrations/jira/callback"
         TRACING_SAMPLE_RATE                   = "0"
@@ -121,6 +122,9 @@ locals {
     }
   }
 
+  # Both scheduled jobs that work for no user reach identity-service's internal API with this one token.
+  identity_internal_api = var.owner_notifications_enabled || var.dashboard_snapshots_enabled
+
   # The secrets each service reads: environment variable => SSM parameter (under /aegis/<environment>/), and
   # whether it's needed. Only what's needed gets a parameter; a person fills its value in (see outputs).
   secret_candidates = {
@@ -134,7 +138,7 @@ locals {
       SPRING_MAIL_USERNAME              = { parameter = "identity/smtp-username", needed = true }
       SPRING_MAIL_PASSWORD              = { parameter = "identity/smtp-password", needed = true }
       IDENTITY_BOOTSTRAP_ADMIN_PASSWORD = { parameter = "identity/bootstrap-admin-password", needed = var.bootstrap_admin_email != "" }
-      IDENTITY_INTERNAL_SERVICE_TOKEN   = { parameter = "identity-internal-token", needed = var.owner_notifications_enabled }
+      IDENTITY_INTERNAL_SERVICE_TOKEN   = { parameter = "identity-internal-token", needed = local.identity_internal_api }
     }
 
     "aegis-core" = {
@@ -145,7 +149,7 @@ locals {
       AEGIS_JIRA_CLIENT_SECRET       = { parameter = "core/jira-client-secret", needed = var.jira_enabled }
       AEGIS_SECRETS_KEY              = { parameter = "core/secrets-key", needed = var.jira_enabled }
       AEGIS_NVD_API_KEY              = { parameter = "core/nvd-api-key", needed = var.nvd_api_key_enabled }
-      IDENTITY_SERVICE_TOKEN         = { parameter = "identity-internal-token", needed = var.owner_notifications_enabled }
+      IDENTITY_SERVICE_TOKEN         = { parameter = "identity-internal-token", needed = local.identity_internal_api }
     }
 
     "ai-service" = {

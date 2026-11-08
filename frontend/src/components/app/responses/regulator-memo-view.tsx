@@ -231,7 +231,7 @@ export function RegulatorMemoView({ memoId }: { memoId: string }) {
             Everything marked &ldquo;[To be confirmed]&rdquo; is for a person to complete.
           </p>
         </div>
-        <pre className="max-h-[40rem] overflow-auto p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
+        <pre tabIndex={0} className="focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none max-h-[40rem] overflow-auto p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
           {memo.body}
         </pre>
         {memo.citations.length > 0 && (

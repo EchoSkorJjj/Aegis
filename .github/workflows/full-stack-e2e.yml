@@ -1,0 +1,80 @@
+name: full-stack-e2e
+
+# The core journeys through the whole product (frontend/e2e-full-stack): the real frontend, gateway, identity-service,
+# aegis-core and ai-service (stub provider), with only NVD and Atlassian faked.
+on:
+  push:
+    paths:
+      - "frontend/**"
+      - "backend/**"
+      - ".github/workflows/full-stack-e2e.yml"
+  pull_request:
+    paths:
+      - "frontend/**"
+      - "backend/**"
+      - ".github/workflows/full-stack-e2e.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  journeys:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        working-directory: frontend
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Start the backend
+        working-directory: frontend
+        run: e2e-full-stack/stack.sh up
+
+      - name: Run the journeys
+        working-directory: frontend
+        run: pnpm exec playwright test --config playwright.full-stack.config.ts
+
+      - name: Show the backend's logs
+        if: ${{ failure() }}
+        run: tail -n 80 "${TMPDIR:-/tmp}"/aegis-full-stack/*.log
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-stack-playwright-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
