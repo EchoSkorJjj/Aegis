@@ -125,6 +125,9 @@ run, judged on what a few runs can measure (thresholds fixed in `runner.py`): a 
 capability's mean score falling more than 5 points, a case's more than 15, more runs breaking a
 constraint than the baseline had plus 2, or an expected blocked case not blocked on every run. A case
 that changed verdict is listed for review, not failed on: near its pass rate, it changes between runs
-of the same code. A model or prompt change is
+of the same code. A run the provider didn't answer (a rate or quota limit, an outage, a timeout)
+scores zero, which says nothing about quality: with any, the run fails as **inconclusive**, comparing
+no scores or verdicts, only the guardrail and constraint checks, which a refusal can't affect; a
+baseline must have none. A model or prompt change is
 measured against the baseline it replaces: re-baseline only on purpose, with the reason in the
 pull request. A full minute of the token budget is waited out, never counted as a failed run.

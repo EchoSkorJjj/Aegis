@@ -4,21 +4,16 @@ name: ai-evaluation
 # (backend/ai-service/evaluation-baseline.json) on what three runs can measure (CS203-231): a draft type's or
 # capability's mean score falling more than 5 points, a case's more than 15, more runs breaking a constraint than the
 # baseline plus 2, or a guardrail case not blocked, fails the run. A case changing verdict is listed in the summary,
-# not failed on: a case near its pass rate changes between runs of the same code. The golden replay in ai-service-ci
-# can't see a prompt or model change; this can. It runs only when the AI changes, or on demand: a run costs about 90,000 tokens of
-# the Groq account, so runs never overlap.
+# not failed on: a case near its pass rate changes between runs of the same code. A run Groq didn't answer (its rate or
+# quota limit) scores nothing, so with any the run fails as inconclusive, comparing no scores; re-run it later. The
+# golden replay in ai-service-ci can't see a prompt or model change; this can. A run costs about 90,000 tokens of the
+# Groq account's allowance, so it runs only on a pull request into develop that changes the AI (each push to one runs
+# it again), never on a push or a pull request into main: that code was evaluated on its way into develop. (Running on
+# the merge into develop and on the pull request into main evaluated one commit twice on 2026-11-08, after its pull
+# request had, and Groq stopped answering.) Re-run it from the Actions page, or on demand; runs never overlap.
 on:
   pull_request:
-    paths:
-      - "backend/ai-service/src/ai_service/prompts/**"
-      - "backend/ai-service/src/ai_service/capabilities/**"
-      - "backend/ai-service/src/ai_service/llm/**"
-      - "backend/ai-service/src/ai_service/evaluation/**"
-      - "backend/ai-service/src/ai_service/schemas.py"
-      - "backend/ai-service/evaluation-baseline.json"
-      - ".github/workflows/ai-evaluation.yml"
-  push:
-    branches: [develop, main]
+    branches: [develop]
     paths:
       - "backend/ai-service/src/ai_service/prompts/**"
       - "backend/ai-service/src/ai_service/capabilities/**"

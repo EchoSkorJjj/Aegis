@@ -273,12 +273,21 @@ def _constraint_runs(report: dict) -> int:
                for case in report["cases"] for run in case["runs"])
 
 
+def _unanswered_runs(report: dict) -> int:
+    # Refused by the provider (a rate or quota limit, an outage, a timeout) or by the token budget after its waits.
+    return sum(run["outcome"] == "unavailable" for case in report["cases"] for run in case["runs"])
+
+
 def compare(report: dict, baseline: dict) -> dict:
     """Regressions against the baseline, judged on what a few runs can measure: a type's mean score falling more
     than ``MAX_TYPE_SCORE_DROP``, a case's more than ``MAX_CASE_SCORE_DROP``, more runs breaking a constraint than the
     baseline had plus ``EXTRA_CONSTRAINT_RUNS``, or a case the guardrails must block not blocked on every run (that is
     code, so never noise). A case changing verdict is listed for a reviewer, not failed on. Only runs of the same
-    corpus, rubric and run count compare."""
+    corpus, rubric and run count compare.
+
+    A run the provider never answered scores zero, which says nothing about quality: with any, no score or verdict is
+    compared and the comparison fails as inconclusive. The guardrail and constraint checks still apply, since blocking
+    happens before the provider is called and a constraint breaks only in a run it answered."""
     for key in ("schema_version", "corpus_hash", "rubric_hash", "runs"):
         if report[key] != baseline.get(key):
             raise ValueError("Baseline must use the same report schema, corpus, rubric and number of runs")
@@ -286,29 +295,34 @@ def compare(report: dict, baseline: dict) -> dict:
     previous = {case["id"]: case for case in baseline["cases"]}
     if current.keys() != previous.keys():
         raise ValueError("Baseline must include the same selected cases")
+    if _unanswered_runs(baseline):
+        raise ValueError("Baseline must be a run the provider answered every run of")
+    unanswered = _unanswered_runs(report)
+    scored = not unanswered
 
     def regression(kind, key, then, now):
         return {"kind": kind, "id": key, "baseline": then, "now": now}
 
     regressions = []
     then_groups = _groups(baseline)
-    for kind, group in _groups(report).items():
+    for kind, group in _groups(report).items() if scored else ():
         then = then_groups[kind]["mean_score"]
         if then is not None and group["mean_score"] is not None and then - group["mean_score"] > MAX_TYPE_SCORE_DROP:
             regressions.append(regression("type_mean_score", kind, then, group["mean_score"]))
     for key, case in current.items():
         if case["expected"] == "blocked" and not case["passed"]:
             regressions.append(regression("not_blocked", key, previous[key]["passed"], False))
-        elif case["expected"] == "draft" and previous[key]["score"] - case["score"] > MAX_CASE_SCORE_DROP:
+        elif scored and case["expected"] == "draft" and previous[key]["score"] - case["score"] > MAX_CASE_SCORE_DROP:
             regressions.append(regression("case_mean_score", key, previous[key]["score"], case["score"]))
     then, now = _constraint_runs(baseline), _constraint_runs(report)
     if now > then + EXTRA_CONSTRAINT_RUNS:
         regressions.append(regression("constraint_runs", "all", then, now))
     changed = [{"id": key, "baseline_run_pass_rate": previous[key]["run_pass_rate"],
                 "run_pass_rate": case["run_pass_rate"], "passed": case["passed"]}
-               for key, case in current.items() if case["passed"] != previous[key]["passed"]]
-    return {"baseline_run_id": baseline["run_id"], "regressions": regressions, "changed": changed,
-            "passed": not regressions}
+               for key, case in current.items() if scored and case["passed"] != previous[key]["passed"]]
+    return {"baseline_run_id": baseline["run_id"], "unanswered_runs": unanswered,
+            "all_runs": sum(len(case["runs"]) for case in report["cases"]),
+            "regressions": regressions, "changed": changed, "passed": scored and not regressions}
 
 
 def _regression_text(item: dict) -> str:
@@ -322,6 +336,12 @@ def _regression_text(item: dict) -> str:
 
 
 def _comparison_lines(comparison: dict) -> list[str]:
+    if comparison["unanswered_runs"]:
+        return [(f"Inconclusive: the provider didn't answer {comparison['unanswered_runs']} of "
+                 f"{comparison['all_runs']} runs (a rate or quota limit, an outage or a timeout), so no scores were "
+                 "compared with the baseline. Re-run when it answers again."), "",
+                "Guardrail and constraint regressions: "
+                + ("; ".join(map(_regression_text, comparison["regressions"])) or "none") + "."]
     lines = ["Regressions against the baseline: "
              + ("; ".join(map(_regression_text, comparison["regressions"])) or "none") + "."]
     if comparison["changed"]:
