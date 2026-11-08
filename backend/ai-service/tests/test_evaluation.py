@@ -16,6 +16,7 @@ from ai_service.evaluation.runner import (
     GoldenClient,
     compare,
     evaluate,
+    job_summary,
     offline_settings,
     write_report,
 )
@@ -174,18 +175,74 @@ def test_invalid_provider_output_is_failed_not_counted_as_a_success(corpus):
     assert report["summary"]["mean_auto_score"] == 0
 
 
-@pytest.mark.parametrize("score,regressed", [(90.0, False), (89.9, True)])
-def test_a_mean_score_drop_regresses_only_beyond_the_limit(golden_report, score, regressed):
-    changed = copy.deepcopy(golden_report)
-    changed["cases"][0]["score"] = score
-    assert (compare(changed, golden_report, max_score_drop=10)["regressions"] == ["ticket-vulnerability"]) is regressed
+def _case(report, case_id):
+    return next(case for case in report["cases"] if case["id"] == case_id)
 
 
-def test_a_case_that_met_its_threshold_in_the_baseline_and_no_longer_does_regresses(golden_report):
+def test_a_borderline_case_missing_its_threshold_is_listed_for_review_not_failed(golden_report):
+    # As in CI with nothing changed: one run of three passing, each failing run 7.5 points down.
     changed = copy.deepcopy(golden_report)
-    changed["cases"][0]["passed"] = False
-    assert not compare(changed, golden_report, max_score_drop=100)["passed"]
-    assert compare(golden_report, changed, max_score_drop=100)["passed"]  # failing then, passing now: no regression
+    case = _case(changed, "memo-cyber-threat")
+    case.update(passed=False, run_pass_rate=0.3333, score=95.0)
+    comparison = compare(changed, golden_report)
+    assert comparison["passed"]
+    assert comparison["changed"] == [{"id": "memo-cyber-threat", "baseline_run_pass_rate": 1.0,
+                                      "run_pass_rate": 0.3333, "passed": False}]
+
+
+@pytest.mark.parametrize("mean,regressed", [(95.0, False), (94.99, True)])
+def test_a_type_whose_mean_score_falls_more_than_five_points_regresses(golden_report, mean, regressed):
+    changed = copy.deepcopy(golden_report)
+    changed["summary"]["by_draft_type"]["memo"]["mean_score"] = mean
+    comparison = compare(changed, golden_report)
+    assert comparison["passed"] is not regressed
+    assert (comparison["regressions"] == [{"kind": "type_mean_score", "id": "memo",
+                                           "baseline": 100.0, "now": mean}]) is regressed
+
+
+@pytest.mark.parametrize("score,regressed", [(85.0, False), (84.99, True)])
+def test_a_case_whose_mean_score_falls_more_than_fifteen_points_regresses(golden_report, score, regressed):
+    changed = copy.deepcopy(golden_report)
+    _case(changed, "upgrade-maven")["score"] = score
+    assert (compare(changed, golden_report)["regressions"] == [
+        {"kind": "case_mean_score", "id": "upgrade-maven", "baseline": 100.0, "now": score}]) is regressed
+
+
+@pytest.mark.parametrize("broken,regressed", [(2, False), (3, True)])
+def test_more_runs_breaking_a_constraint_than_the_baseline_plus_two_regress(golden_report, broken, regressed):
+    changed = copy.deepcopy(golden_report)
+    drafts = [case for case in changed["cases"] if case["expected"] == "draft"]
+    for case in drafts[:broken]:
+        case["runs"][0]["hard_failures"] = ["missing_or_fabricated_citations"]
+    assert (compare(changed, golden_report)["regressions"] == [
+        {"kind": "constraint_runs", "id": "all", "baseline": 0, "now": broken}]) is regressed
+
+
+def test_a_case_the_guardrails_must_block_regresses_unless_blocked_on_every_run(golden_report):
+    changed = copy.deepcopy(golden_report)
+    _case(changed, "memo-injection-blocked")["passed"] = False
+    assert compare(changed, golden_report)["regressions"] == [
+        {"kind": "not_blocked", "id": "memo-injection-blocked", "baseline": True, "now": False}]
+
+
+def test_the_job_summary_counts_runs_the_provider_never_answered(corpus):
+    # So a provider outage reads as one, not as a fall in quality.
+    class Unavailable(GoldenClient):
+        async def generate_json(self, **kwargs):
+            raise ServiceUnavailable("provider is unavailable")
+
+    report = asyncio.run(evaluate(one(corpus, "upgrade-maven"), Unavailable(), offline_settings(), runs=2))
+    assert "Runs without an answer: unavailable 2." in job_summary(report)
+
+
+def test_the_job_summary_names_each_regression_and_each_changed_verdict(golden_report):
+    changed = copy.deepcopy(golden_report)
+    changed["summary"]["by_draft_type"]["memo"]["mean_score"] = 80.0
+    _case(changed, "memo-cyber-threat").update(passed=False, run_pass_rate=0.3333)
+    changed["comparison"] = compare(changed, golden_report)
+    text = job_summary(changed)
+    assert "memo: mean score 100.0 → 80.0" in text
+    assert "memo-cyber-threat: 100% → 33% of runs passing" in text
 
 
 class Answers(GoldenClient):

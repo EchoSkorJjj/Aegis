@@ -56,8 +56,7 @@ async def run(args) -> int:
     finally:
         await client.aclose()
     if args.baseline:
-        report["comparison"] = compare(report, json.loads(args.baseline.read_text(encoding="utf-8")),
-                                       args.max_score_drop)
+        report["comparison"] = compare(report, json.loads(args.baseline.read_text(encoding="utf-8")))
     write_report(report, args.output)
     summary = report["summary"]
     print(f"{report['mode']}: {summary['passed']}/{summary['cases']} cases passed over {args.runs} run(s) each; "
@@ -78,7 +77,6 @@ def main(argv=None) -> int:
     parser.add_argument("--case", action="append", help="Select case ID; repeat to select several")
     parser.add_argument("--output", type=Path, default=Path("evaluation-results/latest"))
     parser.add_argument("--baseline", type=Path, help="Prior report.json for the same corpus selection/rubric")
-    parser.add_argument("--max-score-drop", type=nonnegative, default=0)
     parser.add_argument("--runs", type=positive, default=1,
                         help="Runs per case; a case passes on its pass rate (rubric.RUN_PASS_RATE)")
     parser.add_argument("--delay-seconds", type=nonnegative, default=0,

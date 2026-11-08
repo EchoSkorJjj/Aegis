@@ -1,9 +1,11 @@
 name: ai-evaluation
 
 # The golden cases against the real model (Groq), three runs each, compared with the committed baseline
-# (backend/ai-service/evaluation-baseline.json): a change that makes a case fall below its pass rate, break a constraint,
-# or lose more than 10 points of mean score fails the run (CS203-231). The golden replay in ai-service-ci can't see a
-# prompt or model change; this can. It runs only when the AI changes, or on demand: a run costs about 90,000 tokens of
+# (backend/ai-service/evaluation-baseline.json) on what three runs can measure (CS203-231): a draft type's or
+# capability's mean score falling more than 5 points, a case's more than 15, more runs breaking a constraint than the
+# baseline plus 2, or a guardrail case not blocked, fails the run. A case changing verdict is listed in the summary,
+# not failed on: a case near its pass rate changes between runs of the same code. The golden replay in ai-service-ci
+# can't see a prompt or model change; this can. It runs only when the AI changes, or on demand: a run costs about 90,000 tokens of
 # the Groq account, so runs never overlap.
 on:
   pull_request:
@@ -55,7 +57,8 @@ jobs:
         run: python -m pip install -e '.[dev]'
 
       # Each case three times: quality must pass on two runs in three and the constraints on every run
-      # (ai_service.evaluation.rubric). The per-type pass rates and mean scores go to the job summary.
+      # (ai_service.evaluation.rubric); the regression thresholds are fixed in ai_service.evaluation.runner. The
+      # per-type pass rates and mean scores, the regressions and the changed verdicts go to the job summary.
       - name: Evaluate against the real model and the baseline
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -65,7 +68,7 @@ jobs:
             exit 1
           fi
           python -m ai_service.evaluation --provider groq --runs 3 \
-            --baseline evaluation-baseline.json --max-score-drop 10 --output "$RUNNER_TEMP/ai-evaluation"
+            --baseline evaluation-baseline.json --output "$RUNNER_TEMP/ai-evaluation"
 
       - name: Keep the reports
         if: ${{ !cancelled() }}

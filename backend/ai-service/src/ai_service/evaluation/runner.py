@@ -253,9 +253,32 @@ def _assessment_source(case) -> str:
     return "\n\n".join(part for part in parts if part).strip()
 
 
-def compare(report: dict, baseline: dict, max_score_drop: float = 0) -> dict:
-    """A regression is a case that met its threshold in the baseline and no longer does, or whose mean score fell by
-    more than ``max_score_drop``. Pass rates only compare between runs of the same corpus, rubric and run count."""
+# What fails a run against the baseline, fixed before comparing (CS203-231). Three evaluations of the same code
+# (the baseline and two CI runs, 2026-11-07) moved a type's mean score by at most 2.5 points and a case's by at most
+# 10 (one run in three going wrong), and broke a constraint in at most 1 run of 99; meanwhile four cases changed
+# verdict, both ways, so a case missing its pass rate once is noise, not a regression.
+MAX_TYPE_SCORE_DROP = 5
+MAX_CASE_SCORE_DROP = 15
+EXTRA_CONSTRAINT_RUNS = 2
+
+
+def _groups(report: dict) -> dict:
+    summary = report["summary"]
+    return {**{kind: summary["by_draft_type"][kind] for kind in DRAFT_TYPES},
+            **{kind: summary["by_capability"][kind] for kind in ("assess", "look_for")}}
+
+
+def _constraint_runs(report: dict) -> int:
+    return sum(bool(({run["outcome"]} | set(run["hard_failures"])) & CONSTRAINTS)
+               for case in report["cases"] for run in case["runs"])
+
+
+def compare(report: dict, baseline: dict) -> dict:
+    """Regressions against the baseline, judged on what a few runs can measure: a type's mean score falling more
+    than ``MAX_TYPE_SCORE_DROP``, a case's more than ``MAX_CASE_SCORE_DROP``, more runs breaking a constraint than the
+    baseline had plus ``EXTRA_CONSTRAINT_RUNS``, or a case the guardrails must block not blocked on every run (that is
+    code, so never noise). A case changing verdict is listed for a reviewer, not failed on. Only runs of the same
+    corpus, rubric and run count compare."""
     for key in ("schema_version", "corpus_hash", "rubric_hash", "runs"):
         if report[key] != baseline.get(key):
             raise ValueError("Baseline must use the same report schema, corpus, rubric and number of runs")
@@ -263,11 +286,50 @@ def compare(report: dict, baseline: dict, max_score_drop: float = 0) -> dict:
     previous = {case["id"]: case for case in baseline["cases"]}
     if current.keys() != previous.keys():
         raise ValueError("Baseline must include the same selected cases")
-    regressions = [key for key, case in current.items()
-                   if (previous[key]["passed"] and not case["passed"])
-                   or previous[key]["score"] - case["score"] > max_score_drop]
-    return {"baseline_run_id": baseline["run_id"], "max_score_drop": max_score_drop,
-            "regressions": regressions, "passed": not regressions}
+
+    def regression(kind, key, then, now):
+        return {"kind": kind, "id": key, "baseline": then, "now": now}
+
+    regressions = []
+    then_groups = _groups(baseline)
+    for kind, group in _groups(report).items():
+        then = then_groups[kind]["mean_score"]
+        if then is not None and group["mean_score"] is not None and then - group["mean_score"] > MAX_TYPE_SCORE_DROP:
+            regressions.append(regression("type_mean_score", kind, then, group["mean_score"]))
+    for key, case in current.items():
+        if case["expected"] == "blocked" and not case["passed"]:
+            regressions.append(regression("not_blocked", key, previous[key]["passed"], False))
+        elif case["expected"] == "draft" and previous[key]["score"] - case["score"] > MAX_CASE_SCORE_DROP:
+            regressions.append(regression("case_mean_score", key, previous[key]["score"], case["score"]))
+    then, now = _constraint_runs(baseline), _constraint_runs(report)
+    if now > then + EXTRA_CONSTRAINT_RUNS:
+        regressions.append(regression("constraint_runs", "all", then, now))
+    changed = [{"id": key, "baseline_run_pass_rate": previous[key]["run_pass_rate"],
+                "run_pass_rate": case["run_pass_rate"], "passed": case["passed"]}
+               for key, case in current.items() if case["passed"] != previous[key]["passed"]]
+    return {"baseline_run_id": baseline["run_id"], "regressions": regressions, "changed": changed,
+            "passed": not regressions}
+
+
+def _regression_text(item: dict) -> str:
+    if item["kind"] == "type_mean_score":
+        return f"{item['id']}: mean score {item['baseline']:.1f} → {item['now']:.1f}"
+    if item["kind"] == "case_mean_score":
+        return f"case {item['id']}: mean score {item['baseline']:.1f} → {item['now']:.1f}"
+    if item["kind"] == "constraint_runs":
+        return f"runs breaking a constraint: {item['baseline']} → {item['now']}"
+    return f"case {item['id']}: not blocked on every run"
+
+
+def _comparison_lines(comparison: dict) -> list[str]:
+    lines = ["Regressions against the baseline: "
+             + ("; ".join(map(_regression_text, comparison["regressions"])) or "none") + "."]
+    if comparison["changed"]:
+        lines.extend(["", "Changed verdict since the baseline (listed for review; a case near its pass rate changes "
+                      "between runs with nothing changed): "
+                      + "; ".join(f"{item['id']}: {item['baseline_run_pass_rate']:.0%} → {item['run_pass_rate']:.0%} "
+                                  "of runs passing" for item in comparison["changed"]) + "."])
+    return lines
 
 
 def _fenced(text: str) -> str:
@@ -278,9 +340,7 @@ def _fenced(text: str) -> str:
 
 def job_summary(report: dict) -> str:
     """The run at a glance, for CI's job summary: each draft type's and capability's pass rates and mean score."""
-    summary = report["summary"]
-    groups = {**{kind: summary["by_draft_type"][kind] for kind in DRAFT_TYPES},
-              **{kind: summary["by_capability"][kind] for kind in ("assess", "look_for")}}
+    groups = _groups(report)
     lines = [f"### AI evaluation: {report['provider']} / {report['model']}", "",
              (f"{report['runs']} run(s) per case. A case passes when its quality checks pass on at least "
               f"{RUN_PASS_RATE:.0%} of its runs and its constraints hold on every run."), "",
@@ -289,9 +349,13 @@ def job_summary(report: dict) -> str:
         if group["cases"]:
             score = "n/a" if group["mean_score"] is None else f"{group['mean_score']:.1f}"
             lines.append(f"| {kind} | {group['cases']} | {group['passed']} | {group['run_pass_rate']:.0%} | {score} |")
+    unanswered = {outcome: count for outcome, count in report["summary"]["outcomes"].items()
+                  if outcome not in ("draft", "blocked")}
+    if unanswered:
+        lines.extend(["", "Runs without an answer: "
+                      + ", ".join(f"{outcome} {count}" for outcome, count in unanswered.items()) + "."])
     if "comparison" in report:
-        lines.extend(["", "Regressions against the baseline: "
-                      + (", ".join(report["comparison"]["regressions"]) or "none") + "."])
+        lines.extend(["", *_comparison_lines(report["comparison"])])
     return "\n".join(lines) + "\n"
 
 
@@ -316,7 +380,7 @@ def write_report(report: dict, directory: Path) -> None:
                      f"| {case['score']} | {case['score_range'][0]}–{case['score_range'][1]} | {failures} "
                      f"| {case['passed']} |")
     if "comparison" in protected:
-        lines.extend(["", "Baseline regressions: " + ", ".join(protected["comparison"]["regressions"] or ["none"])])
+        lines.extend(["", *_comparison_lines(protected["comparison"])])
     for case in protected["cases"]:
         lines.extend(["", f"## {case['id']}", _fenced(case["title"]), "", "Source context:",
                       _fenced(case["context"] or "(no context supplied)"), "Candidate:",

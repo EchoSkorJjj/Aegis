@@ -120,8 +120,11 @@ A real model answers the same input differently from run to run, so one green ru
 - An expected **blocked** case must be blocked, without a provider call, on every run.
 
 Each case reports its run pass rate, mean score and range, and the failure types across its runs.
-Against a baseline (`--baseline`, same corpus, rubric and run count), a **regression** is a case that
-met its threshold in the baseline and no longer does, or whose mean score fell by more than
-`--max-score-drop`; only a regression fails a run against a baseline. A model or prompt change is
+Against a baseline (`--baseline`, same corpus, rubric and run count), only a **regression** fails a
+run, judged on what a few runs can measure (thresholds fixed in `runner.py`): a draft type's or
+capability's mean score falling more than 5 points, a case's more than 15, more runs breaking a
+constraint than the baseline had plus 2, or an expected blocked case not blocked on every run. A case
+that changed verdict is listed for review, not failed on: near its pass rate, it changes between runs
+of the same code. A model or prompt change is
 measured against the baseline it replaces: re-baseline only on purpose, with the reason in the
 pull request. A full minute of the token budget is waited out, never counted as a failed run.

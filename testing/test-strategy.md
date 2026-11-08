@@ -75,7 +75,7 @@ Open stories come first. When a story opens, add its acceptance criteria here wi
 |---|---|---|
 | CS203-231 AI evaluation against the real model | CI runs the golden cases against the real model when the AI changes, and on demand, and compares the result with a committed baseline | `.github/workflows/ai-evaluation.yml`, `backend/ai-service/evaluation-baseline.json` |
 | | A case is judged over several runs: quality on two in three, its constraints on every run | `test_evaluation.py`: `test_a_case_passes_when_it_meets_the_pass_rate_on_two_of_three_runs`, `test_one_run_breaking_a_constraint_fails_the_case_however_the_others_score` |
-| | A case that met its threshold in the baseline and no longer does, or whose mean score drops beyond the limit, fails the run | `test_a_case_that_met_its_threshold_in_the_baseline_and_no_longer_does_regresses`, `test_a_mean_score_drop_regresses_only_beyond_the_limit` |
+| | A type's mean score falling more than 5 points, a case's more than 15, more constraint-breaking runs than the baseline plus 2, or a guardrail case not blocked fails the run; a case changing verdict is listed, not failed on | `test_a_type_whose_mean_score_falls_more_than_five_points_regresses`, `test_a_case_whose_mean_score_falls_more_than_fifteen_points_regresses`, `test_more_runs_breaking_a_constraint_than_the_baseline_plus_two_regress`, `test_a_case_the_guardrails_must_block_regresses_unless_blocked_on_every_run`, `test_a_borderline_case_missing_its_threshold_is_listed_for_review_not_failed`, `test_the_job_summary_names_each_regression_and_each_changed_verdict` |
 | | Each run's scores per draft type appear in the job summary | `test_each_draft_type_reports_its_pass_rate_and_mean_score_in_the_job_summary` |
 
 ### Built
