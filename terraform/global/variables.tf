@@ -21,7 +21,7 @@ variable "ecr_images_to_keep" {
 }
 
 variable "github_repository" {
-  description = "owner/name of the repository whose GitHub Actions workflows may push images."
+  description = "The repository whose GitHub Actions workflows may push images, as GitHub's OIDC tokens name it in their sub claim: owner@owner-id/name@repository-id."
   type        = string
 }
 
