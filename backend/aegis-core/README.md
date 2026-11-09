@@ -207,7 +207,8 @@ arithmetic, the decision and its result).
   the issue's key or the pull request's address (409).
 - **Append-only**: a trigger refuses every update, delete and truncate, from any role, the superuser included. It is
   not a lock against the table's owner, today the role aegis-core connects with, which can disable a trigger; closing
-  that needs the owner/app role split in `todo/aws-deployment.md`.
+  that needs an owner/app role split: Flyway migrates as the table's owner, and aegis-core connects as a second role
+  holding only insert and select on it.
 - **Copies, not references**: no foreign keys, so a record outlives its service, ticket or memo, and a later SBOM
   import, re-score or edit never changes it. Org-scoped, with the row-level-security backstop.
 - **A service's trail** holds its tickets' and pull requests' records (`serviceId`) and those of every regulator memo
