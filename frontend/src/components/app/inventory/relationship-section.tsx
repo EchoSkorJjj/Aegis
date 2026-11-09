@@ -23,8 +23,11 @@ export interface RelationshipConfig {
   emptyLabel: string;
   /** Page through the edges linked to this service (0-based). */
   listLinked: (serviceId: string, page: number, size: number) => Promise<Page<{ id: string }>>;
-  /** Server-side search over candidates to link, excluding any already linked to this service. */
-  searchOptions: (serviceId: string, term: string, size: number) => Promise<{ id: string }[]>;
+  /**
+   * Server-side search over candidates to link, excluding what this service already has: the first `size` as `rows`,
+   * and `total`, how many match in all.
+   */
+  searchOptions: (serviceId: string, term: string, size: number) => Promise<{ rows: { id: string }[]; total: number }>;
   attach: (serviceId: string, id: string) => Promise<void>;
   detach: (serviceId: string, id: string) => Promise<void>;
   optionLabel: (row: { id: string }) => string;
@@ -60,6 +63,7 @@ export function RelationshipSection({
   const [term, setTerm] = useState("");
   const [focused, setFocused] = useState(false);
   const [results, setResults] = useState<{ id: string }[]>([]);
+  const [matching, setMatching] = useState(0);
   const [searching, setSearching] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const pickerId = useId();
@@ -95,11 +99,15 @@ export function RelationshipSection({
     const timer = setTimeout(() => {
       config
         .searchOptions(serviceId, term.trim(), RESULT_SIZE)
-        .then((rows) => {
-          if (!controller.signal.aborted) setResults(rows);
+        .then(({ rows, total: found }) => {
+          if (controller.signal.aborted) return;
+          setResults(rows);
+          setMatching(found);
         })
         .catch(() => {
-          if (!controller.signal.aborted) setResults([]);
+          if (controller.signal.aborted) return;
+          setResults([]);
+          setMatching(0);
         })
         .finally(() => {
           if (!controller.signal.aborted) setSearching(false);
@@ -228,6 +236,11 @@ export function RelationshipSection({
                     </div>
                   ))}
                 </div>
+                {!searching && matching > results.length && (
+                  <p className="sticky bottom-0 border-t bg-popover px-2 py-1.5 text-xs text-muted-foreground">
+                    Showing the first {results.length} of {matching.toLocaleString()}. Type to narrow the list.
+                  </p>
+                )}
               </div>
             )}
           </div>

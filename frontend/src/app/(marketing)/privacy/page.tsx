@@ -154,6 +154,22 @@ export default async function PrivacyPage() {
         </p>
       </Section>
 
+      <Section id="ai-reading" title="AI reading of findings">
+        <p>
+          On its own schedule, {name} asks the AI provider what each open material finding means for the service it
+          affects. It sends the vulnerability&apos;s published description or the vendor&apos;s status text, the package
+          and version, what pulls it in, whether the service&apos;s code imports it, the service&apos;s exposure,
+          criticality and impact tier, and, if someone has already asked the AI about the code, its earlier conclusion
+          and reasoning, after removing anything that looks like a secret or personal data. It never sends
+          code, the service&apos;s name, its owners or anyone&apos;s account details.
+        </p>
+        <p>
+          {name} keeps the answer for as long as the service exists: what changed, why it matters, what could happen
+          next, a suggested next step, what must be true for the change to apply, how confident the AI is and what it assumed. The answer is a suggestion for a
+          person. It never changes an impact score, an item&apos;s place in the queue, or decides anything.
+        </p>
+      </Section>
+
       <Section id="dashboard-history" title="Dashboard history">
         <p>
           Once a day, and whenever someone opens the dashboard, {name} records how many open material items the

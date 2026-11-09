@@ -614,6 +614,30 @@ How one package is assessed (`ReachabilityAssessments.run`):
   detail (`components/app/advisories/ai-suggestion.tsx`), "does the code reach the vulnerable part?": uses it / doesn't
   use it / can't tell, why, the cited lines, "Searched the code for …" and a "To check" list, with **Ask the AI** / **Ask again** for whoever may draft a response for the service.
 
+## The AI's reading of each material finding
+
+The triage queue comes from rules alone. `actions.triage.FindingInterpretations` then has the AI read each open
+material finding, with nobody asking: what changed, why it matters to this service, what could happen next, a signal
+(likely real, uncertain, likely noise), a suggested next step, what it assumed and the advisory text it rests on.
+It works from what Aegis already holds and never reads code, so unlike the reachability suggestion above it covers
+packages reached through another one, and vendor outages.
+
+- **Limited by what is known:** the AI must name what has to be true for the change to apply, and an import alone is
+  not proof. Any code assessment kept for the commit last read is passed in: called or not called decides which way
+  the label can go, can't tell keeps it uncertain, and high confidence on a vulnerability needs one that answered.
+- **A suggestion:** scoring, ranking and approvals never read it (`FindingInterpretationIntegrationTest`).
+- **What leaves Aegis:** the advisory or status text, the package and versions, what pulls it in, whether the code
+  imports it, and the service's exposure, criticality and tier. Never code, the service's name or its owners.
+- **When:** `FindingInterpretationJob`, on the `SchedulerLease` holder, off unless `AEGIS_INTERPRETATION_ENABLED` is
+  true (also needs `IDENTITY_SERVICE_TOKEN`). It shares the ai-service's token budgets, so it reads at most
+  `AEGIS_INTERPRETATION_MAX_PER_RUN` (3) findings every `AEGIS_INTERPRETATION_INTERVAL` (2 minutes), worst first, and
+  `AEGIS_INTERPRETATION_MAX_PER_DAY` (60) a UTC day. A failure ends the run and that finding waits 15 minutes.
+- **Again only when the facts change:** V46 `finding_interpretations` keeps a hash of what the AI was told, keyed by
+  service and `TriageQueue.Item.key()`, so a re-import, regrade, revised advisory or new code assessment verdict is read
+  again. Changing what a reading may say moves `READING_VERSION`, so everything is read again.
+- **Read:** `GET /api/findings/interpretations?changeSignalId=`, and `interpretation` plus the `signal` filter on
+  `GET /api/findings`.
+
 ## The AI boundary
 
 The AI logic is **not** in this service. `ai` holds only the seam: the domain depends on the

@@ -11,8 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ai_service.capabilities.assess import AssessmentOutput
 from ai_service.capabilities.draft import DraftOutput, MemoOutput, TicketOutput
+from ai_service.capabilities.interpret import InterpretationOutput
 from ai_service.capabilities.look_for import LookForOutput
-from ai_service.schemas import AssessmentRequest, LookForRequest
+from ai_service.schemas import AssessmentRequest, InterpretationRequest, LookForRequest
 
 
 def fingerprint(value: object) -> str:
@@ -53,7 +54,7 @@ class GoldenCase(StrictModel):
     id: str = Field(pattern=r"^[a-z][a-z0-9-]{1,79}$")
     title: str = Field(min_length=1, max_length=160)
     tags: list[str] = Field(min_length=1)
-    capability: Literal["draft", "assess", "look_for"] = "draft"
+    capability: Literal["draft", "assess", "look_for", "interpret"] = "draft"
     draft_type: Literal["risk_ticket", "upgrade", "memo"] | None = None
     context: str | None = None
     advisory: str | None = None
@@ -65,6 +66,10 @@ class GoldenCase(StrictModel):
     expected_terms: list[str] = Field(default_factory=list)
     unexpected_terms: list[str] = Field(default_factory=list)
     expected_verdict: Literal["CALLED", "NOT_CALLED", "CANT_TELL"] | None = None
+    # An interpret case: the finding's facts (``advisory`` holds the change's text) and the label it must get. Left out
+    # of model_dump, so adding them didn't change the main corpus's hash, which its committed baseline is keyed to.
+    interpretation: dict | None = Field(default=None, exclude=True)
+    expected_signal: Literal["UNCERTAIN", "LIKELY_REAL", "LIKELY_NOISE"] | None = Field(default=None, exclude=True)
     expected_citations: list[str] = Field(default_factory=list)
     expected: Literal["draft", "blocked"] = "draft"
     checks: Checks = Field(default_factory=Checks)
@@ -76,6 +81,8 @@ class GoldenCase(StrictModel):
             self.assessment_request()  # the advisory, the package and the excerpts form a valid request
         elif self.capability == "look_for":
             self.look_for_request()
+        elif self.capability == "interpret":
+            self.interpretation_request()
         elif self.draft_type is None:
             raise ValueError("A draft case names its draft type")
         if self.expected == "blocked":
@@ -90,6 +97,9 @@ class GoldenCase(StrictModel):
             elif self.capability == "look_for":
                 if not self.expected_terms:
                     raise ValueError("A look-for case requires its expected terms")
+            elif self.capability == "interpret":
+                if self.expected_signal is None:
+                    raise ValueError("An interpret case requires its expected signal")
             elif not self.checks.facts or not self.checks.actions:
                 raise ValueError("A quality case requires factual and actionable expectations")
             output_model(self).model_validate(self.reference, strict=True)
@@ -99,6 +109,11 @@ class GoldenCase(StrictModel):
         return AssessmentRequest.model_validate({
             "finding_id": self.id, "advisory_text": self.advisory or "", "package": self.package,
             "fix_summary": self.fix_summary, "searches": self.searches or [], "excerpts": self.excerpts or [],
+        })
+
+    def interpretation_request(self) -> InterpretationRequest:
+        return InterpretationRequest.model_validate({
+            "finding_id": self.id, "change_text": self.advisory or "", **(self.interpretation or {}),
         })
 
     def look_for_request(self) -> LookForRequest:
@@ -113,6 +128,8 @@ def output_model(case: "GoldenCase"):
         return AssessmentOutput
     if case.capability == "look_for":
         return LookForOutput
+    if case.capability == "interpret":
+        return InterpretationOutput
     return {"risk_ticket": TicketOutput, "memo": MemoOutput}.get(case.draft_type, DraftOutput)
 
 

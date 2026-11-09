@@ -93,6 +93,9 @@ services:
       IDENTITY_SERVICE_TOKEN: dev-identity-internal-token-change-me
       AEGIS_NOTIFICATIONS_ENABLED: "true"
       AEGIS_DASHBOARD_SNAPSHOTS_ENABLED: "true"
+      # The AI reads each open material finding, a few at a time. Real answers need LLM_PROVIDER=groq; the stub says
+      # nothing useful, and an answer it wrote is only replaced when the finding's facts change.
+      AEGIS_INTERPRETATION_ENABLED: "true"
       AEGIS_METRICS_DECISION_QUEUE_ENABLED: "true"
       AEGIS_DASHBOARD_SNAPSHOTS_CRON: "${AEGIS_DASHBOARD_SNAPSHOTS_CRON:-0 55 23 * * *}"
       AEGIS_NOTIFICATIONS_INTERVAL: PT1M

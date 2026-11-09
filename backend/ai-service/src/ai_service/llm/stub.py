@@ -44,7 +44,7 @@ class StubLlmClient:
         if isinstance(output, dict) and "cited_passage_ids" in output:
             output["cited_passage_ids"] = passages[:1]
         # Offline there is nothing to search the code for, and nothing for a reviewer to check.
-        for suggestions in ("terms", "checks"):
+        for suggestions in ("terms", "checks", "assumptions"):
             if isinstance(output, dict) and suggestions in output:
                 output[suggestions] = []
         return LlmResult(json.dumps(output), self.provider, self.model, 0, 0)

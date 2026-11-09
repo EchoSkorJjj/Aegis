@@ -420,6 +420,40 @@ class InventoryApiIntegrationTest extends AbstractInventoryIntegrationTest {
                 .andExpect(jsonPath("$.content[0].name").value(tag + "-free"));
     }
 
+    @Test
+    void thePickerLeavesOutWhatTheServiceAlreadyPullsIn() throws Exception {
+        String tag = "graph-" + UUID.randomUUID();
+        BusinessService service = inventory.createBusinessService("Picker " + tag, BusinessCriticality.HIGH);
+        BusinessService other = inventory.createBusinessService("Other " + tag, BusinessCriticality.HIGH);
+        UUID direct = component(tag + "-direct");
+        UUID child = component(tag + "-child");
+        UUID grandchild = component(tag + "-grandchild");
+        component(tag + "-free");
+        mvc.perform(post("/api/inventory/services/{sid}/components/{cid}", service.getId(), direct).with(role("ANALYST")))
+                .andExpect(status().isCreated());
+        dependsOn(direct, child);
+        dependsOn(child, grandchild);
+
+        mvc.perform(get("/api/inventory/components?search=" + tag + "&excludeLinkedToService=" + service.getId()
+                        + "&size=50").with(role("ANALYST")))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].name").value(tag + "-free"));
+        // A service that doesn't use them can still link any of them.
+        mvc.perform(get("/api/inventory/components?search=" + tag + "&excludeLinkedToService=" + other.getId()
+                        + "&size=50").with(role("ANALYST")))
+                .andExpect(jsonPath("$.totalElements").value(4));
+    }
+
+    private UUID component(String name) throws Exception {
+        return create("/api/inventory/components",
+                "{\"ecosystem\":\"npm\",\"name\":\"" + name + "\",\"version\":\"1.0\"}");
+    }
+
+    private void dependsOn(UUID component, UUID dependency) throws Exception {
+        mvc.perform(post("/api/inventory/components/{cid}/dependencies/{did}", component, dependency).with(role("ANALYST")))
+                .andExpect(status().isCreated());
+    }
+
     private UUID create(String path, String json) throws Exception {
         MvcResult result = mvc.perform(post(path)
                         .with(role("ANALYST"))

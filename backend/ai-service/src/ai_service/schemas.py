@@ -88,6 +88,56 @@ class LookFor(ContractModel):
     terms: list[str] = Field(default_factory=list)
 
 
+class CodeAssessmentFact(ContractModel):
+    """What ``/v1/assess`` already concluded about this package in this service's code, when someone has asked."""
+
+    verdict: Literal["CANT_TELL", "CALLED", "NOT_CALLED"]
+    rationale: str = Field(min_length=1, max_length=1200)
+
+
+class InterpretationRequest(ContractModel):
+    """A material finding, for the AI to read with nobody asking: the change itself and what Aegis already knows about
+    it. Facts only: never code, the service's name or its owners, which is why extra fields are refused."""
+
+    finding_id: str
+    kind: Literal["VULNERABILITY", "VENDOR_OUTAGE"]
+    change_text: str = Field(min_length=1, max_length=2500)
+    package: PackageRef | None = None
+    installed_version: str | None = Field(default=None, max_length=64)
+    fixed_version: str | None = Field(default=None, max_length=64)
+    dependency_path: list[str] = Field(default_factory=list, max_length=8)
+    import_status: Literal["IMPORTED", "NOT_IMPORTED", "UNKNOWN"] | None = None
+    vendor: str | None = Field(default=None, max_length=200)
+    severity: str | None = Field(default=None, max_length=32)
+    code_assessment: CodeAssessmentFact | None = None
+    exposure: str = Field(min_length=1, max_length=32)
+    criticality: str = Field(min_length=1, max_length=32)
+    tier: str = Field(min_length=1, max_length=32)
+
+    @model_validator(mode="after")
+    def a_vulnerability_names_its_package(self):
+        if self.kind == "VULNERABILITY" and (self.package is None or self.import_status is None):
+            raise ValueError("A vulnerability names its package and what is known about its import")
+        return self
+
+
+class Interpretation(ContractModel):
+    """What a finding means for one service, as a suggestion for a person: it never changes a score or decides
+    anything. ``citations`` are the advisory's own passages, resolved by the server."""
+
+    signal: Literal["UNCERTAIN", "LIKELY_REAL", "LIKELY_NOISE"]
+    confidence: Literal["LOW", "MEDIUM", "HIGH"]
+    what_changed: str
+    why_it_matters: str
+    what_next: str
+    suggested_action: Literal["VERIFY", "ACT_NOW", "SCHEDULE", "MONITOR"]
+    action_detail: str
+    condition: str
+    condition_met: Literal["UNKNOWN", "YES", "NO"]
+    assumptions: list[str] = Field(default_factory=list)
+    citations: list[str] = Field(default_factory=list)
+
+
 class DraftRequest(ContractModel):
     finding_id: str
     draft_type: Literal["risk_ticket", "upgrade", "memo"]

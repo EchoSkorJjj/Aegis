@@ -99,6 +99,13 @@ Open stories come first. When a story opens, add its acceptance criteria here wi
 | E11-3 code usage | Where the code imports each dependency | `ImportScannerTest`, `CodeUsageTest`, `reachability.spec.ts` |
 | E11-4 usage in the score | Not imported ranks lower | `ReachabilityTest`, `ScoringCalibrationTest` |
 | E11-5 AI suggestion | A suggestion beside the score, never in it | `ReachabilityAssessmentIntegrationTest`, `ai-suggestion.spec.ts` |
+| AI reading of findings | Each open material finding is read without anyone asking, worst first, within a run and a daily cap | `FindingInterpretationsTest`, `FindingInterpretationJobTest` |
+| AI reading of findings | A finding is read again only when its facts change | `FindingInterpretationsTest` |
+| AI reading of findings | The reading is shown beside the finding, filterable, and never moves its score; other organizations see nothing | `FindingInterpretationIntegrationTest`, `ai-interpretation.spec.ts` |
+| AI reading of findings | Calling a finding noise needs Aegis to have read the code; no code, service name or owner reaches the AI | `test_interpret.py`, `FindingInterpretationsTest` |
+| AI reading of findings | An import alone never makes a finding real or high confidence, and a code assessment that can't tell keeps it uncertain | `test_interpret.py` |
+| AI reading of findings | A code assessment kept for the commit last read reaches the AI, and a new verdict means it reads again | `FindingInterpretationsTest` |
+| AI reading of findings | Answers are graded on golden cases, offline and against the real model | `test_interpret.py`, `golden_interpret_cases.json` |
 | E12-3 access review | Every endpoint's required role | `GatewayAccessTest`, `IdentityAccessIntegrationTest`, `AccessControlIntegrationTest` |
 | E13 observability | Pipeline metrics, the decision queue gauge, the alerts and one trace across services | `DecisionQueueMetricsTest`, `PipelineMetricsIntegrationTest`, `ops/alerts.test.yml`, `PipelineTracingTest`, `GatewayTracingTest`, `test_observability.py` |
 | E14-1 test strategy | Coverage targets per service, checked in CI; the core journeys through the real services | `check_coverage.py`, `journey.spec.ts`, `core-journeys.spec.ts` |

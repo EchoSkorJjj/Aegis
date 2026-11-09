@@ -14,6 +14,7 @@ from uuid import uuid4
 from ai_service.capabilities._guardrails import redact
 from ai_service.capabilities.assess import assess
 from ai_service.capabilities.draft import draft
+from ai_service.capabilities.interpret import interpret
 from ai_service.capabilities.look_for import look_for
 from ai_service.core.config import Settings
 from ai_service.core.errors import BadGateway, BadRequest, RateLimited, ServiceUnavailable
@@ -27,6 +28,7 @@ from ai_service.evaluation.rubric import (
     WEIGHTS,
     grade,
     grade_assessment,
+    grade_interpretation,
     grade_look_for,
 )
 from ai_service.llm.base import LlmResult
@@ -38,7 +40,7 @@ REPORT_VERSION = "draft-evaluation.v2"
 # A run waits out a full minute of the token budget at most this often before it counts as unavailable.
 MAX_WAITS = 5
 DRAFT_TYPES = ("risk_ticket", "upgrade", "memo")
-CAPABILITIES = ("draft", "assess", "look_for")
+CAPABILITIES = ("draft", "assess", "look_for", "interpret")
 
 
 class GoldenClient:
@@ -104,6 +106,9 @@ async def _run(case, client, tracked, engine, wait) -> dict:
             elif case.capability == "look_for":
                 candidate = await look_for(case.look_for_request(), engine)
                 grading = grade_look_for(case, candidate)
+            elif case.capability == "interpret":
+                candidate = await interpret(case.interpretation_request(), engine)
+                grading = grade_interpretation(case, candidate)
             else:
                 candidate = await draft(DraftRequest(finding_id=case.id, draft_type=case.draft_type,
                                                    context=case.context), engine)

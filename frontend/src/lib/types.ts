@@ -806,7 +806,35 @@ export interface VendorOutage {
  * that fixes it (`upgrade`, the same recommendation a service's page lists), or a vendor outage still in progress
  * (`outage`). Material only, highest impact first.
  */
+export type InterpretationSignal = "UNCERTAIN" | "LIKELY_REAL" | "LIKELY_NOISE";
+export type InterpretationConfidence = "LOW" | "MEDIUM" | "HIGH";
+export type SuggestedAction = "VERIFY" | "ACT_NOW" | "SCHEDULE" | "MONITOR";
+export type ConditionMet = "UNKNOWN" | "YES" | "NO";
+
+/** What the AI read a material finding to mean for one service: a suggestion, never part of its score. */
+export interface FindingInterpretation {
+  serviceId: string;
+  /** The package, or the vendor for an outage. */
+  subject: string;
+  signal: InterpretationSignal;
+  confidence: InterpretationConfidence;
+  whatChanged: string;
+  whyItMatters: string;
+  whatNext: string;
+  suggestedAction: SuggestedAction;
+  actionDetail: string;
+  /** What must be true in this service for the change to harm it; null on a reading written before Aegis asked. */
+  condition: string | null;
+  conditionMet: ConditionMet;
+  assumptions: string[];
+  /** The change's own text the answer rests on, as Aegis holds it. */
+  citations: string[];
+  interpretedAt: string;
+}
+
 export interface TriageItem {
+  /** The AI's reading of this item, once it has read it. */
+  interpretation?: { signal: InterpretationSignal; confidence: InterpretationConfidence } | null;
   kind: "VULNERABILITY" | "VENDOR_OUTAGE";
   /** The change a response answers; null only for a vulnerability with no change signal yet. */
   changeSignalId: string | null;

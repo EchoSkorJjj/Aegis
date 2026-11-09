@@ -151,6 +151,12 @@ variable "nvd_api_key_enabled" {
   default     = false
 }
 
+variable "finding_interpretation_enabled" {
+  description = "The AI reads each open material finding, a few at a time. Needs llm_provider = groq for real answers, and the identity-internal-token parameter."
+  type        = bool
+  default     = false
+}
+
 variable "osv_ecosystems" {
   description = "OSV ecosystems synced daily, comma-separated; each is a full snapshot download."
   type        = string

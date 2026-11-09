@@ -141,6 +141,7 @@ security). The OpenAPI docs and the health, info and Prometheus endpoints are pu
 | GET | `/api/change-signals/facets` | no | no | yes | yes | yes | no | no | `READ` (the three domain roles) |
 | GET | `/api/change-signals/{id}` | no | no | yes | yes | yes | no | no | `READ` (the three domain roles) |
 | GET | `/api/findings` | no | no | yes | yes | yes | no | no | `InventoryRoles.READ` |
+| GET | `/api/findings/interpretations` | no | no | yes | yes | yes | no | no | `InventoryRoles.READ` |
 | GET | `/api/findings/my-services` | no | no | yes | yes | yes | no | no | `InventoryRoles.READ` |
 | GET | `/api/findings/posture` | no | no | yes | yes | yes | no | no | `InventoryRoles.READ` |
 | GET | `/api/integrations/github` | no | no | yes | yes | yes | yes | no | org admin or a domain role |

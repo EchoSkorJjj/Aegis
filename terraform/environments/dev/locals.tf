@@ -104,6 +104,7 @@ locals {
         AEGIS_JIRA_ENABLED                    = tostring(var.jira_enabled)
         AEGIS_NOTIFICATIONS_ENABLED           = tostring(var.owner_notifications_enabled)
         AEGIS_DASHBOARD_SNAPSHOTS_ENABLED     = tostring(var.dashboard_snapshots_enabled)
+        AEGIS_INTERPRETATION_ENABLED          = tostring(var.finding_interpretation_enabled)
         AEGIS_JIRA_CLIENT_ID                  = var.jira_client_id
         AEGIS_JIRA_CALLBACK_URL               = "${local.app_url}/admin/integrations/jira/callback"
         TRACING_SAMPLE_RATE                   = "0"

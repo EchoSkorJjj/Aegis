@@ -23,6 +23,7 @@ and a person approves before anything is filed or opened.
 | GET | `/v1/ping` | `X-Service-Token` | Connectivity check, called by aegis-core's `/api/ai/ping` |
 | POST | `/v1/assess/look-for` | `X-Service-Token` | `{finding_id, advisory_text, package: {ecosystem, name}, fix_summary?}` → `{terms}` |
 | POST | `/v1/assess` | `X-Service-Token` | `{finding_id, advisory_text, package, fix_summary?, searches: [{term, files_searched, files_matched, lines_matched, complete}], excerpts: [{id, path, start_line, text, kind, term?}]}` → `{verdict, rationale, checks, cited_excerpts}` |
+| POST | `/v1/assess/impact` | `X-Service-Token` | A finding's facts (`kind`, `change_text`, `package?`, `installed_version?`, `fixed_version?`, `dependency_path`, `import_status?`, `vendor?`, `severity?`, `code_assessment?: {verdict, rationale}`, `exposure`, `criticality`, `tier`) → `{signal, confidence, what_changed, why_it_matters, what_next, suggested_action, action_detail, condition, condition_met, assumptions, citations}`. `LIKELY_NOISE` needs `import_status: NOT_IMPORTED` or a code assessment of `NOT_CALLED`; `LIKELY_REAL` needs `condition_met: YES` or `CALLED`; `CANT_TELL` keeps it `UNCERTAIN`; `HIGH` confidence on a vulnerability needs a code assessment that answered |
 | POST | `/v1/draft` | `X-Service-Token` | `{finding_id, draft_type, context?}` → `{draft_type, content, ticket?, memo?, citations}` |
 
 `finding_id` is an opaque string; aegis-core sends the id of the proposal, ticket or memo it is
@@ -268,7 +269,10 @@ a condition code can't show with what to check, a data-shape trigger absent and 
 instruction hidden in a code comment, which must be refused) and 5 look-for cases
 (`capability: "look_for"`: a named function, the type an application binds kept while the fix's
 internal class is dropped, a framework setting kept while its internals are dropped, a secret-ish
-name dropped, an instruction in the fix summary refused). It calls the same
+name dropped, an instruction in the fix summary refused). A separate corpus of 7 cases covers a finding's reading
+(`golden_interpret_cases.json`: real, noise, uncertain, an import that proves nothing, a code assessment that can't tell, a vendor outage, an injection refused), run with
+`--corpus src/ai_service/evaluation/golden_interpret_cases.json`; apart from the main corpus so that one's committed
+baseline still applies. The harness calls the same
 guarded capabilities and structured generator as the API, with no database, core workflow action, or
 running stack required. An assessment is graded on its verdict (a wrong one is a critical failure),
 on citing the excerpts it should and only those it was sent, and on its checks; a look-for answer on

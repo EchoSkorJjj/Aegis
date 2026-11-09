@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Request
 
 from ai_service.capabilities.assess import assess as run_assess
 from ai_service.capabilities.draft import draft as run_draft
+from ai_service.capabilities.interpret import interpret as run_interpret
 from ai_service.capabilities.look_for import look_for as run_look_for
 from ai_service.core.security import require_service_token
 from ai_service.llm.structured import StructuredGenerator
@@ -18,6 +19,8 @@ from ai_service.schemas import (
     AssessmentRequest,
     Draft,
     DraftRequest,
+    Interpretation,
+    InterpretationRequest,
     LookFor,
     LookForRequest,
 )
@@ -70,6 +73,19 @@ async def look_for(
     request: LookForRequest, engine: Annotated[StructuredGenerator, Depends(generator)],
 ) -> LookFor:
     return await run_look_for(request, engine)
+
+
+@router.post(
+    "/v1/assess/impact",
+    response_model=Interpretation,
+    tags=["ai"],
+    summary="Read a material finding: what changed, why it matters to this service and what to do",
+    dependencies=[Depends(require_service_token)],
+)
+async def interpret(
+    request: InterpretationRequest, engine: Annotated[StructuredGenerator, Depends(generator)],
+) -> Interpretation:
+    return await run_interpret(request, engine)
 
 
 @router.post(

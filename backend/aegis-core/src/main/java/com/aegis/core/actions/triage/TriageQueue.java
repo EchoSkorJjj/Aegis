@@ -3,10 +3,13 @@ package com.aegis.core.actions.triage;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -24,9 +27,11 @@ import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.domain.BusinessService;
 import com.aegis.core.inventory.domain.Owner;
 import com.aegis.core.inventory.domain.SbomImportSource;
+import com.aegis.core.matching.MatchingDtos.ComponentRef;
 import com.aegis.core.matching.MatchingDtos.MatchConfidence;
 import com.aegis.core.matching.MatchingDtos.OwnerRef;
 import com.aegis.core.matching.MatchingDtos.ServiceRef;
+import com.aegis.core.matching.MatchingDtos.VulnerabilityRef;
 import com.aegis.core.scoring.ScoringDtos.ChangeImpactResponse;
 import com.aegis.core.scoring.ScoringDtos.ImpactTier;
 import com.aegis.core.scoring.ScoringDtos.ScoredService;
@@ -68,15 +73,18 @@ public class TriageQueue {
     private final ScoringService scoring;
     private final ResponseDirectory responses;
     private final RiskTicketStore tickets;
+    private final FindingInterpretationStore interpretations;
 
     public TriageQueue(InventoryStore inventory, UpgradeRecommendations recommendations, VendorIncidentStore incidents,
-            ScoringService scoring, ResponseDirectory responses, RiskTicketStore tickets) {
+            ScoringService scoring, ResponseDirectory responses, RiskTicketStore tickets,
+            FindingInterpretationStore interpretations) {
         this.inventory = inventory;
         this.recommendations = recommendations;
         this.incidents = incidents;
         this.scoring = scoring;
         this.responses = responses;
         this.tickets = tickets;
+        this.interpretations = interpretations;
     }
 
     public enum Kind { VULNERABILITY, VENDOR_OUTAGE }
@@ -103,7 +111,39 @@ public class TriageQueue {
      */
     public record Item(Kind kind, UUID changeSignalId, ServiceRef service, List<OwnerRef> owners, double score,
                        ImpactTier tier, MatchConfidence confidence, Recommendation upgrade, Outage outage,
-                       ResponseRef response, ResponseStage stage, boolean canDraft) {
+                       ResponseRef response, ResponseStage stage, boolean canDraft, Reading interpretation) {
+
+        /**
+         * What makes an item the same from run to run: a vulnerable dependency by its package and the vulnerability's
+         * canonical id (a CVE), whichever feed's advisory represents it today (V21) and whichever version of the
+         * package the service is on, and an outage by its incident. A more severe vulnerability becoming the one to
+         * answer is a new item.
+         */
+        public String key() {
+            if (upgrade != null) {
+                ComponentRef component = upgrade.component();
+                return "VULNERABILITY:" + component.ecosystem() + ":" + component.name() + ":"
+                        + answered().orElse(String.valueOf(changeSignalId));
+            }
+            return "VENDOR_OUTAGE:" + (outage != null ? outage.id() : changeSignalId);
+        }
+
+        /** The canonical id of the vulnerability this item answers, if it is one. */
+        public Optional<String> answered() {
+            return upgrade == null ? Optional.empty() : upgrade.vulnerabilities().stream()
+                    .filter(candidate -> changeSignalId.equals(candidate.changeSignalId()))
+                    .map(VulnerabilityRef::id)
+                    .findFirst();
+        }
+
+        Item read(Reading reading) {
+            return new Item(kind, changeSignalId, service, owners, score, tier, confidence, upgrade, outage, response,
+                    stage, canDraft, reading);
+        }
+    }
+
+    /** The AI's reading of an item, as the queue shows it. Never part of its score or its place in the ranking. */
+    public record Reading(FindingInterpretation.Signal signal, FindingInterpretation.Confidence confidence) {
     }
 
     /** A page of items, and the filter options of the queue's scope (every service, or the caller's own). */
@@ -137,6 +177,12 @@ public class TriageQueue {
 
     /** Dashboard drill-down filters are applied before paging, against the same response stages it counts. */
     public Queue list(Filters filters, Caller caller, Pageable pageable, boolean openOnly, boolean unassigned) {
+        return list(filters, caller, pageable, openOnly, unassigned, null);
+    }
+
+    /** As {@link #list(Filters, Caller, Pageable, boolean, boolean)}, narrowed to items the AI read as {@code signal}. */
+    public Queue list(Filters filters, Caller caller, Pageable pageable, boolean openOnly, boolean unassigned,
+            FindingInterpretation.Signal signal) {
         Estate estate = estate();
         Map<UUID, List<Owner>> assignments = estate.assignments();
         List<BusinessService> scope = estate.services().stream()
@@ -151,7 +197,7 @@ public class TriageQueue {
             }
         }
 
-        List<Item> material = material(selected, assignments, caller);
+        List<Item> material = withReadings(material(selected, assignments, caller), selected.keySet());
         List<String> ecosystems = material.stream().filter(item -> item.upgrade() != null)
                 .map(item -> item.upgrade().component().ecosystem()).distinct().sorted().toList();
         List<Item> ranked = material.stream()
@@ -160,6 +206,8 @@ public class TriageQueue {
                 .filter(item -> filters.ecosystem() == null || (item.upgrade() != null
                         && filters.ecosystem().equalsIgnoreCase(item.upgrade().component().ecosystem())))
                 .filter(item -> filters.tier() == null || item.tier() == filters.tier())
+                .filter(item -> signal == null || (item.interpretation() != null
+                        && item.interpretation().signal() == signal))
                 .sorted(RANKING)
                 .toList();
         int start = (int) Math.min(pageable.getOffset(), ranked.size());
@@ -237,6 +285,18 @@ public class TriageQueue {
                 inventory.findOwnersForServices(services.stream().map(BusinessService::getId).toList()));
     }
 
+    /** Each item with what the AI has said about it, if anything; the ranking doesn't look at this. */
+    private List<Item> withReadings(List<Item> items, Collection<UUID> serviceIds) {
+        if (items.isEmpty()) {
+            return items;
+        }
+        Map<String, Reading> readings = new HashMap<>();
+        for (FindingInterpretation saved : interpretations.findForServices(serviceIds)) {
+            readings.put(saved.serviceId() + "\0" + saved.itemKey(), new Reading(saved.signal(), saved.confidence()));
+        }
+        return items.stream().map(item -> item.read(readings.get(item.service().id() + "\0" + item.key()))).toList();
+    }
+
     /** The material items in these services: their vulnerable dependencies, and the outages reaching them. */
     private List<Item> material(Map<UUID, BusinessService> selected, Map<UUID, List<Owner>> assignments,
             Caller caller) {
@@ -261,7 +321,7 @@ public class TriageQueue {
         ResponseRef closing = dismissed.get(new ServiceChange(service.getId(), upgrade.changeSignalId()));
         return new Item(Kind.VULNERABILITY, upgrade.changeSignalId(), serviceRef(service), ownerRefs(owners),
                 upgrade.score(), upgrade.tier(), upgrade.confidence(), upgrade, null, upgrade.response(),
-                stage(upgrade.response(), closing), canDraft(caller, owners));
+                stage(upgrade.response(), closing), canDraft(caller, owners), null);
     }
 
     /** Each outage in progress, in every selected service it reaches materially. */
@@ -293,7 +353,7 @@ public class TriageQueue {
                 ResponseRef response = answered.get(key);
                 items.add(new Item(Kind.VENDOR_OUTAGE, incident.id(), scored.service(), ownerRefs(owners),
                         scored.score(), scored.tier(), scored.confidence(), null, outage, response,
-                        stage(response, dismissed.get(key)), canDraft(caller, owners)));
+                        stage(response, dismissed.get(key)), canDraft(caller, owners), null));
             }
         }
         return items;

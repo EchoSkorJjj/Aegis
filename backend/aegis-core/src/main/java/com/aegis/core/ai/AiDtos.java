@@ -17,6 +17,58 @@ public final class AiDtos {
     }
 
     /**
+     * A material finding, for the AI to read with nobody asking: the change and what Aegis already knows about it.
+     * Never code, the service's name or its owners. {@code importStatus} is null for an outage. Redacted here.
+     */
+    public record InterpretationRequest(
+            @JsonProperty("finding_id") String findingId,
+            String kind,
+            @JsonProperty("change_text") String changeText,
+            @JsonProperty("package") PackageRef pkg,
+            @JsonProperty("installed_version") String installedVersion,
+            @JsonProperty("fixed_version") String fixedVersion,
+            @JsonProperty("dependency_path") List<String> dependencyPath,
+            @JsonProperty("import_status") String importStatus,
+            String vendor,
+            String severity,
+            @JsonProperty("code_assessment") CodeAssessmentFact codeAssessment,
+            String exposure,
+            String criticality,
+            String tier) {
+        public InterpretationRequest {
+            changeText = SensitiveText.redact(changeText);
+            dependencyPath = dependencyPath == null ? List.of() : List.copyOf(dependencyPath);
+        }
+    }
+
+    /** What a code assessment someone already asked for concluded: its verdict and reasoning, never the code. */
+    public record CodeAssessmentFact(String verdict, String rationale) {
+        public CodeAssessmentFact {
+            rationale = SensitiveText.redact(rationale);
+        }
+    }
+
+    /** What a finding means for one service: a suggestion, which never changes a score or decides anything. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Interpretation(
+            String signal,
+            String confidence,
+            @JsonProperty("what_changed") String whatChanged,
+            @JsonProperty("why_it_matters") String whyItMatters,
+            @JsonProperty("what_next") String whatNext,
+            @JsonProperty("suggested_action") String suggestedAction,
+            @JsonProperty("action_detail") String actionDetail,
+            String condition,
+            @JsonProperty("condition_met") String conditionMet,
+            List<String> assumptions,
+            List<String> citations) {
+        public Interpretation {
+            assumptions = assumptions == null ? List.of() : List.copyOf(assumptions);
+            citations = citations == null ? List.of() : List.copyOf(citations);
+        }
+    }
+
+    /**
      * Pass 1 of "does this code use the vulnerable part?" (E11-5): from the advisory, the package and what its fix
      * changed, the names to search the service's code for. Nothing from the service. Redacted here.
      */
