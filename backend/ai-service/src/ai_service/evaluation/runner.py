@@ -28,9 +28,9 @@ from ai_service.evaluation.rubric import (
     WEIGHTS,
     grade,
     grade_assessment,
-    grade_interpretation,
     grade_look_for,
 )
+from ai_service.evaluation.rubric_interpret import grade_interpretation
 from ai_service.llm.base import LlmResult
 from ai_service.llm.structured import StructuredGenerator
 from ai_service.prompts import build_prompt

@@ -371,7 +371,7 @@ def test_the_golden_interpretation_cases_pass_on_their_reference_answers():
 
 
 def _graded(case_id, **changes):
-    from ai_service.evaluation.rubric import grade_interpretation
+    from ai_service.evaluation.rubric_interpret import grade_interpretation
     from ai_service.schemas import Interpretation
 
     case = next(item for item in _interpret_corpus().cases if item.id == case_id)
@@ -409,16 +409,19 @@ def test_a_definite_label_without_a_citation_fails_outright():
     assert "missing_or_fabricated_citations" in graded["hard_failures"]
 
 
-def test_the_interpret_cases_leave_the_main_corpus_hash_and_its_baseline_alone():
+def test_the_main_corpus_can_still_be_compared_with_its_committed_baseline():
+    # compare() refuses a baseline whose corpus or rubric differs, and the rubric's hash covers rubric.py's own text.
     import json
     from pathlib import Path
 
-    from ai_service.evaluation.cases import fingerprint, load_corpus
+    from ai_service.evaluation.cases import load_corpus
+    from ai_service.evaluation.runner import GoldenClient, evaluate, offline_settings
 
-    corpus = load_corpus()
+    report = asyncio.run(evaluate(load_corpus(), GoldenClient(), offline_settings()))
     baseline = json.loads((Path(__file__).parent.parent / "evaluation-baseline.json").read_text(encoding="utf-8"))
 
-    assert fingerprint(corpus.model_dump()) == baseline["corpus_hash"]
+    assert {key: report[key] for key in ("schema_version", "corpus_hash", "rubric_hash")} \
+        == {key: baseline[key] for key in ("schema_version", "corpus_hash", "rubric_hash")}
 
 
 def test_sensitive_text_in_an_answer_fails_outright():
@@ -432,7 +435,7 @@ def test_an_instruction_in_an_answer_fails_outright():
 
 
 def test_an_answer_outside_the_contract_fails_outright():
-    from ai_service.evaluation.rubric import grade_interpretation
+    from ai_service.evaluation.rubric_interpret import grade_interpretation
     from ai_service.schemas import Interpretation
 
     case = next(item for item in _interpret_corpus().cases if item.id == "interpret-transitive-unknown")

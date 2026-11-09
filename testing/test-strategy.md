@@ -99,6 +99,9 @@ Open stories come first. When a story opens, add its acceptance criteria here wi
 | E11-3 code usage | Where the code imports each dependency | `ImportScannerTest`, `CodeUsageTest`, `reachability.spec.ts` |
 | E11-4 usage in the score | Not imported ranks lower | `ReachabilityTest`, `ScoringCalibrationTest` |
 | E11-5 AI suggestion | A suggestion beside the score, never in it | `ReachabilityAssessmentIntegrationTest`, `ai-suggestion.spec.ts` |
+| Change-impact service card | Each value is captioned, so a finding's impact can't be mistaken for the service's own criticality, and the explanations open by keyboard | `ai-interpretation.spec.ts` |
+| Service link picker | Offers only what the service doesn't already have, directly or through its dependencies | `InventoryApiIntegrationTest` |
+| Service link picker | Says when it shows only part of the list, and why it's empty | `link-picker.spec.ts` |
 | AI reading of findings | Each open material finding is read without anyone asking, worst first, within a run and a daily cap | `FindingInterpretationsTest`, `FindingInterpretationJobTest` |
 | AI reading of findings | A finding is read again only when its facts change | `FindingInterpretationsTest` |
 | AI reading of findings | The reading is shown beside the finding, filterable, and never moves its score; other organizations see nothing | `FindingInterpretationIntegrationTest`, `ai-interpretation.spec.ts` |

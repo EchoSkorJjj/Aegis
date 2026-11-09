@@ -7,7 +7,8 @@ route; only `aegis-core` shares its Docker network. On AWS, its security group a
 **Status: built, and used by aegis-core's responses.** aegis-core's `HttpAiClient` calls `/v1/draft`
 for an upgrade pull request's rationale (`upgrade`), a risk ticket's narrative (`risk_ticket`) and a
 DORA memo's sections (`memo`), and `/v1/assess/look-for` then `/v1/assess` when a person asks whether a
-service's code uses a vulnerable package's vulnerable function, feature or condition (E11-5). The
+service's code uses a vulnerable package's vulnerable function, feature or condition (E11-5), and
+`/v1/assess/impact` from a background job to read each open material finding, without code. The
 service supports an offline stub and a Groq provider, versioned prompts, strict output validation,
 source-resolved citations, and local rate/token controls. The default remains `stub`, so development
 and tests need no API key. There is no RAG yet: the service is stateless. It returns only proposed
@@ -271,8 +272,8 @@ instruction hidden in a code comment, which must be refused) and 5 look-for case
 internal class is dropped, a framework setting kept while its internals are dropped, a secret-ish
 name dropped, an instruction in the fix summary refused). A separate corpus of 7 cases covers a finding's reading
 (`golden_interpret_cases.json`: real, noise, uncertain, an import that proves nothing, a code assessment that can't tell, a vendor outage, an injection refused), run with
-`--corpus src/ai_service/evaluation/golden_interpret_cases.json`; apart from the main corpus so that one's committed
-baseline still applies. The harness calls the same
+`--corpus src/ai_service/evaluation/golden_interpret_cases.json`; apart from the main corpus, and graded in `rubric_interpret.py`
+rather than `rubric.py` (whose text is part of the rubric hash), so that one's committed baseline still applies. The harness calls the same
 guarded capabilities and structured generator as the API, with no database, core workflow action, or
 running stack required. An assessment is graded on its verdict (a wrong one is a critical failure),
 on citing the excerpts it should and only those it was sent, and on its checks; a look-for answer on

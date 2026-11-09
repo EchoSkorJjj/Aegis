@@ -675,9 +675,14 @@ domain. See `ARCHITECTURE.md` for the topology.
 | `DB_URL` / `DB_USER` / `DB_PASSWORD` | `…/identity`, `identity`, `identity` | Shared datasource |
 | `IDENTITY_JWKS_URI` | `http://localhost:8081/oauth2/jwks` | identity-service's public keys |
 | `IDENTITY_BASE_URL` | `http://localhost:8081` | identity-service's member directory — verifies a service's assigned owner, called with the caller's own token |
-| `IDENTITY_SERVICE_TOKEN` | *(empty)* | Token for identity-service's internal API (`X-Service-Token`), used only by the owner notifications; identity-service holds the same one as `IDENTITY_INTERNAL_SERVICE_TOKEN` |
+| `IDENTITY_SERVICE_TOKEN` | *(empty)* | Token for identity-service's internal API (`X-Service-Token`), used only by scheduled work (the owner notifications, the dashboard's daily record, the AI's reading of findings); identity-service holds the same one as `IDENTITY_INTERNAL_SERVICE_TOKEN` |
 | `AEGIS_NOTIFICATIONS_ENABLED` | `false` | Owner notifications (E9 story 5); needs `IDENTITY_SERVICE_TOKEN` |
 | `AEGIS_NOTIFICATIONS_INTERVAL` | `PT5M` | How often the notification job looks for items that need a decision |
+| `AEGIS_INTERPRETATION_ENABLED` | `false` | The AI's reading of each open material finding; needs `IDENTITY_SERVICE_TOKEN`, and `LLM_PROVIDER=groq` on the ai-service for real answers |
+| `AEGIS_INTERPRETATION_INTERVAL` | `PT2M` | How often that job runs |
+| `AEGIS_INTERPRETATION_INITIAL_DELAY` | `PT1M` | How long after startup it first runs |
+| `AEGIS_INTERPRETATION_MAX_PER_RUN` | `3` | Most findings it reads in one run, across every organization |
+| `AEGIS_INTERPRETATION_MAX_PER_DAY` | `60` | Most findings it reads in a UTC day, since it shares the ai-service's token budgets |
 | `AI_SERVICE_URI` | `http://localhost:8083` | The internal ai-service base URL |
 | `AEGIS_ASSESS_FIX_COMMITS_ENABLED` | `true` | The AI's reachability suggestion (E11-5) reads what an advisory's fix commits changed, fetched as public diffs from github.com / gitlab.com |
 | `AI_SERVICE_TOKEN` | `dev-internal-token-change-me` | Shared service token sent to the ai-service |
@@ -865,7 +870,8 @@ declares are its service's (`business_service_component_dependencies`). The comp
 which hold in every service; `GET …/dependencies` lists both kinds. A service's graph is the components it
 links, its own edges and the hand-added ones, never another service's; `inventory.DependencyGraph` is the one
 walk over it, behind matching, the upgrade recommendations and "Used by". Transitive reachability is resolved
-at query time.
+at query time. `GET /api/inventory/components?excludeLinkedToService={serviceId}`, the service page's link picker,
+leaves out everything in that service's graph: what it links and everything those pull in.
 
 ### Used by
 
