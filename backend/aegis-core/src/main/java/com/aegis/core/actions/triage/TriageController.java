@@ -30,9 +30,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class TriageController {
 
     private final TriageQueue queue;
+    private final FindingInterpretations interpretations;
 
-    public TriageController(TriageQueue queue) {
+    public TriageController(TriageQueue queue, FindingInterpretations interpretations) {
         this.queue = queue;
+        this.interpretations = interpretations;
     }
 
     @GetMapping
@@ -46,11 +48,20 @@ public class TriageController {
             @RequestParam(defaultValue = "false") boolean unassigned,
             @RequestParam(required = false) String ecosystem,
             @RequestParam(required = false) ImpactTier tier,
+            @RequestParam(required = false) FindingInterpretation.Signal signal,
             @PageableDefault(size = 20) Pageable pageable,
             Authentication authentication) {
         String ecosystemFilter = ecosystem == null || ecosystem.isBlank() ? null : ecosystem.strip();
         return queue.list(new Filters(serviceId, ownerId, mine, ecosystemFilter, tier), caller(authentication),
-                pageable, openOnly, unassigned);
+                pageable, openOnly, unassigned, signal);
+    }
+
+    @GetMapping("/interpretations")
+    @PreAuthorize(InventoryRoles.READ)
+    @Operation(summary = "What the AI read a change to mean for each service it reaches: a suggestion, which never "
+            + "changes a score or decides anything")
+    public List<FindingInterpretations.View> interpretations(@RequestParam UUID changeSignalId) {
+        return interpretations.forChange(changeSignalId);
     }
 
     @GetMapping("/my-services")

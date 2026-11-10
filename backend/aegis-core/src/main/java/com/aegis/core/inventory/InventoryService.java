@@ -23,10 +23,12 @@ public class InventoryService {
 
     private final InventoryStore store;
     private final IdentityDirectory directory;
+    private final DependencyGraph graph;
 
-    public InventoryService(InventoryStore store, IdentityDirectory directory) {
+    public InventoryService(InventoryStore store, IdentityDirectory directory, DependencyGraph graph) {
         this.store = store;
         this.directory = directory;
+        this.graph = graph;
     }
 
     /** {@code exposure} may be null — the service then takes {@link BusinessService#DEFAULT_EXPOSURE}. */
@@ -117,7 +119,13 @@ public class InventoryService {
 
     @Transactional(readOnly = true)
     public Page<SoftwareComponent> listSoftwareComponents(InventoryFilters.ComponentFilter filter, Pageable pageable) {
-        return store.findSoftwareComponents(filter, pageable);
+        if (filter.excludeServiceId() == null) {
+            return store.findSoftwareComponents(filter, pageable);
+        }
+        // Linking something the service already pulls in would only mislabel it as declared.
+        UUID service = filter.excludeServiceId();
+        return store.findSoftwareComponents(filter.excluding(graph.graphsOf(List.of(service)).get(service).components()),
+                pageable);
     }
 
     @Transactional(readOnly = true)

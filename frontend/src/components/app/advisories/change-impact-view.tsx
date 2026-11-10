@@ -4,6 +4,7 @@ import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, Info } from "lucide-react";
 
+import { AiInterpretation, useInterpretations } from "@/components/app/advisories/ai-interpretation";
 import { AiSuggestion, useAssessments } from "@/components/app/advisories/ai-suggestion";
 import { ReachabilityEvidence } from "@/components/app/responses/code-usage";
 import { MemoAction, useLiveMemo } from "@/components/app/responses/memo-action";
@@ -127,6 +128,8 @@ function ImpactView({ signalId, finding }: { signalId: string; finding: boolean 
   const memo = useLiveMemo(signalId, respondable);
   // The AI's suggestion on whether the code calls the vulnerable function (E11-5): vulnerabilities only.
   const assessments = useAssessments(signalId, status === "ok" && data?.change.signalType === "VULNERABILITY");
+  // What the AI read each material finding to mean, with nobody asking: a vulnerability or an outage.
+  const interpretations = useInterpretations(signalId, respondable);
 
   const backLink = (
     <Link
@@ -253,6 +256,9 @@ function ImpactView({ signalId, finding }: { signalId: string; finding: boolean 
                 key={scored.service.id}
                 scored={scored}
                 response={respondable ? { signalId, responses, canDraft, preview: finding } : null}
+                interpretation={respondable && scored.material && interpretations ? (
+                  <AiInterpretation items={interpretations.get(scored.service.id) ?? []} />
+                ) : null}
                 suggestion={change.signalType === "VULNERABILITY" && !assessments.error ? (
                   <AiSuggestion
                     changeSignalId={signalId}
@@ -285,10 +291,13 @@ type ResponseContext = {
 function ServiceCard({
   scored,
   response,
+  interpretation,
   suggestion,
 }: {
   scored: ScoredService;
   response: ResponseContext | null;
+  /** What the AI read this finding to mean for this service, above the score and never part of it. */
+  interpretation: React.ReactNode;
   /** The AI's reachability suggestion (E11-5), beside the score and never part of it. */
   suggestion: React.ReactNode;
 }) {
@@ -296,24 +305,43 @@ function ServiceCard({
   const existing = response?.responses?.get(scored.service.id);
   return (
     <div className="rounded-lg border">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3">
-        <ScoreBadge score={scored.score} tier={scored.tier} />
-        <Link href={`/inventory/services/${scored.service.id}`} className="font-medium hover:underline">{scored.service.name}</Link>
-        <span
-          className={`rounded-full px-2 py-0.5 text-xs font-medium ${CRITICALITY_CLASS[scored.service.criticality]}`}
-        >
-          {scored.service.criticality}
-        </span>
-        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${confidence.className}`}>
-          {confidence.label}
-        </span>
-        <span className="ml-auto text-xs text-muted-foreground">
-          {scored.owners.length > 0
-            ? scored.owners.map((owner) => owner.name).join(", ")
-            : "No owners assigned"}
-        </span>
+      <div role="group" aria-label="Service summary" className="border-b px-4 py-3">
+        <dl className="flex flex-wrap items-start gap-x-6 gap-y-3">
+          <SummaryField label="Impact" hint="How bad this finding is for this service, from 0 to 100.">
+            <ScoreBadge score={scored.score} tier={scored.tier} />
+          </SummaryField>
+          <SummaryField label="Service">
+            <Link href={`/inventory/services/${scored.service.id}`} className="font-medium hover:underline">{scored.service.name}</Link>
+          </SummaryField>
+          <SummaryField
+            label="Business criticality"
+            hint="How important this service is to the business, set when it was graded."
+          >
+            <span
+              className={`rounded-full px-2 py-0.5 text-xs font-medium ${CRITICALITY_CLASS[scored.service.criticality]}`}
+            >
+              {sentenceCase(scored.service.criticality)}
+            </span>
+          </SummaryField>
+          <SummaryField
+            label="Match"
+            hint={"Whether Aegis has proven this advisory applies. \"Needs review\" means the package name or version couldn't be fully checked."}
+          >
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${confidence.className}`}>
+              {confidence.label}
+            </span>
+          </SummaryField>
+          <SummaryField label="Owners" className="ml-auto">
+            <span className="text-xs text-muted-foreground">
+              {scored.owners.length > 0
+                ? scored.owners.map((owner) => owner.name).join(", ")
+                : "No owners assigned"}
+            </span>
+          </SummaryField>
+        </dl>
       </div>
       <div className="space-y-3 p-4">
+        {interpretation}
         <WhyThisScore scored={scored} />
         {suggestion}
         {scored.evidence.map((evidence, index) => (
@@ -358,10 +386,54 @@ function DraftedResponse({ response }: { response: RiskTicket }) {
   </section>;
 }
 
+function sentenceCase(word: string) {
+  return `${word.charAt(0)}${word.slice(1).toLowerCase()}`;
+}
+
+/** One captioned value in a service card's header: captions wrap with their values, which a table header wouldn't. */
+function SummaryField({
+  label,
+  hint,
+  className,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`min-w-0 space-y-1 ${className ?? ""}`}>
+      <dt className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+        {label}
+        {hint && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={`What ${label} means`}
+                  className="inline-flex text-muted-foreground hover:text-foreground"
+                >
+                  <Info className="size-3" />
+                </button>
+              }
+            />
+            <TooltipContent side="top" align="start" className="max-w-xs">
+              {hint}
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </dt>
+      <dd>{children}</dd>
+    </div>
+  );
+}
+
 function ScoreBadge({ score, tier }: { score: number; tier: ImpactTier }) {
-  // Worded as an impact, in sentence case, so it never reads as the service's own criticality badge
-  // (which shares the vocabulary — a CRITICAL service can carry a LOW-impact score and vice versa).
-  const label = `${tier.charAt(0)}${tier.slice(1).toLowerCase()} impact`;
+  // Its caption, "Impact", keeps it from reading as the service's own criticality, which shares the vocabulary:
+  // a critical service can carry a low-impact score and vice versa.
+  const label = sentenceCase(tier);
   return (
     <span className="inline-flex items-center gap-1.5">
       <span className="rounded-md border px-1.5 py-0.5 font-mono text-sm font-semibold tabular-nums">

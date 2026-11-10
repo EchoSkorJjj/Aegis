@@ -43,6 +43,16 @@ class JpaReachabilityAssessmentStore implements ReachabilityAssessmentStore {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public List<ReachabilityAssessment> findForServices(Collection<UUID> serviceIds) {
+        if (serviceIds.isEmpty()) {
+            return List.of();
+        }
+        return assessments.findForServices(scope(), serviceIds).stream()
+                .map(ReachabilityAssessmentEntity::toDomain).toList();
+    }
+
+    @Override
     @Transactional
     public ReachabilityAssessment save(ReachabilityAssessment assessment) {
         assessments.upsert(assessment.id(), scope(), assessment.serviceId(), assessment.ecosystem(),

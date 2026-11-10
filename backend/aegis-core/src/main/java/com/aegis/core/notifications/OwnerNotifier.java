@@ -7,7 +7,6 @@ import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -18,9 +17,7 @@ import com.aegis.core.actions.ticket.RiskTicket;
 import com.aegis.core.actions.ticket.RiskTicketStore;
 import com.aegis.core.actions.triage.TriageQueue;
 import com.aegis.core.actions.triage.TriageQueue.Item;
-import com.aegis.core.matching.MatchingDtos.ComponentRef;
 import com.aegis.core.matching.MatchingDtos.OwnerRef;
-import com.aegis.core.matching.MatchingDtos.VulnerabilityRef;
 import com.aegis.core.notifications.OwnerNotification.EmailStatus;
 import com.aegis.core.notifications.OwnerNotification.ItemKind;
 import com.aegis.core.notifications.OwnerNotificationStore.Claim;
@@ -261,12 +258,7 @@ public class OwnerNotifier {
      * answer is a new item.
      */
     static String itemKey(Item item) {
-        if (item.upgrade() != null) {
-            ComponentRef component = item.upgrade().component();
-            return "VULNERABILITY:" + component.ecosystem() + ":" + component.name() + ":"
-                    + answered(item).orElse(String.valueOf(item.changeSignalId()));
-        }
-        return "VENDOR_OUTAGE:" + (item.outage() != null ? item.outage().id() : item.changeSignalId());
+        return item.key();
     }
 
     /**
@@ -277,7 +269,7 @@ public class OwnerNotifier {
     static String title(Item item) {
         String title;
         if (item.upgrade() != null) {
-            String vulnerability = answered(item).orElse(item.upgrade().vulnerabilities().isEmpty()
+            String vulnerability = item.answered().orElse(item.upgrade().vulnerabilities().isEmpty()
                     ? "A vulnerability" : item.upgrade().vulnerabilities().getFirst().id());
             title = vulnerability + " in " + item.upgrade().component().name() + " "
                     + item.upgrade().component().version();
@@ -294,13 +286,6 @@ public class OwnerNotifier {
     }
 
     /** The canonical id of the vulnerability the item answers. */
-    private static Optional<String> answered(Item item) {
-        return item.upgrade().vulnerabilities().stream()
-                .filter(candidate -> item.changeSignalId().equals(candidate.changeSignalId()))
-                .map(VulnerabilityRef::id)
-                .findFirst();
-    }
-
     private static String cut(String text, int max) {
         return text.length() <= max ? text : text.substring(0, max - 1) + "…";
     }

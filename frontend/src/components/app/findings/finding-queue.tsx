@@ -4,6 +4,7 @@ import { useEffect, useId, useOptimistic, useState, useTransition } from "react"
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
+import { AiSignal, SIGNALS } from "@/components/app/advisories/ai-interpretation";
 import { DataPagination } from "@/components/app/data-pagination";
 import { StageBadge, formatDateTime } from "@/components/app/responses/response-status";
 import {
@@ -32,11 +33,12 @@ interface Filters {
   ownerId: string;
   ecosystem: string;
   tier: string;
+  signal: string;
   openOnly: boolean;
   unassigned: boolean;
 }
 
-const NO_FILTERS: Filters = { serviceId: "", ownerId: "", ecosystem: "", tier: "", openOnly: false, unassigned: false };
+const NO_FILTERS: Filters = { serviceId: "", ownerId: "", ecosystem: "", tier: "", signal: "", openOnly: false, unassigned: false };
 
 /** The filters a triage-queue URL names: what the dashboard links to, and what the queue writes back. */
 function filtersFrom(search: URLSearchParams): Filters {
@@ -45,6 +47,7 @@ function filtersFrom(search: URLSearchParams): Filters {
     ownerId: search.get("ownerId") ?? "",
     ecosystem: search.get("ecosystem") ?? "",
     tier: search.get("tier") ?? "",
+    signal: search.get("signal") ?? "",
     openOnly: search.get("open") === "true",
     unassigned: search.get("unassigned") === "true",
   };
@@ -57,6 +60,7 @@ function queryOf(filters: Filters): string {
   if (filters.ownerId) params.set("ownerId", filters.ownerId);
   if (filters.ecosystem) params.set("ecosystem", filters.ecosystem);
   if (filters.tier) params.set("tier", filters.tier);
+  if (filters.signal) params.set("signal", filters.signal);
   if (filters.openOnly) params.set("open", "true");
   if (filters.unassigned) params.set("unassigned", "true");
   const query = params.toString();
@@ -156,6 +160,7 @@ export function TriageList({
         ownerId: query.ownerId || undefined,
         ecosystem: query.ecosystem || undefined,
         tier: query.tier || undefined,
+        signal: query.signal || undefined,
         mine: mine ? "true" : undefined,
         open: query.openOnly ? "true" : undefined,
         unassigned: query.unassigned ? "true" : undefined,
@@ -176,7 +181,7 @@ export function TriageList({
     };
   }, [filterKey, page, mine, refresh]);
 
-  const filtering = filters.serviceId !== "" || filters.ownerId !== "" || filters.ecosystem !== "" || filters.tier !== ""
+  const filtering = filters.serviceId !== "" || filters.ownerId !== "" || filters.ecosystem !== "" || filters.tier !== "" || filters.signal !== ""
     || filters.openOnly || filters.unassigned;
   const filter = (change: Partial<Filters>) => {
     const next = { ...filters, ...change };
@@ -248,6 +253,19 @@ export function TriageList({
           {TIERS.map((tier) => (
             <option key={tier} value={tier}>
               {tierLabel(tier)}
+            </option>
+          ))}
+        </FilterSelect>
+        <FilterSelect
+          id={`${filterId}-signal`}
+          label="AI signal"
+          value={filters.signal}
+          allLabel="All AI signals"
+          onChange={(signal) => filter({ signal })}
+        >
+          {SIGNALS.map(({ value, label }) => (
+            <option key={value} value={value}>
+              {label}
             </option>
           ))}
         </FilterSelect>
@@ -361,6 +379,7 @@ function TriageRow({ item }: { item: TriageItem }) {
       </TableCell>
       <TableCell className="align-top">
         <ImpactBadge score={item.score} tier={item.tier} />
+        {item.interpretation && <AiSignal signal={item.interpretation.signal} />}
         {item.confidence === "POSSIBLE" && (
           <span className="mt-1 block text-xs text-muted-foreground">Possible match — check the evidence</span>
         )}

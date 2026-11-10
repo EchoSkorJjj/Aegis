@@ -23,11 +23,11 @@ class Prompt:
 
 
 # A template's version moves when its wording does, so metrics and logs tell the two apart.
-VERSIONS = {"assess": "v6", "look_for": "v2"}
+VERSIONS = {"assess": "v6", "look_for": "v2", "interpret": "v2"}
 
 
 def build_prompt(
-    capability: Literal["assess", "look_for", "draft"],
+    capability: Literal["assess", "look_for", "interpret", "draft"],
     sources: list[tuple[str, str | None]],
     *,
     draft_type: Literal["risk_ticket", "upgrade", "memo"] | None = None,

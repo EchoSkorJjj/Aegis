@@ -13,6 +13,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+import com.aegis.core.inventory.DependencyGraph;
 import com.aegis.core.inventory.InventoryService;
 import com.aegis.core.inventory.InventoryStore;
 import com.aegis.core.inventory.InventoryStore.ComponentDependencyLink;
@@ -50,7 +51,7 @@ class SbomImportServiceTest {
 
     private final InventoryStore store = mock(InventoryStore.class);
     private final SbomImportService importer =
-            new SbomImportService(new InventoryService(store, mock(IdentityDirectory.class)), store);
+            new SbomImportService(new InventoryService(store, mock(IdentityDirectory.class), new DependencyGraph(store)), store);
     private final UUID serviceId = UUID.randomUUID();
 
     private final Map<String, SoftwareComponent> componentsByCoordinates = new HashMap<>();
