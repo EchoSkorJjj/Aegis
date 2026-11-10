@@ -32,6 +32,7 @@ class OutsideSwitchesIntegrationTest extends AbstractIntegrationTest {
                 "aegis.notifications.enabled",
                 "aegis.assess.fix-commits.enabled",
                 "aegis.dashboard.snapshots.enabled",
+                "aegis.interpretation.enabled",
                 "aegis.metrics.decision-queue.enabled");
         assertThat(switches).allSatisfy(name ->
                 assertThat(environment.getProperty(name, Boolean.class)).as(name).isFalse());

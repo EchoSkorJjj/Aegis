@@ -19,6 +19,10 @@ public class FakeAiAssessor implements AiAssessor {
 
     private final List<AiDtos.LookForRequest> lookFors = Collections.synchronizedList(new ArrayList<>());
     private final List<AiDtos.AssessmentRequest> requests = Collections.synchronizedList(new ArrayList<>());
+    private final List<AiDtos.InterpretationRequest> interpretations = Collections.synchronizedList(new ArrayList<>());
+    private volatile AiDtos.Interpretation interpretation = new AiDtos.Interpretation("UNCERTAIN", "LOW",
+            "The change.", "Why it matters.", "What is next.", "VERIFY", "Check it.", "It is configured.", "UNKNOWN",
+            List.of(), List.of());
     private volatile AiDtos.Assessment answer = NOT_CALLED;
     private volatile List<String> terms = List.of();
     private volatile RuntimeException failure;
@@ -30,6 +34,22 @@ public class FakeAiAssessor implements AiAssessor {
         this.terms = List.of();
         this.failure = null;
         this.lookForFailure = null;
+    }
+
+    /** Read every finding as {@code answer} from now on, and stop failing. */
+    public void interprets(AiDtos.Interpretation answer) {
+        this.interpretation = answer;
+        this.failure = null;
+    }
+
+    public void clearInterpretations() {
+        interpretations.clear();
+    }
+
+    public List<AiDtos.InterpretationRequest> interpretations() {
+        synchronized (interpretations) {
+            return List.copyOf(interpretations);
+        }
     }
 
     /** Name {@code terms} to search the code for (pass 1). */
@@ -77,5 +97,15 @@ public class FakeAiAssessor implements AiAssessor {
             throw failing;
         }
         return answer;
+    }
+
+    @Override
+    public AiDtos.Interpretation interpret(AiDtos.InterpretationRequest request) {
+        interpretations.add(request);
+        RuntimeException failing = failure;
+        if (failing != null) {
+            throw failing;
+        }
+        return interpretation;
     }
 }

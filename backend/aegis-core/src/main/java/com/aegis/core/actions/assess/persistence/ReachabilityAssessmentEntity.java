@@ -88,6 +88,9 @@ interface ReachabilityAssessmentJpaRepository extends JpaRepository<Reachability
     List<ReachabilityAssessmentEntity> findFor(@Param("org") UUID org, @Param("services") Collection<UUID> services,
             @Param("vulnerability") String vulnerabilityId);
 
+    @Query("select a from ReachabilityAssessmentEntity a where a.orgId = :org and a.serviceId in :services")
+    List<ReachabilityAssessmentEntity> findForServices(@Param("org") UUID org, @Param("services") Collection<UUID> services);
+
     /** Insert, or replace the answer for the same service, package, vulnerability and commit. */
     @Modifying
     @Query(value = """

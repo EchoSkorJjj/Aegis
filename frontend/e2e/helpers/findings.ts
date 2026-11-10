@@ -118,6 +118,11 @@ function mayDraft(role: Role, item: TriageItem): boolean {
   return role === "ANALYST" || (role === "SERVICE_OWNER" && item.owners.some((owner) => owner.userId === "me"));
 }
 
+/** The AI has read one finding, so the queue's signal has something to show and to filter on. */
+function reading(item: TriageItem) {
+  return item.upgrade?.component.name === "axios" ? { signal: "LIKELY_REAL" as const, confidence: "MEDIUM" as const } : null;
+}
+
 export async function fakeBff(page: Page, { role = "ANALYST", owned = 1, tickets = [TICKET], fail = false, responseFailure = false, vulnerability = false }: {
   role?: Role; owned?: number; tickets?: RiskTicket[]; fail?: boolean; responseFailure?: boolean; vulnerability?: boolean;
 } = {}) {
@@ -150,8 +155,9 @@ export async function fakeBff(page: Page, { role = "ANALYST", owned = 1, tickets
         (!query.get("open") || (item.stage !== "ACTIONED" && item.stage !== "CLOSED")) &&
         (!query.get("unassigned") || item.owners.length === 0) &&
         (!query.get("ecosystem") || item.upgrade?.component.ecosystem === query.get("ecosystem")) &&
-        (!query.get("tier") || item.tier === query.get("tier")))
-        .map((item) => ({ ...item, canDraft: mayDraft(role, item) }));
+        (!query.get("tier") || item.tier === query.get("tier")) &&
+        (!query.get("signal") || reading(item)?.signal === query.get("signal")))
+        .map((item) => ({ ...item, canDraft: mayDraft(role, item), interpretation: reading(item) }));
       const number = Number(query.get("page") || 0);
       const size = Number(query.get("size") || 20);
       const services = [...new Map(scope.map((item) => [item.service.id, item.service])).values()];

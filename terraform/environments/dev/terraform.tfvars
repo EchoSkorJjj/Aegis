@@ -9,7 +9,7 @@ capacity    = "spot"
 
 # 0 until the secrets are filled in and the database roles exist; then 1. Back to 0 between demos.
 desired_count = 0
-image_tag     = "0cfdf574cb47" # the tag CI pushed
+image_tag     = "f5a241c8b639" # the tag CI pushed
 
 deletion_protection  = false
 registration_enabled = true
@@ -29,3 +29,6 @@ privacy_contact       = "jihoonsong29@gmail.com"
 # The dashboard's daily risk-posture record (23:55 UTC). Like owner notifications, it needs the
 # identity-internal-token parameter: create it first (README, step 2).
 dashboard_snapshots_enabled = true
+
+# The AI reads each open material finding (capped a run and a day; needs identity-internal-token too).
+finding_interpretation_enabled = true

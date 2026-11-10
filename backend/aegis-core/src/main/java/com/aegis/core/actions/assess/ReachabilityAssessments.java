@@ -351,7 +351,7 @@ public class ReachabilityAssessments {
      * The change's title, its advisory's description (else the signal's summary) and the advisory's details (V42 — what
      * OSV says beyond its one-line summary), redacted and cut to {@value #MAX_ADVISORY_CHARS} characters.
      */
-    static String advisoryText(String title, String description, String details, String summary) {
+    public static String advisoryText(String title, String description, String details, String summary) {
         String body = description != null && !description.isBlank() ? description : summary;
         StringBuilder text = new StringBuilder(title == null ? "" : title.strip());
         for (String part : new String[] {body, details}) {

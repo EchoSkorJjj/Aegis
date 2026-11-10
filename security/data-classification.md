@@ -41,6 +41,7 @@ Companion to [threat-model.md](threat-model.md); story CS203-146 (E12-2). As of 
 | Risk tickets: the AI's narrative, Aegis's evidence, edits and overrides with reasons, decisions | Confidential | `risk_tickets` | Domain roles; drafted and decided by analysts and the service's owners | No limit | Jira, when approved (title, description, labels, priority, due date) |
 | Upgrade pull requests: edits, title and body | Confidential | `upgrade_proposals` | Domain roles | No limit | GitHub, when approved, as a draft pull request |
 | DORA regulator memos | Confidential | `regulator_memos` | Domain roles; drafted and decided by analysts | No limit | Nowhere automatically: a person downloads it once final and submits it |
+| The AI's readings of material findings: what changed, why it matters, what is next, a suggested step, the condition the change needs, assumptions, cited advisory text — never code, the service's name or its owners | Confidential | `finding_interpretations` | Domain roles | No limit (removed with the service) | Package names, versions, the service's exposure, criticality and tier, advisory text, and any kept code assessment's verdict and reasoning go to the AI provider |
 | AI reachability answers: verdict, rationale, checks, the terms searched, cited paths and lines — never the code | Confidential | `reachability_assessments` | Domain roles | No limit (keyed by the commit read) | The verdict, rationale and checks into a drafted ticket's evidence, so to Jira |
 | The decision trail: every step a response took, who took it (user id), when, why, and the response as it stood | Confidential, Personal | `decision_records`, append-only | `ANALYST`, `COMPLIANCE_ADMIN` | No limit; the application can't delete it | Evidence exports (below) |
 | Evidence exports: a service's decisions for a period, people named from the member directory | Confidential, Personal | Not stored: a temporary file while it downloads, then deleted (`EvidenceExport`) | `ANALYST`, `COMPLIANCE_ADMIN` | The download | The downloading person, as a PDF or CSV |
@@ -105,7 +106,7 @@ Monitoring services need operator access controls before remote hosting (threat 
 ## Checked against `/privacy`
 
 The notice (`frontend/src/app/(marketing)/privacy/page.tsx`) covers Jira, GitHub, AI drafting, the AI reachability
-assessment, dashboard history and the separation of organizations, and on those it matches this classification.
+assessment, the AI reading of findings, dashboard history and the separation of organizations, and on those it matches this classification.
 It doesn't yet cover:
 
 | Gap | Owner | Follow-up |
@@ -127,7 +128,7 @@ data, when each gets a retention period and a job that enforces it:
 | `decision_records` | Keep with no limit: it is the audit trail a reviewer or regulator asks for. Revisit before prod: a fixed period agreed with whoever runs the deployment. | Core |
 | `risk_posture_snapshots`, `risk_posture_breakdowns` (owners' names) | Keep with no limit for now, as the privacy notice says. Revisit before prod: a period, or dropping names after it. | Core |
 | `audit_events` (email, IP, user agent) | Keep with no limit for now. Revisit before prod: a period (for example 1 year). | Identity |
-| `owner_notifications`, `risk_tickets`, `upgrade_proposals`, `regulator_memos`, `reachability_assessments` | Keep with no limit for now; removed with their service. Revisit before prod. | Core |
+| `owner_notifications`, `risk_tickets`, `upgrade_proposals`, `regulator_memos`, `reachability_assessments`, `finding_interpretations` | Keep with no limit for now; removed with their service. Revisit before prod. | Core |
 | Expired `refresh_tokens`, `auth_tokens`, `login_challenges` rows | Keep (they are hashes and grant nothing once expired). Revisit: a clean-up job. | Identity |
 | Feed tables and `raw_events` | Keep with no limit (public data). Revisit if storage grows. | Core |
 

@@ -71,6 +71,25 @@ class HttpAiClientTest {
                 slept::add);
     }
 
+    @Test
+    void aFindingIsSentForReadingInSnakeCaseAndItsAnswerParsed() throws Exception {
+        body = """
+                {"signal":"UNCERTAIN","confidence":"LOW","what_changed":"a","why_it_matters":"b","what_next":"c",
+                 "suggested_action":"VERIFY","action_detail":"d","condition":"g","condition_met":"UNKNOWN",
+                 "assumptions":["e"],"citations":["f"]}
+                """;
+
+        AiDtos.Interpretation answer = client.interpret(new AiDtos.InterpretationRequest("finding", "VENDOR_OUTAGE",
+                "Elevated errors", null, null, null, List.of(), null, "Cloud", null, null, "INTERNET_FACING", "HIGH", "HIGH"));
+
+        assertThat(seenPath.get()).isEqualTo("/v1/assess/impact");
+        assertThat(JSON.readValue(seenBody.get(), JSON_OBJECT)).containsOnlyKeys("finding_id", "kind", "change_text",
+                "package", "installed_version", "fixed_version", "dependency_path", "import_status", "vendor", "severity",
+                "code_assessment", "exposure", "criticality", "tier");
+        assertThat(answer).isEqualTo(new AiDtos.Interpretation("UNCERTAIN", "LOW", "a", "b", "c", "VERIFY", "d",
+                "g", "UNKNOWN", List.of("e"), List.of("f")));
+    }
+
     @AfterEach
     void stop() {
         server.stop(0);

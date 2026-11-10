@@ -1,6 +1,7 @@
 package com.aegis.core.inventory;
 
 import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
 
 import com.aegis.core.inventory.domain.BusinessCriticality;
@@ -32,8 +33,19 @@ public final class InventoryFilters {
      * "link a component" picker never offers one the service already has).
      */
     public record ComponentFilter(
-            String search, String ecosystem, Instant createdAfter, Instant createdBefore, UUID excludeServiceId) {
+            String search, String ecosystem, Instant createdAfter, Instant createdBefore, UUID excludeServiceId,
+            Set<UUID> excludeComponentIds) {
         public static final ComponentFilter NONE = new ComponentFilter(null, null, null, null, null);
+
+        public ComponentFilter(String search, String ecosystem, Instant createdAfter, Instant createdBefore,
+                UUID excludeServiceId) {
+            this(search, ecosystem, createdAfter, createdBefore, excludeServiceId, Set.of());
+        }
+
+        /** This filter, also dropping {@code componentIds}: what {@code excludeServiceId} already has in its graph. */
+        public ComponentFilter excluding(Set<UUID> componentIds) {
+            return new ComponentFilter(search, ecosystem, createdAfter, createdBefore, excludeServiceId, componentIds);
+        }
     }
 
     /**

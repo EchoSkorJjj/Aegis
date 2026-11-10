@@ -77,7 +77,7 @@ def test_all_golden_references_pass_actual_drafting_pipeline(golden_report):
     assert golden_report["summary"]["guardrail_cases"] == 5
     assert golden_report["summary"]["provider_calls"] == 28
     assert {kind: (group["cases"], group["passed"]) for kind, group in golden_report["summary"]["by_capability"].items()} \
-        == {"draft": (20, 20), "assess": (8, 8), "look_for": (5, 5)}
+        == {"draft": (20, 20), "assess": (8, 8), "look_for": (5, 5), "interpret": (0, 0)}
     assert golden_report["mode"] == "reference_replay"
     assert golden_report["summary"]["human_review"] == "pending"
     for case in golden_report["cases"]:

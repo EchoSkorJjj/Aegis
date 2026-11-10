@@ -52,8 +52,11 @@ const componentsConfig: RelationshipConfig = {
   emptyLabel: "No components linked yet — import an SBOM or link one above.",
   note: "Direct components only. An SBOM's transitive dependencies aren't listed here — they live in Components and are reached through the dependency map.",
   listLinked: (serviceId, page, size) => inventoryApi.listServiceComponents(serviceId, { page, size }),
-  searchOptions: async (serviceId, term, size) =>
-    (await inventoryApi.listComponents({ search: term, size, excludeLinkedToService: serviceId })).content,
+  noOptionsLabel: "Nothing to link: every component in the catalogue is already part of this service.",
+  searchOptions: async (serviceId, term, size) => {
+    const found = await inventoryApi.listComponents({ search: term, size, excludeLinkedToService: serviceId });
+    return { rows: found.content, total: found.totalElements };
+  },
   attach: (serviceId, id) => inventoryApi.addServiceComponent(serviceId, id),
   detach: (serviceId, id) => inventoryApi.removeServiceComponent(serviceId, id),
   optionLabel: (row) => {
@@ -80,8 +83,10 @@ const vendorsConfig: RelationshipConfig = {
   addPlaceholder: "Link an existing vendor…",
   emptyLabel: "No vendors linked yet.",
   listLinked: (serviceId, page, size) => inventoryApi.listServiceVendors(serviceId, { page, size }),
-  searchOptions: async (serviceId, term, size) =>
-    (await inventoryApi.listVendors({ search: term, size, excludeLinkedToService: serviceId })).content,
+  searchOptions: async (serviceId, term, size) => {
+    const found = await inventoryApi.listVendors({ search: term, size, excludeLinkedToService: serviceId });
+    return { rows: found.content, total: found.totalElements };
+  },
   attach: (serviceId, id) => inventoryApi.addServiceVendor(serviceId, id),
   detach: (serviceId, id) => inventoryApi.removeServiceVendor(serviceId, id),
   optionLabel: (row) => (row as ThirdPartyVendor).name,
@@ -104,7 +109,8 @@ const ownersConfig: RelationshipConfig = {
       inventoryApi.listServiceOwners(serviceId, { size: 100 }),
     ]);
     const taken = new Set(assigned.content.map((owner) => owner.userId));
-    return members.content.filter((member) => member.enabled && !taken.has(member.id));
+    const rows = members.content.filter((member) => member.enabled && !taken.has(member.id));
+    return { rows, total: rows.length };
   },
   attach: async (serviceId, userId) => {
     await inventoryApi.assignServiceOwner(serviceId, userId);

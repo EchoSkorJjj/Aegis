@@ -614,6 +614,30 @@ How one package is assessed (`ReachabilityAssessments.run`):
   detail (`components/app/advisories/ai-suggestion.tsx`), "does the code reach the vulnerable part?": uses it / doesn't
   use it / can't tell, why, the cited lines, "Searched the code for …" and a "To check" list, with **Ask the AI** / **Ask again** for whoever may draft a response for the service.
 
+## The AI's reading of each material finding
+
+The triage queue comes from rules alone. `actions.triage.FindingInterpretations` then has the AI read each open
+material finding, with nobody asking: what changed, why it matters to this service, what could happen next, a signal
+(likely real, uncertain, likely noise), a suggested next step, what it assumed and the advisory text it rests on.
+It works from what Aegis already holds and never reads code, so unlike the reachability suggestion above it covers
+packages reached through another one, and vendor outages.
+
+- **Limited by what is known:** the AI must name what has to be true for the change to apply, and an import alone is
+  not proof. Any code assessment kept for the commit last read is passed in: called or not called decides which way
+  the label can go, can't tell keeps it uncertain, and high confidence on a vulnerability needs one that answered.
+- **A suggestion:** scoring, ranking and approvals never read it (`FindingInterpretationIntegrationTest`).
+- **What leaves Aegis:** the advisory or status text, the package and versions, what pulls it in, whether the code
+  imports it, and the service's exposure, criticality and tier. Never code, the service's name or its owners.
+- **When:** `FindingInterpretationJob`, on the `SchedulerLease` holder, off unless `AEGIS_INTERPRETATION_ENABLED` is
+  true (also needs `IDENTITY_SERVICE_TOKEN`). It shares the ai-service's token budgets, so it reads at most
+  `AEGIS_INTERPRETATION_MAX_PER_RUN` (3) findings every `AEGIS_INTERPRETATION_INTERVAL` (2 minutes), worst first, and
+  `AEGIS_INTERPRETATION_MAX_PER_DAY` (60) a UTC day. A failure ends the run and that finding waits 15 minutes.
+- **Again only when the facts change:** V46 `finding_interpretations` keeps a hash of what the AI was told, keyed by
+  service and `TriageQueue.Item.key()`, so a re-import, regrade, revised advisory or new code assessment verdict is read
+  again. Changing what a reading may say moves `READING_VERSION`, so everything is read again.
+- **Read:** `GET /api/findings/interpretations?changeSignalId=`, and `interpretation` plus the `signal` filter on
+  `GET /api/findings`.
+
 ## The AI boundary
 
 The AI logic is **not** in this service. `ai` holds only the seam: the domain depends on the
@@ -651,9 +675,14 @@ domain. See `ARCHITECTURE.md` for the topology.
 | `DB_URL` / `DB_USER` / `DB_PASSWORD` | `…/identity`, `identity`, `identity` | Shared datasource |
 | `IDENTITY_JWKS_URI` | `http://localhost:8081/oauth2/jwks` | identity-service's public keys |
 | `IDENTITY_BASE_URL` | `http://localhost:8081` | identity-service's member directory — verifies a service's assigned owner, called with the caller's own token |
-| `IDENTITY_SERVICE_TOKEN` | *(empty)* | Token for identity-service's internal API (`X-Service-Token`), used only by the owner notifications; identity-service holds the same one as `IDENTITY_INTERNAL_SERVICE_TOKEN` |
+| `IDENTITY_SERVICE_TOKEN` | *(empty)* | Token for identity-service's internal API (`X-Service-Token`), used only by scheduled work (the owner notifications, the dashboard's daily record, the AI's reading of findings); identity-service holds the same one as `IDENTITY_INTERNAL_SERVICE_TOKEN` |
 | `AEGIS_NOTIFICATIONS_ENABLED` | `false` | Owner notifications (E9 story 5); needs `IDENTITY_SERVICE_TOKEN` |
 | `AEGIS_NOTIFICATIONS_INTERVAL` | `PT5M` | How often the notification job looks for items that need a decision |
+| `AEGIS_INTERPRETATION_ENABLED` | `false` | The AI's reading of each open material finding; needs `IDENTITY_SERVICE_TOKEN`, and `LLM_PROVIDER=groq` on the ai-service for real answers |
+| `AEGIS_INTERPRETATION_INTERVAL` | `PT2M` | How often that job runs |
+| `AEGIS_INTERPRETATION_INITIAL_DELAY` | `PT1M` | How long after startup it first runs |
+| `AEGIS_INTERPRETATION_MAX_PER_RUN` | `3` | Most findings it reads in one run, across every organization |
+| `AEGIS_INTERPRETATION_MAX_PER_DAY` | `60` | Most findings it reads in a UTC day, since it shares the ai-service's token budgets |
 | `AI_SERVICE_URI` | `http://localhost:8083` | The internal ai-service base URL |
 | `AEGIS_ASSESS_FIX_COMMITS_ENABLED` | `true` | The AI's reachability suggestion (E11-5) reads what an advisory's fix commits changed, fetched as public diffs from github.com / gitlab.com |
 | `AI_SERVICE_TOKEN` | `dev-internal-token-change-me` | Shared service token sent to the ai-service |
@@ -841,7 +870,8 @@ declares are its service's (`business_service_component_dependencies`). The comp
 which hold in every service; `GET …/dependencies` lists both kinds. A service's graph is the components it
 links, its own edges and the hand-added ones, never another service's; `inventory.DependencyGraph` is the one
 walk over it, behind matching, the upgrade recommendations and "Used by". Transitive reachability is resolved
-at query time.
+at query time. `GET /api/inventory/components?excludeLinkedToService={serviceId}`, the service page's link picker,
+leaves out everything in that service's graph: what it links and everything those pull in.
 
 ### Used by
 

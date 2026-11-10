@@ -11,4 +11,7 @@ public interface AiAssessor {
     AiDtos.LookFor lookFor(AiDtos.LookForRequest request);
 
     AiDtos.Assessment assess(AiDtos.AssessmentRequest request);
+
+    /** What a material finding means for one service, from facts Aegis already holds: never code, and a suggestion. */
+    AiDtos.Interpretation interpret(AiDtos.InterpretationRequest request);
 }

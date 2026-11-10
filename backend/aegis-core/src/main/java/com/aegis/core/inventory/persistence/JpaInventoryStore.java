@@ -184,6 +184,9 @@ public class JpaInventoryStore implements InventoryStore {
             specs.add(notLinkedToService(
                     ServiceComponentEntity.class, "componentId", filter.excludeServiceId(), org));
         }
+        if (!filter.excludeComponentIds().isEmpty()) {
+            specs.add((root, query, cb) -> cb.not(root.get("id").in(filter.excludeComponentIds())));
+        }
         return components.findAll(Specification.allOf(specs), pageable);
     }
 

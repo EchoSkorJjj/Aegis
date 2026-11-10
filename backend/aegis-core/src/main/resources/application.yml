@@ -113,6 +113,15 @@ aegis:
     enabled: ${AEGIS_NOTIFICATIONS_ENABLED:false}
     interval: ${AEGIS_NOTIFICATIONS_INTERVAL:PT5M}
     initial-delay: ${AEGIS_NOTIFICATIONS_INITIAL_DELAY:PT1M}
+  # The AI's reading of each open material finding, written with nobody asking. It shares the ai-service's token
+  # budgets with people drafting responses, so it reads a few a run and a capped number a UTC day. Off by default;
+  # needs identity-service's service token (IDENTITY_SERVICE_TOKEN) to list the organizations.
+  interpretation:
+    enabled: ${AEGIS_INTERPRETATION_ENABLED:false}
+    interval: ${AEGIS_INTERPRETATION_INTERVAL:PT2M}
+    initial-delay: ${AEGIS_INTERPRETATION_INITIAL_DELAY:PT1M}
+    max-per-run: ${AEGIS_INTERPRETATION_MAX_PER_RUN:3}
+    max-per-day: ${AEGIS_INTERPRETATION_MAX_PER_DAY:60}
   # Opt-in: load the fictional demo estate (classpath:demo/) at startup. Idempotent; dev/demo only.
   demo:
     seed-enabled: ${AEGIS_DEMO_SEED_ENABLED:false}

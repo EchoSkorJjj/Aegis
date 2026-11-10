@@ -131,10 +131,10 @@ aws ssm put-parameter --type SecureString --name $P/core/jira-client-secret --va
 aws ssm put-parameter --type SecureString --name $P/core/secrets-key --value "$(openssl rand -base64 32)"
 ```
 
-**Owner notifications or the dashboard's daily record** (`owner_notifications_enabled = true`,
-`dashboard_snapshots_enabled = true`): the token aegis-core presents to identity-service's internal API to list the
-organizations (for both) and email service owners (for notifications). Both services read this one parameter. The
-committed `terraform.tfvars` turn the daily record on, so create it before the services start; without the record, a
+**Owner notifications, the dashboard's daily record or the AI's reading of findings** (`owner_notifications_enabled = true`,
+`dashboard_snapshots_enabled = true`, `finding_interpretation_enabled = true`): the token aegis-core presents to identity-service's internal API to list the
+organizations (for all three) and email service owners (for notifications). Both services read this one parameter. The
+committed `terraform.tfvars` turn the daily record and the AI's reading on, so create it before the services start; without the record, a
 day is kept only when someone opens the dashboard.
 
 ```bash

@@ -115,6 +115,6 @@ class RiskPostureTest {
 
     private static Item item(ServiceRef service, List<OwnerRef> owners, ResponseStage stage, ImpactTier tier, double score) {
         return new Item(TriageQueue.Kind.VULNERABILITY, UUID.randomUUID(), service, owners, score, tier,
-                MatchConfidence.CONFIRMED, null, null, null, stage, false);
+                MatchConfidence.CONFIRMED, null, null, null, stage, false, null);
     }
 }

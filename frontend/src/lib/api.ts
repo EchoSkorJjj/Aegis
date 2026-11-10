@@ -1,4 +1,5 @@
 import type {
+  FindingInterpretation,
   AcceptInviteInput,
   AuthConfig,
   BusinessService,
@@ -474,11 +475,16 @@ export const findingApi = {
       unassigned?: string;
       ecosystem?: string;
       tier?: string;
+      signal?: string;
       page?: number;
       size?: number;
     } = {},
   ) {
     return bffFetch<TriageQueueResponse>(`/api/findings${qs(params)}`);
+  },
+  /** What the AI read this change to mean for each service it reaches. */
+  interpretations(changeSignalId: string) {
+    return bffFetch<FindingInterpretation[]>(`/api/findings/interpretations${qs({ changeSignalId })}`);
   },
   /** The services you are an assigned owner of, each with what it needs (E9 story 2). */
   myServices() {

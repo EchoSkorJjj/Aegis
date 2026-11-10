@@ -59,6 +59,11 @@ public class HttpAiClient implements AiAssessor, AiDrafter {
     }
 
     @Override
+    public AiDtos.Interpretation interpret(AiDtos.InterpretationRequest request) {
+        return post("/v1/assess/impact", request, AiDtos.Interpretation.class);
+    }
+
+    @Override
     public AiDtos.Draft draft(AiDtos.DraftRequest request) {
         return post("/v1/draft", request, AiDtos.Draft.class);
     }
